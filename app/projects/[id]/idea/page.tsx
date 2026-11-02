@@ -51,6 +51,8 @@ function IdeaPageInner() {
 
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [project, setProject] = useState<Project | null>(null);
+  /** 顶栏里可直接改的项目名，失焦时落库 */
+  const [projectName, setProjectName] = useState('');
   const [source, setSource] = useState<StoredScript | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [submitting, setSubmitting] = useState(false);
@@ -75,6 +77,7 @@ function IdeaPageInner() {
         const { project: detail, scripts: list } = await api.getProject(projectId);
         if (cancelled) return;
         setProject(detail);
+        setProjectName(detail.name);
         setScriptCount(list.length);
 
         if (sourceId) {
@@ -107,6 +110,25 @@ function IdeaPageInner() {
     [projectId, router],
   );
 
+  /** 顶栏直接改名：失焦 / 回车时落库，空值回退成原名字 */
+  const saveProjectName = useCallback(async () => {
+    if (!project) return;
+    const name = projectName.trim();
+    if (!name || name === project.name) {
+      setProjectName(project.name);
+      return;
+    }
+
+    try {
+      const { project: saved } = await api.updateProject(projectId, { name });
+      setProject(saved);
+      setProjectName(saved.name);
+    } catch (err) {
+      setProjectName(project.name);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [project, projectId, projectName]);
+
   const handleGenerate = useCallback(
     async (formParams: ScriptParams) => {
       if (submitting) return;
@@ -116,8 +138,13 @@ function IdeaPageInner() {
         const { script: generated } = await api.createScript({
           idea: formParams.idea,
           style: formParams.style,
+          mode: formParams.mode,
           shotCount: formParams.shotCount,
-          duration: formParams.shotCount * formParams.shotDuration,
+          duration:
+            formParams.mode === 'duration'
+              ? formParams.totalDuration
+              : formParams.shotCount * formParams.shotDuration,
+          ensureCompleteness: formParams.ensureCompleteness,
         });
 
         // 编辑时保留用户自己起的剧本名，不被模型标题冲掉
@@ -219,9 +246,31 @@ function IdeaPageInner() {
       <main className="idea-page">
         <div className="idea-wrap">
           <div className="idea-head">
-            <div className="panel-title">故事创意</div>
-            <h1>{head.title}</h1>
-            <p>{head.desc}</p>
+            {/* 刚建的项目里还没有剧本，项目页是空的，此时只回首页 */}
+            {fresh ? (
+              <button
+                className="idea-back"
+                type="button"
+                onClick={() => void handleBackHome()}
+                disabled={cancelling}
+                title="回到项目列表，并撤掉这次刚创建的空项目"
+              >
+                {cancelling ? <span className="spinner" /> : '←'} 返回首页
+              </button>
+            ) : (
+              <Link className="idea-back" href={projectHref}>
+                ← 返回项目
+              </Link>
+            )}
+
+            <div className="idea-head-text">
+              <h1>{head.title}</h1>
+              <p>{head.desc}</p>
+            </div>
+
+            {mode === 'edit' && (
+              <span className="idea-head-note">重新生成会替换这份剧本的分镜</span>
+            )}
           </div>
 
           <section className="panel">
@@ -232,6 +281,9 @@ function IdeaPageInner() {
               initialStyle={source?.script.style ?? ''}
               initialShotCount={shots.length || undefined}
               initialShotDuration={shots[0]?.duration || undefined}
+              projectName={projectName}
+              onProjectNameChange={setProjectName}
+              onProjectNameCommit={() => void saveProjectName()}
               submitText={head.submit}
               onGenerate={handleGenerate}
               onLoadDemo={handleLoadDemo}
@@ -239,31 +291,6 @@ function IdeaPageInner() {
           </section>
 
           {error && <div className="alert alert--error">{error}</div>}
-
-          <div className="idea-foot">
-            <div className="idea-foot-actions">
-              <Link className="btn btn--ghost btn--sm" href={projectHref}>
-                {fresh ? '← 进入项目页' : '← 返回项目'}
-              </Link>
-              {fresh && (
-                <button
-                  className="btn btn--ghost btn--sm"
-                  type="button"
-                  onClick={() => void handleBackHome()}
-                  disabled={cancelling}
-                  title="回到项目列表，并撤掉这次刚创建的空项目"
-                >
-                  {cancelling ? <span className="spinner" /> : null}
-                  返回首页
-                </button>
-              )}
-            </div>
-            {mode === 'edit' && (
-              <span className="field-hint">
-                重新生成会替换这份剧本的分镜，已手动修改的镜头内容不会保留
-              </span>
-            )}
-          </div>
         </div>
       </main>
     </div>

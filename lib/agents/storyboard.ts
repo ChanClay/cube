@@ -1,14 +1,31 @@
 import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/logger';
+import {
+  fitDurations,
+  splitByDuration,
+  MAX_SHOT_COUNT,
+  MAX_SHOT_SECONDS,
+  MIN_SHOT_SECONDS,
+  type DurationSplit,
+  type ScriptMode,
+} from '@/lib/shot-plan';
 import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
-import { planStory, type StoryPlan } from './continuity';
+import { planStory, type Beat, type StoryPlan } from './continuity';
 import { callChatJson } from './llm';
 
 export interface ScriptRequest {
   idea: string;
   style?: string;
+  /** 分镜方式：shots=按镜头数（默认），duration=按总时长反推镜头数 */
+  mode?: ScriptMode;
   shotCount?: number;
+  /** shots 模式下是总时长，duration 模式下是用户设定的视频总时长 */
   duration?: number;
+  /**
+   * 仅 duration 模式生效，默认 true：
+   * true=镜头数取最少、每镜尽量凑满 30 秒；false=镜数由 AI 按剧情决定（只约束区间）。
+   */
+  ensureCompleteness?: boolean;
 }
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
@@ -28,6 +45,7 @@ function buildSystemPrompt(): string {
 其它创作要求：
 1. 镜头必须构成完整叙事：开场建立环境 → 冲突推进 → 高潮 → 收尾，每个镜头画面都要有变化，禁止重复同一构图。
 2. 每个镜头 duration 字段是 2~30 之间的整数（秒），常用 5 或 10；镜头之间的时长可以不同。所有镜头时长之和接近用户要求的总时长。
+   如果用户给出了「镜头时长分配」，必须逐条照抄到对应的 duration 字段，不得改动，也不要在镜头上多加时长。
 3. videoPrompt 字段必须是英文提示词，40~90 个单词，按以下顺序描述：镜头主体 + 具体动作 + 环境与背景 + 光线与色调 + 景别与运镜 + 画面风格。要求画面具体、可拍摄、有电影感。
    - 禁止出现字幕、文字、水印、logo、分屏等描述；
    - 禁止出现 "shot 1"、"scene 2" 这类结构性词语；
@@ -71,14 +89,27 @@ function buildUserPrompt(
   shotCount: number,
   totalDuration: number,
   plan: StoryPlan | null,
+  durations: number[] | null,
 ): string {
+  /**
+   * 总时长模式下时长是要对齐的：
+   * - 时长已经算好（保证完整性 / 串联大纲给了 duration）→ 逐条写进提示词，模型只负责照抄；
+   * - 镜数由 AI 决定时算不出来 → 只给区间和总和约束，让它自己分配。
+   */
+  const isDurationMode = req.mode === 'duration';
+  const timing = durations && durations.length === shotCount
+    ? `\n镜头时长分配（必须逐条对应，单位秒）：${durations.join(' / ')}`
+    : isDurationMode
+      ? `\n每镜时长：在 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒之间自行分配，各镜 duration 之和必须等于 ${totalDuration} 秒`
+      : '';
+
   const head = `故事创意：
 ${req.idea}
 
 整体视觉风格：${req.style || '电影感写实'}
 镜头数量：${shotCount} 个
 总时长：约 ${totalDuration} 秒
-旁白语言：中文`;
+旁白语言：中文${timing}`;
 
   if (!plan) {
     return `${head}
@@ -195,21 +226,146 @@ function normalizeScript(raw: unknown, fallbackStyle: string): Script {
   };
 }
 
+/**
+ * 串联大纲里各镜的时长。
+ * 只有当模型给出的每镜秒数都合法、且总和与总时长相差不多时才算可用；
+ * 否则返回 null，由调用方按镜头数把总时长摊平。
+ */
+function beatDurations(beats: Beat[], totalDuration: number): number[] | null {
+  if (beats.length === 0) return null;
+
+  const list = beats.map((b) => b.duration);
+  if (
+    list.some(
+      (d) =>
+        typeof d !== 'number' ||
+        !Number.isFinite(d) ||
+        d < MIN_SHOT_SECONDS ||
+        d > MAX_SHOT_SECONDS,
+    )
+  ) {
+    return null;
+  }
+
+  const durations = list as number[];
+  const sum = durations.reduce((a, b) => a + b, 0);
+  // 允许小偏差：把差额补到最后一镜上，越界就整体摊平
+  if (Math.abs(sum - totalDuration) > Math.max(2, beats.length)) return null;
+
+  const last = durations[durations.length - 1] + (totalDuration - sum);
+  if (last < MIN_SHOT_SECONDS || last > MAX_SHOT_SECONDS) return null;
+
+  durations[durations.length - 1] = last;
+  return durations;
+}
+
+/** 总时长模式下的拆解结果：镜数、每镜秒数（可能未知）、总时长 */
+interface DurationBudget {
+  split: DurationSplit;
+  /** 动态模式下镜数未知，只有区间 */
+  dynamic: boolean;
+  /** 固定镜数（dynamic=false 时有效） */
+  shotCount: number | null;
+  /** 每镜目标秒数；动态模式且串联大纲没给时长时为 null（由 AI 分配） */
+  durations: number[] | null;
+  total: number;
+}
+
+/**
+ * 动态模式下模型自己给的秒数：总和接近总时长就微调最后一镜，
+ * 否则整体摊平。这样 AI 排的节奏（长镜头 / 快切）不会被打乱。
+ */
+function reconcileDurations(shots: Shot[], total: number): number[] {
+  const list = shots.map((s) =>
+    Math.round(clamp(s.duration, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS)),
+  );
+  const sum = list.reduce((a, b) => a + b, 0);
+  const tolerance = Math.max(2, Math.ceil(total * 0.1));
+
+  if (Math.abs(sum - total) <= tolerance) {
+    const last = list[list.length - 1] + (total - sum);
+    if (last >= MIN_SHOT_SECONDS && last <= MAX_SHOT_SECONDS) {
+      list[list.length - 1] = last;
+      return list;
+    }
+  }
+  return fitDurations(total, shots.length);
+}
+
+/**
+ * 把模型返回的镜头数与总时长对齐：
+ * - 固定镜数（保证完整性）：多出来的镜头直接截掉，秒数照计划落地；
+ * - 动态镜数：只夹上限，秒数尽量保留模型自己的分配。
+ */
+function applyDurationBudget(script: Script, budget: DurationBudget): void {
+  const { durations, dynamic, total } = budget;
+  // 单镜最少 2 秒，决定了这条总时长最多能分几镜
+  const ceiling = clamp(Math.floor(total / MIN_SHOT_SECONDS), 1, MAX_SHOT_COUNT);
+  const limit = durations && !dynamic ? Math.min(durations.length, ceiling) : ceiling;
+
+  if (script.shots.length > limit) {
+    script.shots = script.shots.slice(0, limit);
+  }
+
+  const targets =
+    durations && script.shots.length === durations.length
+      ? durations
+      : dynamic
+        ? reconcileDurations(script.shots, total)
+        : fitDurations(total, script.shots.length);
+
+  // fitDurations 在镜头过多时会把数组压短，多出来的镜头只能丢掉，总时长优先
+  script.shots = script.shots.slice(0, targets.length);
+  script.shots.forEach((shot, i) => {
+    shot.index = i + 1;
+    shot.duration = targets[i];
+  });
+}
+
 export async function generateScript(req: ScriptRequest): Promise<Script> {
   if (!config.llm.apiKey) {
     throw new Error('未配置 LLM_API_KEY，请在 .env.local 中填写剧本生成模型的 Key');
   }
 
-  const shotCount = clamp(Math.round(req.shotCount ?? 6), 1, 12);
-  // 上限对齐 wan3.0 单镜 30 秒 × 最多 12 镜
-  const totalDuration = clamp(Math.round(req.duration ?? shotCount * 5), 5, 360);
+  const mode: ScriptMode = req.mode === 'duration' ? 'duration' : 'shots';
   const style = req.style || '电影感写实';
+
+  /** 总时长模式的拆解结果；null 表示「按镜头数量」模式 */
+  let budget: DurationBudget | null = null;
+  let totalDuration: number;
+  let plannedShotCount: number | null;
+
+  if (mode === 'duration') {
+    const split = splitByDuration(req.duration ?? MAX_SHOT_SECONDS, req.ensureCompleteness !== false);
+    totalDuration = split.total;
+    plannedShotCount = split.dynamic ? null : split.shotCount;
+    budget = {
+      split,
+      dynamic: split.dynamic,
+      shotCount: plannedShotCount,
+      durations: split.dynamic ? null : split.durations,
+      total: split.total,
+    };
+  } else {
+    plannedShotCount = clamp(Math.round(req.shotCount ?? 6), 1, MAX_SHOT_COUNT);
+    // 上限对齐 wan3.0 单镜 30 秒 × 最多 12 镜
+    totalDuration = clamp(
+      Math.round(req.duration ?? plannedShotCount * 5),
+      5,
+      MAX_SHOT_SECONDS * MAX_SHOT_COUNT,
+    );
+  }
 
   // 第一步：串联 agent 规划带 entry / exit 的状态链；失败则退化为直接生成
   const plan = await planStory({
     idea: req.idea,
     style,
-    shotCount,
+    // 动态模式不给固定镜数，只给合法区间
+    shotCount: plannedShotCount ?? undefined,
+    shotRange:
+      budget?.dynamic && budget.split
+        ? { min: budget.split.minShotCount, max: budget.split.maxShotCount }
+        : undefined,
     totalDuration,
   });
 
@@ -218,22 +374,32 @@ export async function generateScript(req: ScriptRequest): Promise<Script> {
     void logAgentWarn('plan', {
       reason: '串联规划失败，已降级为直接生成分镜',
       idea: req.idea.slice(0, 80),
-      shotCount,
+      shotCount: plannedShotCount ?? `${budget?.split.minShotCount}~${budget?.split.maxShotCount}`,
       totalDuration,
     });
   }
 
-  const targetShots = plan ? plan.beats.length : shotCount;
+  /** 动态模式下降级时没有大纲，用最少镜数兜底（每镜刚好 30 秒，总时长不会缩水） */
+  const fallbackShots = plannedShotCount ?? budget?.split.minShotCount ?? 6;
+  const targetShots = plan ? plan.beats.length : fallbackShots;
+
+  // 动态模式下时长由大纲分配；固定模式直接沿用算好的分配
+  if (budget && budget.dynamic && plan) {
+    budget.durations = beatDurations(plan.beats, budget.total);
+  }
 
   // 第二步：分镜 agent 照着状态链写画面
   const raw = await callChatJson({
     system: buildSystemPrompt(),
-    user: buildUserPrompt(req, targetShots, totalDuration, plan),
+    user: buildUserPrompt(req, targetShots, totalDuration, plan, budget?.durations ?? null),
     temperature: 0.8,
     maxTokens: 6000,
   });
 
   const script = normalizeScript(raw, style);
+
+  // 总时长模式：总时长是硬约束，落地时统一校正每镜秒数
+  if (budget) applyDurationBudget(script, budget);
 
   // 角色卡以串联大纲为唯一事实来源：分镜 prompt 用的就是它，
   // 不能再让模型二次生成一份，否则 UI 上看到的和提示词里用的会不一致。

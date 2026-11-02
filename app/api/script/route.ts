@@ -23,13 +23,19 @@ export async function POST(request: Request) {
   const style = typeof payload.style === 'string' ? payload.style.trim() : '';
   const shotCount = Number(payload.shotCount);
   const duration = Number(payload.duration);
+  /** 缺省仍是「按镜头数」，保持老调用方的行为 */
+  const mode = payload.mode === 'duration' ? 'duration' : 'shots';
+  /** 默认开启：镜头少一点、每镜凑满 30 秒，故事更完整 */
+  const ensureCompleteness = payload.ensureCompleteness !== false;
 
   try {
     const script = await generateScript({
       idea,
       style,
+      mode,
       shotCount: Number.isFinite(shotCount) ? shotCount : undefined,
       duration: Number.isFinite(duration) ? duration : undefined,
+      ensureCompleteness,
     });
     return NextResponse.json({ script, meta: { model: config.llm.model } });
   } catch (err) {

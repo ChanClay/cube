@@ -107,8 +107,13 @@ async function request<T>(url: string, init?: RequestInitWithTimeout): Promise<T
 export interface ScriptBody {
   idea: string;
   style: string;
+  /** shots=按镜头数（缺省），duration=按视频总时长反推镜头数 */
+  mode?: 'shots' | 'duration';
   shotCount: number;
+  /** shots 模式下为总时长，duration 模式下为用户设定的视频总时长 */
   duration: number;
+  /** 仅 duration 模式生效，缺省 true */
+  ensureCompleteness?: boolean;
 }
 
 export interface VideoBody {
