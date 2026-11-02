@@ -1,0 +1,27 @@
+{
+  "name": "cube",
+  "version": "0.1.0",
+  "private": true,
+  "description": "文本 -> 剧本分镜 -> AI 视频生成",
+  "scripts": {
+    "dev": "next dev -p 4500",
+    "build": "next build",
+    "start": "next start -p 4500",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.6",
+    "next": "^15.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
