@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import CastCards from './CastCards';
 import ShotCard from './ShotCard';
 import type {
@@ -117,19 +116,6 @@ export default function ScriptView({
   const busyCount = Object.values(jobs).filter(
     (job) => job.status === 'queued' || job.status === 'running',
   ).length;
-
-  /** 合成结果不再常驻页面，点按钮才弹窗看 */
-  const [composeOpen, setComposeOpen] = useState(false);
-  const composed = composeState === 'done' && !!composeResult;
-
-  useEffect(() => {
-    if (!composeOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setComposeOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [composeOpen]);
 
   return (
     <>
@@ -327,9 +313,9 @@ export default function ScriptView({
                       className="btn btn--sm"
                       type="button"
                       onClick={onRecreateIdea}
-                      title="已有镜头生成过视频，会带着当前创意另存为新剧本，不改动这份"
+                      title="已有镜头生成过视频，会带着当前创意新建一份剧本，不改动这份"
                     >
-                      另存新剧本
+                      基于当前创意重新新建
                     </button>
                   ) : null}
                 </div>
@@ -348,26 +334,14 @@ export default function ScriptView({
                         <span className="spinner" />
                         合成中…
                       </>
-                    ) : composed ? (
+                    ) : composeState === 'done' ? (
                       '重新合成'
                     ) : (
                       '合成成片'
                     )}
                   </button>
-                  {/* 合成过才出现：点开弹窗看视频，不再把大播放器铺在页面里 */}
-                  {composed && (
-                    <button
-                      className="btn btn--sm btn--primary"
-                      onClick={() => setComposeOpen(true)}
-                      title="弹窗查看已合成的成片"
-                    >
-                      ▶ 查看成片
-                    </button>
-                  )}
                   <span className="field-hint">
-                    {composeState === 'running'
-                      ? `正在下载并重新编码 ${doneCount} 个镜头，请勿关闭页面`
-                      : `把 ${doneCount} 个已生成镜头按顺序拼接为一个 MP4`}
+                    把 {doneCount} 个已生成镜头按顺序拼接为一个 MP4
                   </span>
                 </div>
               )}
@@ -393,6 +367,22 @@ export default function ScriptView({
               <div className="alert alert--warn">
                 未检测到 ffmpeg，无法合成成片。macOS 可执行 <code>brew install ffmpeg</code>，或在{' '}
                 <code>.env.local</code> 设置 <code>FFMPEG_PATH</code> 后重启服务。
+              </div>
+            )}
+
+            {composeState === 'done' && composeResult && (
+              <div className="compose-result">
+                <div className="compose-head">
+                  <b>合成成片</b>
+                  <span>
+                    {composeResult.clips} 个镜头 · {composeResult.size} ·{' '}
+                    {(composeResult.bytes / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                  <a href={composeResult.url} download={composeResult.fileName}>
+                    下载 MP4
+                  </a>
+                </div>
+                <video src={composeResult.url} controls playsInline preload="metadata" />
               </div>
             )}
 
@@ -430,64 +420,6 @@ export default function ScriptView({
           </>
         )}
       </div>
-
-      {composeOpen && composeResult && (
-        <div
-          className="modal-mask"
-          role="dialog"
-          aria-modal="true"
-          aria-label="合成成片"
-          onClick={() => setComposeOpen(false)}
-        >
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <b>合成成片</b>
-              <span>
-                {composeResult.clips} 个镜头 · {composeResult.size} ·{' '}
-                {(composeResult.bytes / 1024 / 1024).toFixed(1)} MB
-              </span>
-              <button
-                className="modal-close"
-                type="button"
-                onClick={() => setComposeOpen(false)}
-                aria-label="关闭"
-                title="关闭（Esc）"
-              >
-                ×
-              </button>
-            </div>
-
-            <video
-              className="modal-video"
-              src={composeResult.url}
-              controls
-              autoPlay
-              playsInline
-              preload="metadata"
-            />
-
-            <div className="modal-foot">
-              <a
-                className="btn btn--primary btn--sm"
-                href={composeResult.url}
-                download={composeResult.fileName}
-              >
-                下载 MP4
-              </a>
-              <button
-                className="btn btn--sm"
-                type="button"
-                onClick={onCompose}
-                disabled={composeState === 'running' || !composeReady}
-                title="按剧本顺序重新拼接"
-              >
-                {composeState === 'running' ? '合成中…' : '重新合成'}
-              </button>
-              <span className="field-hint">共 {composeResult.clips} 段，点击遮罩或按 Esc 关闭</span>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -1416,82 +1416,6 @@ a.btn:visited {
   max-width: 190px;
 }
 
-/* 角色卡 / 场景卡：默认一行 chip，点开才展开详情 */
-.cast-strip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 1px;
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.cast-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  max-width: 190px;
-  height: 32px;
-  padding: 0 11px 0 4px;
-  border-radius: 99px;
-  border: 1px solid var(--border-soft);
-  background: #fff;
-  color: var(--text-dim);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.cast-chip:hover {
-  border-color: var(--border);
-  color: var(--text);
-}
-
-.cast-chip.is-open {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.cast-chip-thumb {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: var(--field-2);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.cast-chip-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.cast-chip-name {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* 展开出来的详情面板：比默认卡片更亮一点，和 chip 拉开层次 */
-.cast-panel {
-  margin-top: 2px;
-}
-
-.cast-panel .cast-card {
-  background: #fff;
-  border-color: var(--border);
-}
-
 /* 角色卡 / 场景卡：缩略图 + 名称描述 + 生成 / 上传 */
 .cast-card {
   display: grid;
@@ -1611,83 +1535,50 @@ a.btn:visited {
   border-top: 1px dashed var(--border-soft);
 }
 
-/* 合成成片弹窗：默认不占页面篇幅，点「查看成片」才出现 */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(16, 24, 40, 0.55);
-  backdrop-filter: blur(3px);
-}
-
-.modal {
-  display: flex;
-  flex-direction: column;
-  width: min(880px, 100%);
-  max-height: 100%;
-  overflow: hidden;
-  border-radius: var(--radius);
+.compose-result {
+  margin-bottom: 16px;
   border: 1px solid var(--border);
-  background: var(--panel);
-  box-shadow: 0 24px 60px rgba(16, 24, 40, 0.28);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--video-bg);
+  box-shadow: var(--shadow-sm);
 }
 
-.modal-head {
+.compose-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 0 0 auto;
-  padding: 11px 14px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  background: var(--panel-3);
   border-bottom: 1px solid var(--border-soft);
   font-size: 12px;
   color: var(--muted);
 }
 
-.modal-head b {
+.compose-head b {
   color: var(--text);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
-.modal-close {
+.compose-head a {
   margin-left: auto;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 12px;
 }
 
-.modal-close:hover {
-  border-color: var(--border);
-  background: var(--field);
-  color: var(--text);
+.compose-head a:hover {
+  text-decoration: underline;
 }
 
-.modal-video {
+.compose-result video {
   display: block;
   width: 100%;
-  max-height: 64vh;
+  aspect-ratio: 16 / 9;
   object-fit: contain;
   background: #000;
-}
-
-.modal-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  flex: 0 0 auto;
-  padding: 11px 14px;
-  border-top: 1px solid var(--border-soft);
 }
 
 .shot-list {
