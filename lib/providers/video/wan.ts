@@ -1,15 +1,9 @@
 import { config } from '@/lib/config';
+import type { JobStatus } from '@/lib/types';
 import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
-import {
-  DEFAULT_MODEL,
-  mapDashScopeStatus,
-  toDuration,
-  toRatio,
-  toResolution,
-} from './params';
 
 /**
- * 阿里云百炼 · 通义万相 Wan3.0（All-in-One 多模态视频模型）· 原生异步协议
+ * 阿里云百炼 · 通义万相 Wan3.0（All-in-One 多模态视频模型）
  *
  * 创建任务：POST {base}/services/aigc/video-generation/video-synthesis
  *           Header: X-DashScope-Async: enable + Authorization: Bearer <key>
@@ -32,11 +26,55 @@ import {
  * }
  *
  * 素材规则：首帧/尾帧与 reference_* 互斥；file 与 link 互斥；单次最多 20 个素材。
- *
- * 走 OpenAI 风格中转网关时请改用 compat.ts：那条链路只认 `POST {base}/videos`。
  */
 
 const DEFAULT_BASE_URL = 'https://cn-beijing.maas.qianwenaiapi.com/api/v1';
+const DEFAULT_MODEL = 'wan3.0-video';
+const DEFAULT_RATIO = 'adaptive';
+const VALID_RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive']);
+
+/** 统一成 480P / 720P / 1080P */
+function toResolution(resolution: string): string {
+  const value = (resolution || '').trim().toUpperCase();
+
+  if (/^\d+P$/.test(value)) return value;
+
+  // 兼容 1280*720 / 720x1280 这类像素尺寸，按短边判断档位
+  const match = value.match(/[*X×](\d+)/);
+  if (match) {
+    const side = Number(match[1]);
+    if (side >= 1000) return '1080P';
+    if (side >= 700) return '720P';
+    return '480P';
+  }
+
+  return '720P';
+}
+
+function toRatio(ratio: string): string {
+  const value = (ratio || '').trim();
+  return VALID_RATIOS.has(value) ? value : DEFAULT_RATIO;
+}
+
+/** wan3.0 支持 2~30 秒 */
+function toDuration(duration: number): number {
+  const value = Math.round(Number(duration));
+  if (!Number.isFinite(value) || value <= 0) return 5;
+  return Math.min(30, Math.max(2, value));
+}
+
+function mapStatus(raw: string | undefined): JobStatus {
+  switch ((raw ?? '').toUpperCase()) {
+    case 'PENDING':
+      return 'queued';
+    case 'RUNNING':
+      return 'running';
+    case 'SUCCEEDED':
+      return 'succeeded';
+    default:
+      return 'failed';
+  }
+}
 
 export class WanProvider implements VideoProvider {
   readonly name = 'wan';
@@ -144,7 +182,7 @@ export class WanProvider implements VideoProvider {
       };
     };
 
-    const status = mapDashScopeStatus(data.output?.task_status);
+    const status = mapStatus(data.output?.task_status);
     return {
       id: providerJobId,
       status,

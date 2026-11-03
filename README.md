@@ -64,7 +64,7 @@ make distclean    # 连 node_modules 一起清理
 | 变量 | 说明 |
 | --- | --- |
 | `VIDEO_API_KEY` | 阿里云百炼 DashScope API Key（`sk-` 开头） |
-| `VIDEO_BASE_URL` | 原生异步接口地址，默认 `https://cn-beijing.maas.qianwenaiapi.com/api/v1`（**不要**用 `/compatible-mode/v1`）；以 `/v1` 结尾的 OpenAI 风格网关地址会自动切到网关协议，见下 |
+| `VIDEO_BASE_URL` | 原生异步接口地址，默认 `https://cn-beijing.maas.qianwenaiapi.com/api/v1`（**不要**用 `/compatible-mode/v1`） |
 | `VIDEO_MODEL` | 留空默认 `wan3.0-video`；可选 `wan3.0-video-prime` |
 | `VIDEO_RESOLUTION` | `480p` / `720p` / `1080p`，请求时自动转成 `480P` / `720P` / `1080P` |
 | `VIDEO_RATIO` | `21:9` / `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `adaptive`（默认） |
@@ -84,17 +84,6 @@ VIDEO_AUDIO=true
 走百炼 MaaS 异步接口：`POST /services/aigc/video-generation/video-synthesis`（需 `X-DashScope-Async: enable`），创建后轮询 `GET /tasks/{task_id}`。
 
 注意 wan3.0 的参数与 wan2.x 不通用：wan3.0 用 `parameters.resolution`（`480P` / `720P` / `1080P`）+ `parameters.ratio` + `duration`，wan2.x 用 `size`（如 `1280*720`）。本实现按 wan3.0 请求，代码见 `lib/providers/video/wan.ts`。用首帧/尾帧、视频编辑、延长时建议 `VIDEO_RATIO=adaptive`。
-
-#### 两套协议自动切换
-
-| `VIDEO_BASE_URL` 形态 | 走的协议 | 代码 |
-| --- | --- | --- |
-| 以 `/api/v1` 结尾（百炼原生） | `POST /services/aigc/video-generation/video-synthesis` + `GET /tasks/{id}` | `providers/video/wan.ts` |
-| 其余（`https://xxx/v1`，如 viprouter 等中转站） | `POST /videos` + `GET /videos/{id}`（OpenAI Sora 风格） | `providers/video/compat.ts` |
-
-切换只需改 `VIDEO_BASE_URL`（和配套的 `VIDEO_API_KEY`），任务记录里的 `provider` 会记住创建时用的协议，轮询历史任务不会串。判断逻辑在 `lib/providers/endpoint.ts`，`GET /api/health` 的 `video.provider` 会显示 `wan` 或 `wan-gateway`。
-
-> 网关协议的限制：`/v1/videos` 只接受顶层 `prompt` / `seconds` / `size`，**不认首帧、尾帧、参考图、参考音频**（URL 字段会被静默忽略，multipart 会解析失败）。走网关时这些素材会被丢掉并记一条 `video:media` 告警，等于退化成纯文生视频；要用「承接上一镜末帧」必须换成百炼原生地址。
 
 ### 站点
 
@@ -158,10 +147,8 @@ wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `tru
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `IMAGE_API_KEY` | 复用 `VIDEO_API_KEY` | 百炼 API Key |
-| `IMAGE_BASE_URL` | 复用 `VIDEO_BASE_URL` | 文生图接口地址，与视频一样按 `/api/v1` 或 `/v1` 自动切协议 |
-| `IMAGE_MODEL` | `wan2.6-t2i` | `wan2.6` 及以后走同步协议；`wan2.5` 及以下自动切换成异步轮询 |
-
-网关协议下走 `POST /v1/images/generations`：尺寸折算成 `1024x1024` / `1024x1536` / `1536x1024`，`negative_prompt` 并入正向提示词，`data[0].b64_json` 直接在服务端落盘。注意该网关把 dashscope 系图片模型（`wan2.x-t2i` / `qwen-image-*`）转发到百炼时会报 `url error`，走网关时请改用 `azure/gpt-image-2` 这类通用图片模型；换回百炼原生地址后再用 `wan2.7-image`。
+| `IMAGE_BASE_URL` | 复用 `VIDEO_BASE_URL` | 文生图接口地址 |
+| `IMAGE_MODEL` | `wan2.6-t2i` | `wan2.6` 系列走同步协议；`wan2.5` 及以下自动切换成异步轮询 |
 
 > 注意：镜头素材里的本地文件存在本机，通义万相在云端拉取，无法访问 `localhost`。要让本地上传的素材真正参与生成，需要配置 `PUBLIC_BASE_URL` 指向公网可访问地址（反向代理 / 对象存储），否则请改用公网 URL。
 
@@ -298,16 +285,7 @@ lib/
     continuity.ts       串联导演 agent（规划 entry/exit 状态链）
     storyboard.ts       分镜 agent（照状态链写画面 + JSON 规范化）
     media.ts            素材关联 agent（镜头文本 / 角色卡 → 该带哪些项目素材）
-  providers/endpoint.ts 按 base URL 判断「百炼原生 / OpenAI 风格网关」
-  providers/video/      通义万相 wan3.0
-    types.ts            VideoProvider 接口（createTask / getTask）
-    params.ts           时长 / 分辨率 / 比例 / 状态映射（两套协议共用）
-    wan.ts              百炼原生异步协议
-    compat.ts           OpenAI 风格网关 /videos 协议
-    index.ts            按 VIDEO_BASE_URL 选 provider
-  providers/image/      角色卡 / 场景卡配图
-    wan-image.ts        万相原生文生图（wan2.6+ 同步，wan2.5 及以下异步）
-    compat.ts           网关 /v1/images/generations
+  providers/video/      通义万相 wan3.0（types.ts / index.ts / wan.ts）
 ```
 
 若将来接入其它视频平台：实现 `lib/providers/video/types.ts` 中的 `VideoProvider` 接口，在 `lib/providers/video/index.ts` 注册即可。

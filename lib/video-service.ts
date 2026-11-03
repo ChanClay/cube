@@ -124,9 +124,7 @@ export async function syncVideoJob(job: VideoJob): Promise<VideoJob> {
 
   if (!job.providerJobId) return job;
 
-  // 按任务落库时的 provider 查：中途把 VIDEO_BASE_URL 从网关切回原生（或反过来）后，
-  // 旧任务仍然要用创建它的那套协议去查
-  const provider = getProvider(job.provider);
+  const provider = getProvider();
   try {
     const state = await provider.getTask(job.providerJobId);
 
