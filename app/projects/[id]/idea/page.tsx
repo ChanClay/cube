@@ -30,8 +30,8 @@ const HEAD_TEXT: Record<Mode, { title: string; desc: string; submit: string }> =
     submit: '重新生成剧本',
   },
   copy: {
-    title: '基于当前创意重新新建',
-    desc: '当前剧本已经生成过视频，为避免覆盖成片，会带着这份创意另存为新剧本。',
+    title: '另存为新剧本',
+    desc: '这份剧本已经生成过视频，所以会带着当前创意新建一份。',
     submit: '生成新剧本',
   },
 };
