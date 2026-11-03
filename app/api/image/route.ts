@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
-import { generateImage } from '@/lib/providers/image/wan-image';
+import { generateImage } from '@/lib/providers/image';
 import { UPLOAD_DIR } from '@/lib/uploads';
 import type { ProjectMedia } from '@/lib/types';
 
@@ -44,6 +44,13 @@ const MIME_BY_EXT: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+/** 网关直接回 base64 时，靠它反推落盘扩展名 */
+const EXT_BY_MIME: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+};
+
 /**
  * 给角色卡 / 场景卡生成一张配图。
  * body: { prompt, kind: 'character' | 'scene', style? }
@@ -69,22 +76,30 @@ export async function POST(request: Request) {
   }
 
   try {
-    const remoteUrl = await generateImage({
+    const generated = await generateImage({
       prompt: buildPrompt(prompt, kind, style),
       size: SIZE_BY_KIND[kind],
       negativePrompt: NEGATIVE,
     });
 
-    const res = await fetch(remoteUrl, { signal: AbortSignal.timeout(120_000) });
-    if (!res.ok || !res.body) {
-      return NextResponse.json(
-        { error: `下载生成的图片失败（HTTP ${res.status}）` },
-        { status: 502 },
-      );
-    }
-    const bytes = Buffer.from(await res.arrayBuffer());
+    let bytes: Buffer;
+    let ext: string;
 
-    const ext = extensionOf(remoteUrl);
+    if ('base64' in generated) {
+      // OpenAI 风格网关（gpt-image 等）只回 base64，没有可下载的地址
+      bytes = Buffer.from(generated.base64, 'base64');
+      ext = EXT_BY_MIME[generated.mime] ?? '.png';
+    } else {
+      const res = await fetch(generated.url, { signal: AbortSignal.timeout(120_000) });
+      if (!res.ok || !res.body) {
+        return NextResponse.json(
+          { error: `下载生成的图片失败（HTTP ${res.status}）` },
+          { status: 502 },
+        );
+      }
+      bytes = Buffer.from(await res.arrayBuffer());
+      ext = extensionOf(generated.url);
+    }
     const stored = `${crypto.randomUUID()}${ext}`;
     await fs.mkdir(UPLOAD_DIR, { recursive: true });
     await fs.writeFile(path.join(UPLOAD_DIR, stored), bytes);

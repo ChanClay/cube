@@ -1,4 +1,5 @@
 import { config } from '@/lib/config';
+import type { GenerateImageInput, GeneratedImage } from './types';
 
 /**
  * 阿里云百炼 · 万相文生图（角色卡 / 场景卡配图）
@@ -17,18 +18,11 @@ import { config } from '@/lib/config';
 const DEFAULT_BASE_URL = 'https://cn-beijing.maas.qianwenaiapi.com/api/v1';
 const DEFAULT_MODEL = 'wan2.6-t2i';
 
-/** 只有 wan2.6 系列支持同步调用，其余必须异步轮询 */
-const SYNC_MODEL = /^wan2\.6/i;
+/** wan2.6 及以后（wan2.7 / wan3.x）支持同步调用，wan2.5 及以下必须异步轮询 */
+const SYNC_MODEL = /^wan(2\.[6-9]|[3-9]\.)/i;
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_TIMEOUT_MS = 180_000;
-
-export interface GenerateImageInput {
-  prompt: string;
-  /** 输出尺寸，如 1104*1472 / 1696*960 */
-  size?: string;
-  negativePrompt?: string;
-}
 
 function baseUrl(): string {
   return config.image.baseUrl || DEFAULT_BASE_URL;
@@ -189,8 +183,9 @@ async function generateAsync(input: GenerateImageInput): Promise<string> {
 }
 
 /** 生成一张图，返回临时地址（有效期 24 小时，调用方需转存） */
-export async function generateImage(input: GenerateImageInput): Promise<string> {
+export async function generateNativeImage(input: GenerateImageInput): Promise<GeneratedImage> {
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error('提示词不能为空');
-  return SYNC_MODEL.test(model()) ? generateSync(input) : generateAsync(input);
+  const url = SYNC_MODEL.test(model()) ? await generateSync(input) : await generateAsync(input);
+  return { url };
 }
