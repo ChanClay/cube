@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
-import { MAX_UPLOAD_BYTES, UPLOAD_DIR } from '@/lib/uploads';
+import { MAX_UPLOAD_BYTES, UPLOAD_DIR, compressImage } from '@/lib/uploads';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,9 +56,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const stored = `${crypto.randomUUID()}${extensionOf(file.name)}`;
+  const raw = Buffer.from(await file.arrayBuffer());
+  // 图片先瘦身：云端模型要从隧道下载这张图，原图太大会下载超时
+  const compressed = await compressImage(raw, mime);
+  const data = compressed?.data ?? raw;
+  const stored = `${crypto.randomUUID()}${compressed?.ext ?? extensionOf(file.name)}`;
+
   await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  await fs.writeFile(path.join(UPLOAD_DIR, stored), Buffer.from(await file.arrayBuffer()));
+  await fs.writeFile(path.join(UPLOAD_DIR, stored), data);
 
   return NextResponse.json({
     media: {
@@ -66,8 +71,8 @@ export async function POST(request: Request) {
       type: 'reference_image',
       url: `/api/uploads/${stored}`,
       name: file.name || stored,
-      mime,
-      size: file.size,
+      mime: compressed?.mime ?? mime,
+      size: data.byteLength,
       local: true,
       createdAt: Date.now(),
     },

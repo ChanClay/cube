@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
-import { absolutizeMediaUrl, sanitizeMedia, validateMedia } from '@/lib/media';
+import { absolutizeMediaUrl, isPublicOrigin, sanitizeMedia, validateMedia } from '@/lib/media';
 import { listJobs } from '@/lib/store';
 import { syncAllJobs, startVideoJob } from '@/lib/video-service';
 import { normalizeRatio, normalizeResolution } from '@/lib/video-options';
@@ -67,6 +67,18 @@ export async function POST(request: Request) {
   // 站内地址（角色卡 / 场景卡配图）先按 PUBLIC_BASE_URL 绝对化，再校验。
   const origin = config.publicBaseUrl || new URL(request.url).origin;
   const manual = sanitizeMedia(payload.media);
+
+  // 站内素材要变成公网地址才能交给云端模型；origin 是 localhost 时注定下载失败，
+  // 提前报错，别等任务跑完才在 provider 侧失败（之前就是这么白烧额度的）。
+  if (manual.some((item) => item.url.startsWith('/api/')) && !isPublicOrigin(origin)) {
+    return NextResponse.json(
+      {
+        error: `素材地址是 ${origin}，云端视频模型访问不到本机。请通过公网隧道打开页面，或在 .env.local 把 PUBLIC_BASE_URL 配成公网地址后重启服务`,
+      },
+      { status: 400 },
+    );
+  }
+
   const media: MediaInput[] = manual.map((item) => ({
     ...item,
     url: absolutizeMediaUrl(item.url, origin),

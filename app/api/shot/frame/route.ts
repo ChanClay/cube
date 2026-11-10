@@ -2,15 +2,12 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { FrameError, extractFrame, type FramePosition } from '@/lib/frame';
 import { logVideoError } from '@/lib/logger';
+import { isPublicOrigin } from '@/lib/media';
 import { getJob } from '@/lib/store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
-
-/** 回环 / 局域网地址：云端视频模型都下载不到 */
-const PRIVATE_HOST =
-  /^(localhost|0\.0\.0\.0|\[::1\]|::1|127\.|10\.|192\.168\.|169\.254\.)|^172\.(1[6-9]|2\d|3[01])\./i;
 
 /** 站外可访问的站点地址：优先 PUBLIC_BASE_URL，其次请求自身的 origin */
 function resolveOrigin(request: Request): string {
@@ -25,11 +22,7 @@ function resolveOrigin(request: Request): string {
 /** 云端视频模型能否下载到这张图（回环 / 局域网地址都不行） */
 function isPubliclyReachable(origin: string): boolean {
   if (config.publicBaseUrl) return true;
-  try {
-    return !PRIVATE_HOST.test(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
+  return isPublicOrigin(origin);
 }
 
 /**

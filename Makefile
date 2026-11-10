@@ -37,9 +37,8 @@ dev: ## 启动开发服务器（默认 4500）
 	@echo "→ http://localhost:$(PORT)"
 	@npx next dev -p $(PORT)
 
-proxy: ## 起公网隧道（npx tunnelmole 4500）
-	@echo "→ 隧道指向 http://localhost:$(PORT)"
-	@npx --yes tunnelmole $(PORT)
+proxy: ## 起公网隧道（cloudflared，自动回写 PUBLIC_BASE_URL）
+	@node scripts/tunnel.mjs $(PORT)
 
 build: ## 生产构建
 	$(NPM) run build

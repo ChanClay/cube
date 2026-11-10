@@ -117,6 +117,19 @@ export function absolutizeMediaUrl(url: string, origin: string): string {
   return `${base}${url}`;
 }
 
+/** 回环 / 局域网地址：云端视频模型都下载不到 */
+const PRIVATE_HOST =
+  /^(localhost|0\.0\.0\.0|\[::1\]|::1|127\.|10\.|192\.168\.|169\.254\.)|^172\.(1[6-9]|2\d|3[01])\./i;
+
+/** 这个地址云端模型能不能访问到（localhost / 内网 IP 都不行） */
+export function isPublicOrigin(origin: string): boolean {
+  try {
+    return !PRIVATE_HOST.test(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 从上一镜视频末帧抽出来的首帧（落在 /api/frames/），也就是「承接上一镜」的标志。
  * 服务端据此关掉这一镜的原生音频，避免画面接着上一镜、声音却从头开始。

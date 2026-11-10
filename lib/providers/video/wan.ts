@@ -76,6 +76,21 @@ function mapStatus(raw: string | undefined): JobStatus {
   }
 }
 
+/**
+ * 把 provider 的英文报错翻成人话。
+ *
+ * 最常见的是阿里云绿网（内容安全）拒单：`Green net check rejected image (output)`
+ * —— 模型已经生成，但输出画面被审核拦下，原因通常是提示词带殡葬 / 血腥 / 恐怖语义。
+ */
+function explainProviderError(message: string, code?: string): string {
+  const raw = message || code || '视频生成失败';
+  if (!/green[ _-]?net|data[_ -]?inspection/i.test(`${message} ${code ?? ''}`)) return raw;
+
+  // (input) 指素材被判违规，(output) 指生成的画面被判违规
+  const target = /\(input\)/i.test(message) ? '输入素材' : '生成的画面';
+  return `内容安全审核未通过：阿里云绿网拦截了${target}（原文 ${raw}）。请改写提示词，避开殡葬、血腥、恐怖、暴露等敏感描述后重试`;
+}
+
 export class WanProvider implements VideoProvider {
   readonly name = 'wan';
 
@@ -199,7 +214,7 @@ export class WanProvider implements VideoProvider {
       progress: null,
       error:
         status === 'failed'
-          ? (data.output?.message ?? data.output?.code ?? '视频生成失败')
+          ? explainProviderError(data.output?.message ?? '', data.output?.code)
           : null,
     };
   }
