@@ -17,7 +17,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   return NextResponse.json({ project, scripts });
 }
 
-/** 更新项目名称 / 描述 */
+/** 更新项目名称 / 描述 / 画幅 / 画质 */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
 
@@ -32,6 +32,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const project = await updateProject(id, {
     name: typeof payload.name === 'string' ? payload.name : undefined,
     description: typeof payload.description === 'string' ? payload.description : undefined,
+    ratio: typeof payload.ratio === 'string' ? payload.ratio : undefined,
+    resolution: typeof payload.resolution === 'string' ? payload.resolution : undefined,
   });
 
   if (!project) {

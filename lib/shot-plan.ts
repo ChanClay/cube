@@ -14,11 +14,20 @@ export const MAX_SHOT_SECONDS = 30;
 /** 单镜最短 2 秒（wan3.0 下限） */
 export const MIN_SHOT_SECONDS = 2;
 /** 一份剧本最多 12 镜：对齐 30 秒 × 12 = 360 秒的长度上限 */
+export const MIN_SHOT_COUNT = 1;
 export const MAX_SHOT_COUNT = 12;
 /** 视频总时长上限：12 镜 × 30 秒 */
 export const MAX_TOTAL_SECONDS = MAX_SHOT_SECONDS * MAX_SHOT_COUNT;
 /** 视频总时长下限：不能再短于一个合法镜头（2 秒） */
 export const MIN_TOTAL_SECONDS = MIN_SHOT_SECONDS;
+
+/**
+ * 小说 / 章节改编的输入长度（前后端共用）：
+ * - 太短算不上「小说片段」，直接当创意写更合适；
+ * - 太长会超出单次改编的处理能力，建议先选一章。
+ */
+export const MIN_NOVEL_CHARS = 200;
+export const MAX_NOVEL_CHARS = 30000;
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 

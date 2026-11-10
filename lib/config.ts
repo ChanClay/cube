@@ -21,14 +21,21 @@ export const config = {
      * 思考过程会把 max_tokens 吃光，导致正文为空（finish_reason=length）。
      */
     thinking: bool(process.env.LLM_THINKING, false),
+    /**
+     * 成稿后是否允许审片 agent 修一次。
+     * 只在检测到硬伤时才会额外发请求，正常输出不会变慢。
+     */
+    review: bool(process.env.SCRIPT_REVIEW, true),
   },
   video: {
     /** 通义万相 wan3.0（唯一支持的视频模型） */
     apiKey: trim(process.env.VIDEO_API_KEY),
     baseUrl: stripSlash(trim(process.env.VIDEO_BASE_URL)),
     model: trim(process.env.VIDEO_MODEL),
-    resolution: trim(process.env.VIDEO_RESOLUTION) || '720p',
-    ratio: trim(process.env.VIDEO_RATIO) || 'adaptive',
+    /** 兜底画质：实际按项目设置（创建项目时选择，默认 480p） */
+    resolution: trim(process.env.VIDEO_RESOLUTION) || '480p',
+    /** 兜底画幅：实际按项目设置（默认 16:9），带首帧 / 尾帧的镜头自动用 adaptive */
+    ratio: trim(process.env.VIDEO_RATIO) || '16:9',
     defaultDuration: Number(trim(process.env.VIDEO_DURATION) || 5),
     /** 是否输出有声视频（wan3.0 原生支持台词 / BGM / 音效） */
     audio: bool(process.env.VIDEO_AUDIO, true),

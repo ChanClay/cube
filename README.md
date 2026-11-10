@@ -54,6 +54,7 @@ make distclean    # 连 node_modules 一起清理
 | `LLM_TIMEOUT_MS` | 超时时间，默认 180000 |
 | `LLM_MAX_TOKENS` | 单次调用的输出预算，默认 6000；思考型模型的 reasoning tokens 也算在里面 |
 | `LLM_THINKING` | 是否开启思考模式，默认 `false`：本项目只要 JSON，思考过程会把预算吃光导致正文为空 |
+| `SCRIPT_REVIEW` | 成稿后是否允许审片 agent 修一次，默认 `true`；只检测到硬伤时才额外发请求，正常输出不会变慢 |
 
 模型需支持 `response_format: { type: "json_object" }`；不支持时会摘掉该参数重发，退化为「从返回文本中提取 JSON」。同理，服务端不认 `thinking` 参数时也会自动去掉。被 `max_tokens` 截断或正文为空时会自动放大一倍以上预算重试一次，仍失败才报错（错误里会带上 `finish_reason` 与 `reasoning_tokens`）。
 
@@ -66,8 +67,8 @@ make distclean    # 连 node_modules 一起清理
 | `VIDEO_API_KEY` | 阿里云百炼 DashScope API Key（`sk-` 开头） |
 | `VIDEO_BASE_URL` | 原生异步接口地址，默认 `https://cn-beijing.maas.qianwenaiapi.com/api/v1`（**不要**用 `/compatible-mode/v1`） |
 | `VIDEO_MODEL` | 留空默认 `wan3.0-video`；可选 `wan3.0-video-prime` |
-| `VIDEO_RESOLUTION` | `480p` / `720p` / `1080p`，请求时自动转成 `480P` / `720P` / `1080P` |
-| `VIDEO_RATIO` | `21:9` / `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `adaptive`（默认） |
+| `VIDEO_RESOLUTION` | 兜底画质：`480p` / `720p` / `1080p`。实际画质按项目设置（创建项目时选择，默认 `480p`） |
+| `VIDEO_RATIO` | 兜底画幅：`21:9` / `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `adaptive`。实际画幅按项目设置（默认 `16:9`），带首帧 / 尾帧的镜头自动用 `adaptive` |
 | `VIDEO_DURATION` | 兜底时长（秒），wan3.0 支持 2~30，实际以每个镜头的 duration 为准 |
 | `VIDEO_AUDIO` | 是否输出原生有声视频（台词 / BGM / 音效），默认 `true` |
 | `VIDEO_AUDIO_ON_CARRY` | 承接上一镜末帧的镜头是否也生成音频，默认 `false`：画面接着上一镜、声音却重新生成会断档，这类镜头直接静音 |
@@ -76,14 +77,14 @@ make distclean    # 连 node_modules 一起清理
 ```env
 VIDEO_API_KEY=sk-your-dashscope-key
 VIDEO_MODEL=wan3.0-video
-VIDEO_RESOLUTION=720p
-VIDEO_RATIO=adaptive
+VIDEO_RESOLUTION=480p
+VIDEO_RATIO=16:9
 VIDEO_AUDIO=true
 ```
 
 走百炼 MaaS 异步接口：`POST /services/aigc/video-generation/video-synthesis`（需 `X-DashScope-Async: enable`），创建后轮询 `GET /tasks/{task_id}`。
 
-注意 wan3.0 的参数与 wan2.x 不通用：wan3.0 用 `parameters.resolution`（`480P` / `720P` / `1080P`）+ `parameters.ratio` + `duration`，wan2.x 用 `size`（如 `1280*720`）。本实现按 wan3.0 请求，代码见 `lib/providers/video/wan.ts`。用首帧/尾帧、视频编辑、延长时建议 `VIDEO_RATIO=adaptive`。
+注意 wan3.0 的参数与 wan2.x 不通用：wan3.0 用 `parameters.resolution`（`480P` / `720P` / `1080P`）+ `parameters.ratio` + `duration`，wan2.x 用 `size`（如 `1280*720`）。本实现按 wan3.0 请求，代码见 `lib/providers/video/wan.ts`。画幅 / 画质在创建项目时选择（默认 480p / 16:9），存在项目表里；带首帧 / 尾帧的镜头比例由素材决定，会自动改用 `adaptive`，`VIDEO_RATIO` / `VIDEO_RESOLUTION` 只作为兜底。
 
 ### 站点
 
@@ -95,12 +96,15 @@ VIDEO_AUDIO=true
 
 0. **项目列表（`/`）**：首页展示全部项目卡片（剧本数 · 更新时间），点击进入项目，`×` 删除项目（连带其下剧本）。顶部输入名称即可新建。
 1. **项目工作台（`/projects/[id]`）**：一个项目下可以有多份剧本。
-   - 左栏「故事创意」：填写创意、选风格，再选分镜方式，点「生成剧本」（`⌘/Ctrl + Enter`）。内部先跑串联 agent 规划状态链，再由分镜 agent 写画面（见「分镜串联 agent」），每次生成都会新增一份剧本
+   - 左栏「故事素材」：先选「故事创意」或「小说 / 章节」。
+     - 故事创意：一段想法或梗概，内部先由故事架构师规划蓝图，再由分镜编剧写画面，最后审片一次（见「剧本 agent（三步）」）
+     - 小说 / 章节：粘贴或导入 txt / md（200~30000 字）。镜头数量、每镜时长与总时长由改编模型按剧情决定，不再让用户手填；先压成一条主线，再走同样的分镜链路（见「小说 / 章节改编」）
+     - 每次生成都会新增一份剧本
      - **按镜头数量**：手动指定镜头数（1–12）与单镜时长（2–30 秒滑块）
      - **按总时长**：只给视频总时长（2–360 秒，按 1 秒粒度调整）。勾选「保证完整性」（默认开启）时分镜数量取最少（`ceil(总时长 / 30)`），每镜尽量凑满 30 秒；关闭后不预设镜头数，只给 AI 一个合法区间（`ceil(总时长/30)` ~ `min(12, 总时长/2)`），由它按剧情自己判断切几刀并分配每镜时长。两种方式下每镜时长都在 2–30 秒之间，总和等于设定的总时长
    - 右栏顶部下拉切换本项目下的剧本
 2. **分镜剧本**：LLM 返回结构化分镜，每镜头含中文画面描述、英文视频提示词、景别、运镜、旁白，均可编辑。
-   - **角色卡 / 场景卡**：剧本头部与角色卡同级展示场景卡。两张卡都可以改名 / 改描述，并各自挂一张参考图——点「生成配图」调万相文生图，或「上传」用本地图片。改角色名会同步更新各镜头的出场角色标注。
+   - **角色卡 / 场景卡**：剧本头部与角色卡同级展示场景卡。两张卡都可以改名 / 改描述，并各自挂一张参考图——点「生成配图」调万相文生图，或「上传」用本地图片；点缩略图或展开后的配图可看大图（Esc / 点背景关闭）。改角色名会同步更新各镜头的出场角色标注。
    - 卡片配图会作为首帧的**兜底**参与生成（见下一节的首帧优先级）。
 3. **生成视频**：单镜头点击「生成视频」，或点「全部生成」进入串行队列（并发 = 1）：一次只提交一镜，等它成功后再用 ffmpeg 抽该视频的**末帧**，作为下一镜的 `first_frame` 传进去，保证画面承接。页面每 5 秒轮询一次任务状态，完成后直接内联播放，可打开原视频。
    - **首帧优先级**（单镜生成与串行队列一致）：
@@ -118,9 +122,10 @@ VIDEO_AUDIO=true
 wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `true`），但**台词必须写进 prompt** 才会被说出来：
 
 - 分镜输出 `narration`（这一镜要说的话）和 `narrationType`：`dialogue` 是角色开口、会驱动口型；`voiceover` 是画外旁白、人物闭嘴
+- `dialogue` 还会输出 `speaker`（谁在说，必须是本镜 `characters` 里的名字）。多人物镜头会把说话人写进提示词，避免模型挑错人开口
 - 提交生成时由 `lib/dialogue.ts` 拼接到画面描述末尾，画面描述保持纯英文，台词保留原文（官方支持中英混写）
-- 镜头卡片上的下拉可逐个切换类型；旧剧本没有这个字段，一律按 `voiceover` 处理，避免旁白变成人物开口
-- 台词要短：一句 10~20 字，5 秒左右的镜头最多一句
+- 镜头卡片上的台词框可直接编辑，类型下拉逐个切换；切成角色台词时可指定说话人。旧剧本没有 `speaker` 时保持原行为，一律按 `voiceover` 处理，避免旁白变成人物开口
+- 台词要短：一句 10~20 字，5 秒左右的镜头最多一句；同一句台词只表达一个意思
 - 首帧/首尾帧模式**不能**同时传 `reference_audio`，所以音色不可指定。想要固定音色只能放弃首尾帧衔接，改走全模态参考模式（`reference_image` + `reference_audio`）
 
 ## 素材与配图
@@ -148,7 +153,7 @@ wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `tru
 | --- | --- | --- |
 | `IMAGE_API_KEY` | 复用 `VIDEO_API_KEY` | 百炼 API Key |
 | `IMAGE_BASE_URL` | 复用 `VIDEO_BASE_URL` | 文生图接口地址 |
-| `IMAGE_MODEL` | `wan2.6-t2i` | `wan2.6` 系列走同步协议；`wan2.5` 及以下自动切换成异步轮询 |
+| `IMAGE_MODEL` | `wan2.6-t2i` | `wan2.6` 及以上（含 `wan2.7-image`）走多模态同步协议；`wan2.5` 及以下自动切换成异步轮询 |
 
 > 注意：镜头素材里的本地文件存在本机，通义万相在云端拉取，无法访问 `localhost`。要让本地上传的素材真正参与生成，需要配置 `PUBLIC_BASE_URL` 指向公网可访问地址（反向代理 / 对象存储），否则请改用公网 URL。
 
@@ -160,32 +165,48 @@ wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `tru
 - 每个片段先 `scale + pad` 到统一尺寸再 `concat`，源视频分辨率/帧率不一致也不会失败
 - 输出 H.264（`-preset veryfast -crf 20`）+ `faststart`
 - 任一镜头带声音就保留音轨：统一 48kHz 立体声、AAC 192k，按镜头时长裁剪/补静音后再拼；所有镜头都无声时自动退化为纯画面输出（`VIDEO_AUDIO=false` 走这条）
-- 输出尺寸跟随 `VIDEO_RESOLUTION` 与 `VIDEO_RATIO`：16:9 → 1280×720，9:16 → 720×1280，1:1 → 720×720
+- 输出尺寸跟随项目的画幅 / 画质设置（创建项目时选择）：480p+16:9 → 832×480，720p+16:9 → 1280×720，9:16 自动变成 480×832 / 720×1280，1:1 → 480×480 / 720×720
 - 产物保存在 `.data/exports/`，自动保留最近 10 个；`GET /api/exports/{file}` 支持 Range 拖动播放
 
-## 分镜串联 agent
+## 剧本 agent（三步）
 
-一次性让模型吐全部镜头，很容易「每镜各自成立、彼此接不起来」。生成剧本现在是两阶段：
+一次性让模型吐全部镜头，很容易「每镜各自成立、彼此接不起来」，人物外形和场景光线也会逐镜漂移。生成剧本现在是三步：
 
 ```
-创意 ──▶ 串联导演 agent ──▶ 状态链(entry/exit) ──▶ 分镜 agent ──▶ 分镜脚本
+创意 ──▶ 故事架构师 ──▶ 蓝图（主题/人物/场景/状态链） ──▶ 分镜编剧 ──▶ 成稿 ──▶ 审片编辑 ──▶ 分镜脚本
 ```
 
-**第一阶段 `lib/agents/continuity.ts`**：不写分镜文案，只规划一条状态链。每个镜头必须给出：
+**第一步 `lib/agents/continuity.ts`（故事架构师）**：不写分镜文案，只定故事与结构。
 
-| 字段 | 含义 |
-| --- | --- |
-| `entry` | 承接上一镜的哪个状态；第一镜写「开场」 |
-| `action` | 这一镜做完什么动作 |
-| `exit` | 结束时留下的可拍摄状态（谁、在哪、什么姿势、朝向、手里拿什么） |
-| `shotSize` / `cameraMove` | 成组推进的景别与运镜 |
-| `transition` | 到下一镜的衔接方式（只作剪辑参考，不进画面） |
+- 故事层：`logline`（谁 + 想要什么 + 阻碍 + 代价）、`theme`（可被画面证明的判断）、`tone`（基调与节奏）
+- 人物：`role` 叙事功能、`desc` 可拍摄的中文外形、`promptEn` 全片固定的英文外貌短语
+- 场景：`desc` 地点 / 时间 / 光线 / 陈设、`promptEn` 固定的英文空间短语
+- 状态链：每个节拍给出 `beat`（开场钩子 / 激励事件 / 高潮 / 余韵…）、`emotion`（1~5 情绪曲线）、`entry` / `action` / `exit`、景别与运镜
 
-硬约束：相邻镜头的 action 首尾相接、不允许凭空换场地、角色外形全片锁定、景别按「建立 → 逼近 → 细节 → 释放」推进。
+硬约束：相邻镜头的 action 首尾相接、不允许凭空换场地、角色外形与场景光线全片锁定、景别按「建立 → 逼近 → 细节 → 释放」推进、情绪最高点落在后 1/3。蓝图缺动作 / 缺交接时会带着问题清单重试一次。
 
-**第二阶段 `lib/agents/storyboard.ts`**：把状态链和角色表塞进分镜提示词，要求第 N 镜从 `entry` 开始、在 `exit` 结束，`shotSize`/`cameraMove` 照抄大纲，同一角色复用同一段英文外貌描述。
+**第二步 `lib/agents/storyboard.ts`（分镜编剧）**：把蓝图塞进提示词，逐镜写画面、英文视频提示词与台词。蓝图节拍数与目标镜数不一致时，多就合并、少就拆解，不新增剧情。写完做确定性收口：角色卡 / 场景卡以蓝图为准、错位的名字映射回卡上、中文描述里点名的角色自动补进 `characters`、台词按时长截断、镜数与总时长对齐。
 
-降级：串联环节失败（网络、JSON 不合法等）会退回原来的一次性生成，并往 `.data/logs/agent.log` 记一条 warn，不会让生成直接失败。代价是生成耗时大约翻倍（两次 LLM 调用，实测 4 镜约 24 秒）。
+**第三步 `lib/agents/review.ts`（审片编辑）**：先做不发请求的体检——镜数、英文提示词长度、禁用词（字幕 / 水印 / logo / 分屏）、台词长度、角色与场景引用、重复提示词。只有硬伤才额外调用一次模型修复（`SCRIPT_REVIEW=false` 可关闭）；修复失败保留原稿，不让生成失败。
+
+公共规范收在 `lib/agents/spec.ts`（景别 / 运镜 / 提示词 / 台词约束与清洗），分镜写作、单镜重算（`/api/shot/refine`）、审片共用同一份，避免三处规则漂移。
+
+降级：蓝图规划失败会退回一次性生成，并往 `.data/logs/agent.log` 记一条 warn。正常生成是 2 次 LLM 调用，触发审片时才多一次。
+
+## 小说 / 章节改编
+
+「小说 / 章节」模式不是把整章原文直接交给规划 agent，而是先压缩再分镜：
+
+```
+原文 ──▶（>8000 字先分段摘要）──▶ 改编 agent ──▶ 蓝图 + 梗概 ──▶ 分镜链路
+```
+
+- 输入 200~30000 字；超过 8000 字按段落切成最多 5 段，每段先摘要，再合成蓝图（map-reduce）
+- 镜头数量、每镜时长、总时长全部由改编蓝图按剧情决定（1~12 镜、每镜 2~30 秒、总时长 30~360 秒），用户不需要手填
+- 只保留一条主线、2~4 个人物、1~4 个场景，保留主角、核心冲突、关键道具与结局方向；删副线、次要人物、过场
+- 改编输出 `treatment`（300~500 字梗概），作为「故事创意」传给分镜 agent，也回填到剧本信息；整章原文不入库
+- 一次改编对应一份 6 分钟内的短片；整本小说请按章多次生成
+- 改编失败会直接报错，不会悄悄退回「把整章当创意」，避免生成一份更差的稿
 
 ## 排查视频生成失败
 
@@ -218,7 +239,7 @@ tail -f .data/logs/video.log # 实时跟踪
 | GET / POST | `/api/projects` | 项目列表 / 新建项目 `{ name?, description? }` |
 | GET | `/api/projects/[id]` | 项目详情 + 其下剧本列表 `{ project, scripts }` |
 | PATCH / DELETE | `/api/projects/[id]` | 改名、改描述 / 删除项目（连带剧本） |
-| POST | `/api/script` | `{ idea, style, shotCount, duration }` → `{ script }` |
+| POST | `/api/script` | `{ idea, source?, style, shotCount, duration }` → `{ script, meta }`；`source=novel` 时 `idea` 是小说原文，`shotCount` / `duration` 被忽略（由改编蓝图决定），`meta.adaptedIdea` 返回压缩梗概 |
 | POST | `/api/image` | `{ prompt, kind, style? }` → 万相文生图并转存本地，返回 `{ media }` |
 | GET | `/api/scripts` | 剧本列表 `{ scripts }`，`?limit=20&projectId=` |
 | POST | `/api/scripts` | 保存剧本 `{ id?, projectId?, idea, script }` → `{ script }` |
@@ -280,11 +301,14 @@ lib/
   compose.ts            下载 + ffmpeg 拼接成片（导出到 .data/exports）
   frame.ts              从镜头视频抽关键帧（导出到 .data/frames，供下一镜当首帧）
   agents/              所有「让模型做判断」的逻辑，与存储 / 路由 / 视频 provider 分离
-    index.ts            统一出口（浏览器端请直接从 agents/media 引入）
+    index.ts            统一出口
+    spec.ts             影视语言规范（景别 / 运镜 / 提示词 / 台词约束与清洗）
     llm.ts              LLM 调用与 JSON 提取（最底层，其余 agent 共用）
-    continuity.ts       串联导演 agent（规划 entry/exit 状态链）
-    storyboard.ts       分镜 agent（照状态链写画面 + JSON 规范化）
-    media.ts            素材关联 agent（镜头文本 / 角色卡 → 该带哪些项目素材）
+    adaptation.ts       小说 / 章节改编（分段摘要 → 压缩蓝图 + 梗概）
+    continuity.ts       故事架构师（主题 / 人物 / 场景 + entry/exit 状态链）
+    storyboard.ts       分镜编剧（照蓝图写画面与提示词 + 时长 / 引用收口）
+    review.ts           审片编辑（确定性体检 + 只修复有硬伤的镜头）
+  media.ts              素材类型与校验（前后端共用）
   providers/video/      通义万相 wan3.0（types.ts / index.ts / wan.ts）
 ```
 

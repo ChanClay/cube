@@ -322,6 +322,10 @@ select {
   color: var(--muted);
 }
 
+.field-hint--error {
+  color: #b42318;
+}
+
 .textarea,
 .input,
 .select {
@@ -647,6 +651,23 @@ a.btn:visited {
   background: var(--panel);
 }
 
+/* 画幅 / 画质：项目级设置，顶栏就地切换 */
+.topbar-select {
+  width: auto;
+  height: 28px;
+  max-width: 150px;
+  padding: 0 26px 0 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+}
+
+@media (max-width: 900px) {
+  .topbar-select {
+    display: none;
+  }
+}
+
 .topbar-project {
   font-size: 13.5px;
   font-weight: 600;
@@ -846,6 +867,11 @@ a.btn:visited {
   gap: 8px;
 }
 
+.home-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .home-actions .input {
   width: 240px;
   height: 36px;
@@ -853,6 +879,14 @@ a.btn:visited {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--field);
+}
+
+/* 创建项目时选画幅 / 画质 */
+.home-actions .home-select {
+  width: auto;
+  height: 36px;
+  padding: 0 30px 0 10px;
+  font-size: 12.5px;
 }
 
 .project-grid {
@@ -1475,6 +1509,15 @@ a.btn:visited {
   display: block;
 }
 
+/* 有配图的缩略图：点击看大图，用放大镜光标和描边提示可点 */
+.cast-chip-thumb.is-viewable {
+  cursor: zoom-in;
+}
+
+.cast-chip-thumb.is-viewable:hover {
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+
 .cast-chip-name {
   min-width: 0;
   overflow: hidden;
@@ -1525,6 +1568,24 @@ a.btn:visited {
   object-fit: cover;
   display: block;
   border-radius: 5px;
+}
+
+/* 展开后的缩略图本身也是「查看大图」按钮 */
+.cast-thumb-view {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.cast-thumb-view:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 1px;
 }
 
 /* 缩略图右上角的移除配图按钮 */
@@ -1599,6 +1660,108 @@ a.btn:visited {
   margin-top: 8px;
   font-size: 11px;
   color: #d64545;
+}
+
+/* 整体画风：决定角色卡 / 场景卡配图的画面风格 */
+.cast-style {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.cast-style-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cast-style-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--field);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.cast-style-input:hover {
+  border-color: var(--accent-border);
+}
+
+.cast-style-input:focus {
+  outline: none;
+  border-style: solid;
+  border-color: var(--accent-border);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(79, 91, 213, 0.1);
+}
+
+.cast-style-input::placeholder {
+  color: var(--placeholder);
+}
+
+/* 角色卡 / 场景卡配图的大图查看器 */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(10, 14, 22, 0.8);
+  backdrop-filter: blur(4px);
+  cursor: zoom-out;
+}
+
+.image-viewer img {
+  max-width: 92vw;
+  max-height: 86vh;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  cursor: default;
+}
+
+.image-viewer-close {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.image-viewer-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+@media (max-width: 640px) {
+  .image-viewer {
+    padding: 14px;
+  }
+
+  .image-viewer img {
+    max-width: 96vw;
+    max-height: 80vh;
+  }
 }
 
 .compose-bar {
@@ -1999,11 +2162,8 @@ a.btn:visited {
 }
 
 .narration {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
   margin-top: 9px;
-  padding: 7px 10px;
+  padding: 7px 10px 8px;
   border-radius: 8px;
   background: rgba(79, 91, 213, 0.05);
   border-left: 2px solid rgba(79, 91, 213, 0.4);
@@ -2011,21 +2171,40 @@ a.btn:visited {
   color: var(--text-dim);
 }
 
-.narration span {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.6;
+.narration-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.narration-input {
+  width: 100%;
+  min-height: 36px;
+  font-size: 12px;
+  color: var(--text);
+  resize: vertical;
 }
 
 /* 选了「都不要」：文本保留但灰掉，表示不会提交给模型 */
-.narration--off span {
+.narration--off .narration-input {
   opacity: 0.45;
 }
 
-/* 台词类型切换：画外旁白 / 角色台词。
-   .select 全局是 width:100%，在 flex 行里会把台词挤出去；
+/* 台词类型 / 说话人切换：
+   .select 全局是 width:100%，在 flex 行里会把输入框挤出去；
    而且原生下拉箭头要占位，auto 宽度会算少，四个字就被挤成两行 */
 .narration-type {
+  flex: none;
+  width: auto;
+  min-width: 92px;
+  height: 24px;
+  padding: 0 2px 0 7px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+
+.narration-speaker {
   flex: none;
   width: auto;
   min-width: 92px;
@@ -2114,6 +2293,89 @@ a.btn:visited {
   border: 1px solid var(--border-soft);
   background: var(--panel);
   font-size: 11.5px;
+}
+
+/* 素材缩略图：点开看大图 / 播放，省得对着 URL 猜 */
+.media-thumb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft);
+  background: var(--field);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: zoom-in;
+}
+
+.media-thumb:hover {
+  border-color: var(--accent);
+}
+
+.media-thumb img,
+.media-thumb video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.media-thumb--broken {
+  font-size: 10px;
+  cursor: default;
+}
+
+.media-viewer-video {
+  display: block;
+  max-width: 92vw;
+  max-height: 86vh;
+  border-radius: 8px;
+  background: #000;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  cursor: default;
+}
+
+.media-viewer-audio {
+  width: min(420px, 90vw);
+  cursor: default;
+}
+
+.media-viewer-link {
+  max-width: min(720px, 90vw);
+  padding: 14px 18px;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent-strong);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.media-viewer-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  max-width: 88vw;
+  padding: 5px 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
 }
 
 .media-type {

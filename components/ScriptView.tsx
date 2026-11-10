@@ -42,6 +42,8 @@ interface Props {
   onCharactersChange?: (next: Character[]) => void;
   /** 场景卡编辑（新增 / 删除 / 改描述 / 换配图） */
   onScenesChange?: (next: Scene[]) => void;
+  /** 修改整体画风：角色卡 / 场景卡配图与分镜提示词都用它 */
+  onStyleChange?: (style: string) => void;
   /** 新建一份空白剧本（只有这里会新增剧本记录） */
   onNewScript?: () => void;
   /** 删除当前剧本 */
@@ -100,6 +102,7 @@ export default function ScriptView({
   switching = false,
   onCharactersChange,
   onScenesChange,
+  onStyleChange,
   onNewScript,
   onDeleteScript,
   onScriptTitleChange,
@@ -377,6 +380,7 @@ export default function ScriptView({
                 style={script.style}
                 onCharactersChange={onCharactersChange ?? (() => undefined)}
                 onScenesChange={onScenesChange ?? (() => undefined)}
+                onStyleChange={onStyleChange}
               />
 
             </header>

@@ -2,24 +2,19 @@ import { NextResponse } from 'next/server';
 import { ComposeError, composeVideos } from '@/lib/compose';
 import { config } from '@/lib/config';
 import { listJobs } from '@/lib/store';
+import { exportSize } from '@/lib/video-options';
 import type { VideoJob } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-/** 导出尺寸跟随 VIDEO_RESOLUTION / VIDEO_RATIO，竖屏或方形时自动调换 */
-function resolveExportSize(): string {
-  const res = config.video.resolution.toLowerCase();
-  const base = res.startsWith('1080')
-    ? { w: 1920, h: 1080 }
-    : res.startsWith('480')
-      ? { w: 832, h: 480 }
-      : { w: 1280, h: 720 };
-
-  if (config.video.ratio === '9:16') return `${base.h}x${base.w}`;
-  if (config.video.ratio === '1:1') return `${base.h}x${base.h}`;
-  return `${base.w}x${base.h}`;
+/**
+ * 导出尺寸跟随项目的画幅 / 画质；
+ * 没传（老客户端）时回落到全局 VIDEO_RESOLUTION / VIDEO_RATIO。
+ */
+function resolveExportSize(resolution: string | undefined, ratio: string | undefined): string {
+  return exportSize(resolution || config.video.resolution, ratio || config.video.ratio);
 }
 
 export async function POST(request: Request) {
@@ -60,9 +55,14 @@ export async function POST(request: Request) {
     clips.push({ url: job.videoUrl, shotId });
   }
 
+  const size = resolveExportSize(
+    typeof payload.resolution === 'string' ? payload.resolution : undefined,
+    typeof payload.ratio === 'string' ? payload.ratio : undefined,
+  );
+
   try {
-    const result = await composeVideos(clips, resolveExportSize());
-    return NextResponse.json({ ...result, size: resolveExportSize() });
+    const result = await composeVideos(clips, size);
+    return NextResponse.json({ ...result, size });
   } catch (err) {
     if (err instanceof ComposeError) {
       return NextResponse.json({ error: err.message }, { status: err.status });

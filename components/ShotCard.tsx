@@ -11,7 +11,14 @@ import {
   validateMedia,
 } from '@/lib/media';
 import { api } from '@/lib/client';
-import type { Character, MediaType, NarrationType, Shot, VideoJob } from '@/lib/types';
+import type {
+  Character,
+  MediaInput,
+  MediaType,
+  NarrationType,
+  Shot,
+  VideoJob,
+} from '@/lib/types';
 
 interface Props {
   shot: Shot;
@@ -32,6 +39,21 @@ interface Props {
   /** 放弃这一镜：停止跟踪进度（云端任务仍会跑完） */
   onAbandon?: () => void;
 }
+
+/** 图片类素材画缩略图，视频用首帧，其余类型用符号占位 */
+const isImageMedia = (type: MediaType): boolean =>
+  type === 'first_frame' || type === 'last_frame' || type === 'reference_image';
+
+/** 不能直接预览的素材给个符号，免得缩略图区空着 */
+const MEDIA_GLYPH: Record<MediaType, string> = {
+  first_frame: '▣',
+  last_frame: '▣',
+  reference_image: '▣',
+  reference_video: '▶',
+  reference_audio: '♪',
+  file: '▤',
+  link: '↗',
+};
 
 const STATUS_TEXT = {
   queued: '排队中',
@@ -62,8 +84,25 @@ export default function ShotCard({
   /** 按当前画面描述重算分镜信息的进行中状态 */
   const [refining, setRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
+  /** 正在预览的素材：点缩略图打开，点遮罩 / 按 ESC 关闭 */
+  const [previewing, setPreviewing] = useState<MediaInput | null>(null);
+  /** 加载失败的缩略图地址：显示占位，不留破图 */
+  const [brokenThumbs, setBrokenThumbs] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!previewing) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewing(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewing]);
 
   const media = shot.media ?? [];
+  /** 说话人下拉：优先本镜出镜角色，其次全片角色卡 */
+  const speakerOptions = [
+    ...new Set([...(shot.characterNames ?? []), ...characters.map((c) => c.name)]),
+  ].filter(Boolean);
 
   /**
    * 这一镜会不会静音：首帧来自上一镜末帧时，服务端不生成音轨
@@ -118,6 +157,8 @@ export default function ShotCard({
         narration: next.narration,
       };
       if (next.title) patch.title = next.title;
+      // 模型给了说话人就更新；没给时保留原值，避免重算把已选的人清掉
+      if (next.speaker) patch.speaker = next.speaker;
       onChange(patch);
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : String(err));
@@ -220,14 +261,29 @@ export default function ShotCard({
         onChange={(e) => onChange({ videoPrompt: e.target.value })}
       />
 
-      {shot.narration && (
-        <div className={`narration${shot.narrationType === 'none' ? ' narration--off' : ''}`}>
+      <div className={`narration${shot.narrationType === 'none' ? ' narration--off' : ''}`}>
+        <div className="narration-head">
           <select
             className="select narration-type"
             value={shot.narrationType ?? 'voiceover'}
-            onChange={(e) =>
-              onChange({ narrationType: e.target.value as NarrationType })
-            }
+            onChange={(e) => {
+              const type = e.target.value as NarrationType;
+              const onScreen = shot.characterNames ?? [];
+              const patch: Partial<Shot> = { narrationType: type };
+
+              // 切成角色台词时尽量把说话人补上：本镜只有一个人就用他，
+              // 全片只有一个角色就直接采用，避免出现「有人在说但不知道是谁」。
+              if (type === 'dialogue' && !shot.speaker) {
+                if (onScreen.length === 1) {
+                  patch.speaker = onScreen[0];
+                } else if (characters.length === 1) {
+                  patch.speaker = characters[0].name;
+                  patch.characterNames = [...onScreen, characters[0].name];
+                }
+              }
+              if (type !== 'dialogue') patch.speaker = undefined;
+              onChange(patch);
+            }}
             aria-label="台词类型"
             title="角色台词：画面里的人物开口说话；画外旁白：人物不开口；都不要：这句不提交给模型"
           >
@@ -235,9 +291,74 @@ export default function ShotCard({
             <option value="dialogue">角色台词</option>
             <option value="none">都不要</option>
           </select>
-          <span>{shot.narration}</span>
+
+          {shot.narrationType === 'dialogue' && (
+            <select
+              className="select narration-speaker"
+              value={shot.speaker ?? ''}
+              onChange={(e) => {
+                const name = e.target.value;
+                const patch: Partial<Shot> = { speaker: name || undefined };
+                // 说话人必须在本镜出镜，否则模型不知道该让谁开口
+                if (name && !(shot.characterNames ?? []).includes(name)) {
+                  patch.characterNames = [...(shot.characterNames ?? []), name];
+                }
+                onChange(patch);
+              }}
+              aria-label="说话人"
+              title="这句台词由谁来说：会写进视频提示词，避免多人物镜头里挑错人"
+            >
+              <option value="">谁在说…</option>
+              {speakerOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-      )}
+
+        <textarea
+          className="shot-textarea narration-input"
+          rows={2}
+          value={shot.narration}
+          onChange={(e) => {
+            const narration = e.target.value;
+            const onScreen = shot.characterNames ?? [];
+            const patch: Partial<Shot> = { narration };
+
+            /**
+             * 往空镜里第一次填台词时自动选对类型：
+             * 画面里有人 → 角色台词（驱动口型）；纯空镜 → 画外旁白。
+             * 之后用户手动改成的类型不会被覆盖。
+             */
+            if (narration.trim()) {
+              const wasEmpty = !shot.narration;
+              if (shot.narrationType === 'none') {
+                patch.narrationType = onScreen.length > 0 ? 'dialogue' : 'voiceover';
+              } else if (
+                wasEmpty &&
+                (shot.narrationType ?? 'voiceover') === 'voiceover' &&
+                onScreen.length > 0
+              ) {
+                patch.narrationType = 'dialogue';
+              }
+
+              if (patch.narrationType === 'dialogue' && !shot.speaker) {
+                if (onScreen.length === 1) {
+                  patch.speaker = onScreen[0];
+                } else if (characters.length === 1) {
+                  patch.speaker = characters[0].name;
+                  patch.characterNames = [...onScreen, characters[0].name];
+                }
+              }
+            }
+            onChange(patch);
+          }}
+          placeholder="这一镜的台词或旁白，留空则无口播"
+          aria-label="台词或旁白"
+        />
+      </div>
 
       <details className="media-panel" open={media.length > 0}>
         <summary>
@@ -249,22 +370,56 @@ export default function ShotCard({
 
         {media.length > 0 && (
           <div className="media-list">
-            {media.map((item, index) => (
-              <div className="media-item" key={`${item.type}-${index}`}>
-                <span className="media-type">{MEDIA_LABEL[item.type]}</span>
-                <span className="media-url" title={item.url}>
-                  {item.url}
-                </span>
-                <button
-                  className="media-remove"
-                  onClick={() => removeMedia(index)}
-                  aria-label="移除素材"
-                  type="button"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {media.map((item, index) => {
+              const broken = brokenThumbs.includes(item.url);
+              return (
+                <div className="media-item" key={`${item.type}-${index}`}>
+                  <button
+                    className={`media-thumb${broken ? ' media-thumb--broken' : ''}`}
+                    type="button"
+                    onClick={() => setPreviewing(item)}
+                    title="点击预览"
+                    aria-label={`预览${MEDIA_LABEL[item.type]}`}
+                  >
+                    {isImageMedia(item.type) ? (
+                      broken ? (
+                        <span>无图</span>
+                      ) : (
+                        <img
+                          src={item.url}
+                          alt={MEDIA_LABEL[item.type]}
+                          loading="lazy"
+                          onError={() =>
+                            setBrokenThumbs((prev) =>
+                              prev.includes(item.url) ? prev : [...prev, item.url],
+                            )
+                          }
+                        />
+                      )
+                    ) : item.type === 'reference_video' ? (
+                      <video src={item.url} preload="metadata" muted playsInline />
+                    ) : (
+                      <span>{MEDIA_GLYPH[item.type]}</span>
+                    )}
+                  </button>
+                  <span className="media-type">
+                    {MEDIA_LABEL[item.type]}
+                    {item.auto ? ' · 自动' : ''}
+                  </span>
+                  <span className="media-url" title={item.url}>
+                    {item.url}
+                  </span>
+                  <button
+                    className="media-remove"
+                    onClick={() => removeMedia(index)}
+                    aria-label="移除素材"
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -406,6 +561,69 @@ export default function ShotCard({
           {buttonText}
         </button>
       </div>
+
+      {previewing && (
+        <div
+          className="image-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`预览${MEDIA_LABEL[previewing.type]}`}
+          onClick={() => setPreviewing(null)}
+        >
+          <button
+            className="image-viewer-close"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPreviewing(null);
+            }}
+            aria-label="关闭预览"
+            autoFocus
+          >
+            ×
+          </button>
+
+          {isImageMedia(previewing.type) ? (
+            <img
+              src={previewing.url}
+              alt={MEDIA_LABEL[previewing.type]}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : previewing.type === 'reference_video' ? (
+            <video
+              className="media-viewer-video"
+              src={previewing.url}
+              controls
+              autoPlay
+              playsInline
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : previewing.type === 'reference_audio' ? (
+            <audio
+              className="media-viewer-audio"
+              src={previewing.url}
+              controls
+              autoPlay
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <a
+              className="media-viewer-link"
+              href={previewing.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {previewing.url}
+            </a>
+          )}
+
+          <div className="media-viewer-caption" onClick={(e) => e.stopPropagation()}>
+            {MEDIA_LABEL[previewing.type]}
+            {previewing.auto ? ' · 自动关联' : ''} · {previewing.url}
+          </div>
+        </div>
+      )}
     </article>
   );
 }

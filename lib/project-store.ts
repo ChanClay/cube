@@ -2,6 +2,7 @@ import type { ResultSetHeader } from 'mysql2';
 import { currentUserId } from './auth';
 import { getDb } from './db';
 import type { Project, ProjectSummary } from './types';
+import { normalizeRatio, normalizeResolution } from './video-options';
 
 const MAX_PROJECTS = 200;
 
@@ -9,6 +10,8 @@ interface ProjectRow {
   id: string;
   name: string;
   description: string | null;
+  ratio: string | null;
+  resolution: string | null;
   created_at: number | string;
   updated_at: number | string;
 }
@@ -22,6 +25,8 @@ function toProject(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     description: row.description ?? '',
+    ratio: normalizeRatio(row.ratio),
+    resolution: normalizeResolution(row.resolution),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -44,6 +49,8 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     name: row.name,
     description: row.description ?? '',
     scriptCount: Number(row.script_count ?? 0),
+    ratio: normalizeRatio(row.ratio),
+    resolution: normalizeResolution(row.resolution),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   }));
@@ -63,6 +70,8 @@ export async function getProject(id: string): Promise<Project | null> {
 export async function createProject(input: {
   name?: string;
   description?: string;
+  ratio?: string;
+  resolution?: string;
 }): Promise<Project> {
   const pool = await getDb();
   const userId = await currentUserId();
@@ -70,11 +79,13 @@ export async function createProject(input: {
   const id = crypto.randomUUID();
   const name = input.name?.trim().slice(0, 200) || '未命名项目';
   const description = input.description?.trim() ?? '';
+  const ratio = normalizeRatio(input.ratio);
+  const resolution = normalizeResolution(input.resolution);
 
   await pool.query(
-    `INSERT INTO projects (id, user_id, name, description, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [id, userId, name, description, now, now],
+    `INSERT INTO projects (id, user_id, name, description, ratio, resolution, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, userId, name, description, ratio, resolution, now, now],
   );
 
   // 只裁剪当前用户自己的项目
@@ -89,12 +100,14 @@ export async function createProject(input: {
     [userId, userId],
   );
 
-  return { id, name, description, createdAt: now, updatedAt: now };
+  return { id, name, description, ratio, resolution, createdAt: now, updatedAt: now };
 }
 
 export interface UpdateProjectInput {
   name?: string;
   description?: string;
+  ratio?: string;
+  resolution?: string;
 }
 
 export async function updateProject(id: string, patch: UpdateProjectInput): Promise<Project | null> {
@@ -109,14 +122,20 @@ export async function updateProject(id: string, patch: UpdateProjectInput): Prom
       : existing.name;
   const description =
     typeof patch.description === 'string' ? patch.description : existing.description;
+  const ratio = patch.ratio === undefined ? existing.ratio : normalizeRatio(patch.ratio, existing.ratio);
+  const resolution =
+    patch.resolution === undefined
+      ? existing.resolution
+      : normalizeResolution(patch.resolution, existing.resolution);
 
   const userId = await currentUserId();
   await pool.query(
-    `UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
-    [name, description, now, id, userId],
+    `UPDATE projects SET name = ?, description = ?, ratio = ?, resolution = ?, updated_at = ?
+     WHERE id = ? AND user_id = ?`,
+    [name, description, ratio, resolution, now, id, userId],
   );
 
-  return { ...existing, name, description, updatedAt: now };
+  return { ...existing, name, description, ratio, resolution, updatedAt: now };
 }
 
 export async function deleteProject(id: string): Promise<boolean> {

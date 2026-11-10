@@ -3,7 +3,7 @@ import { config } from '@/lib/config';
 /**
  * 阿里云百炼 · 万相文生图（角色卡 / 场景卡配图）
  *
- * wan2.6 走新的多模态协议，支持 HTTP 同步：
+ * wan2.6 / 2.7 走新的多模态协议，支持 HTTP 同步：
  *   POST {base}/services/aigc/multimodal-generation/generation
  *   → output.choices[].message.content[].image
  *
@@ -17,8 +17,20 @@ import { config } from '@/lib/config';
 const DEFAULT_BASE_URL = 'https://cn-beijing.maas.qianwenaiapi.com/api/v1';
 const DEFAULT_MODEL = 'wan2.6-t2i';
 
-/** 只有 wan2.6 系列支持同步调用，其余必须异步轮询 */
-const SYNC_MODEL = /^wan2\.6/i;
+/**
+ * wan2.6 起改用多模态同步协议（multimodal-generation），
+ * wan2.5 及以下仍是旧的 text2image 异步任务协议。
+ *
+ * 注意不能只判断 2.6：wan2.7-image 也走新协议，判断错会拿旧端点去调
+ * 新模型，直接返回 `url error, please check url`。
+ */
+function usesMultimodalProtocol(modelName: string): boolean {
+  const match = /^wan(\d+)\.(\d+)/i.exec(modelName);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 2 || (major === 2 && minor >= 6);
+}
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_TIMEOUT_MS = 180_000;
@@ -84,8 +96,8 @@ function pickWan26Image(data: Record<string, unknown>): string | null {
   return null;
 }
 
-/** wan2.6 同步调用 */
-async function generateSync(input: GenerateImageInput): Promise<string> {
+/** wan2.6 / 2.7 同步调用（多模态协议） */
+async function generateMultimodal(input: GenerateImageInput): Promise<string> {
   const res = await fetch(`${baseUrl()}/services/aigc/multimodal-generation/generation`, {
     method: 'POST',
     headers: headers(),
@@ -98,9 +110,11 @@ async function generateSync(input: GenerateImageInput): Promise<string> {
       parameters: {
         size: input.size,
         n: 1,
-        prompt_extend: true,
         watermark: false,
-        ...(input.negativePrompt ? { negative_prompt: input.negativePrompt } : {}),
+        /**
+         * 只发多模态协议的公共字段：wan2.7 不支持 prompt_extend / negative_prompt，
+         * 传了会 400；提示词里已经带了「无文字无水印」等负向约束，够用。
+         */
       },
     }),
   });
@@ -108,10 +122,13 @@ async function generateSync(input: GenerateImageInput): Promise<string> {
   const raw = await res.text();
   if (!res.ok) {
     const hint =
-      res.status === 401 || res.status === 404
-        ? `\n请检查 IMAGE_BASE_URL（当前 ${baseUrl()}）与 API Key 是否属于同一地域；` +
-          '万相专属入口不支持该接口时，可改用 https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1'
-        : '';
+      res.status === 400 && raw.includes('url error')
+        ? '\n该模型可能不属于当前协议：wan2.6 / 2.7-image 需走 multimodal-generation，' +
+          'wan2.5 及以下才用 text2image。请确认 IMAGE_MODEL。'
+        : res.status === 401 || res.status === 404
+          ? `\n请检查 IMAGE_BASE_URL（当前 ${baseUrl()}）与 API Key 是否属于同一地域；` +
+            '万相专属入口不支持该接口时，可改用 https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/api/v1'
+          : '';
     throw new Error(`万相文生图失败（${res.status}）：${raw.slice(0, 300)}${hint}`);
   }
 
@@ -142,7 +159,14 @@ async function generateAsync(input: GenerateImageInput): Promise<string> {
 
   const createRaw = await createRes.text();
   if (!createRes.ok) {
-    throw new Error(`万相文生图创建任务失败（${createRes.status}）：${createRaw.slice(0, 400)}`);
+    // 旧端点遇到新版模型时最常见的报错就是 url error，直接给出排查方向
+    const hint = createRaw.includes('url error')
+      ? '\n该模型可能需要新版多模态协议：请确认 IMAGE_MODEL 是 wan2.6 / 2.7-image 系列；' +
+        '文生图模型请用 wan2.7-image，不要用需要参考图的编辑模型。'
+      : '';
+    throw new Error(
+      `万相文生图创建任务失败（${createRes.status}）：${createRaw.slice(0, 400)}${hint}`,
+    );
   }
 
   const created = parseJson(createRaw, '创建任务');
@@ -192,5 +216,5 @@ async function generateAsync(input: GenerateImageInput): Promise<string> {
 export async function generateImage(input: GenerateImageInput): Promise<string> {
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error('提示词不能为空');
-  return SYNC_MODEL.test(model()) ? generateSync(input) : generateAsync(input);
+  return usesMultimodalProtocol(model()) ? generateMultimodal(input) : generateAsync(input);
 }

@@ -23,6 +23,9 @@ export async function POST(request: Request) {
   const project = await createProject({
     name: typeof payload.name === 'string' ? payload.name : undefined,
     description: typeof payload.description === 'string' ? payload.description : undefined,
+    // 画幅 / 画质在创建时选定，非法值由 store 归一化成默认值
+    ratio: typeof payload.ratio === 'string' ? payload.ratio : undefined,
+    resolution: typeof payload.resolution === 'string' ? payload.resolution : undefined,
   });
 
   // 不再预建空剧本：新建项目会先进故事创意页，生成后才写入第一份剧本，

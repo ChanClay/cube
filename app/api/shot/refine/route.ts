@@ -2,41 +2,32 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/logger';
 import { callChatJson } from '@/lib/agents/llm';
+import {
+  normalizeCameraMove,
+  normalizeShotSize,
+  SHOT_LANGUAGE_RULES,
+  str,
+  trimNarration,
+  VIDEO_PROMPT_RULES,
+} from '@/lib/agents/spec';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-const SHOT_SIZES = ['特写', '近景', '中景', '全景', '远景', '大远景'];
-const CAMERA_MOVES = [
-  '固定机位',
-  '缓慢推近',
-  '缓慢拉远',
-  '横向移动',
-  '环绕',
-  '跟随',
-  '手持晃动',
-  '升格慢动作',
-];
-
-const str = (v: unknown, fallback = ''): string =>
-  typeof v === 'string' && v.trim() ? v.trim() : fallback;
-
 function buildSystemPrompt(): string {
   return `你是一位资深 AI 分镜师。用户已经手动改写了某个镜头的「画面描述」，你需要据此重新产出这一镜的结构化分镜信息。
 
 要求：
-1. videoPrompt 必须是英文提示词，40~90 个单词，按顺序描述：镜头主体 + 具体动作 + 环境与背景 + 光线与色调 + 景别与运镜 + 画面风格。画面要具体、可拍摄、有电影感。
-   - 禁止出现字幕、文字、水印、logo、分屏；
-   - 禁止出现 "shot 1"、"scene 2" 这类结构性词语；
-   - 角色外貌用简短且固定的英文短语，避免和上下镜冲突。
+1. ${VIDEO_PROMPT_RULES}
 2. description 不需要你重写（用户已经改好），不要返回它。
-3. shotSize 用中文景别（特写/近景/中景/全景/远景/大远景）；cameraMove 用中文运镜（固定机位/缓慢推近/缓慢拉远/横向移动/环绕/跟随/手持晃动/升格慢动作）。
+3. ${SHOT_LANGUAGE_RULES}
 4. 若提供了角色表，本镜出镜角色的外貌必须与角色表一致；视频提示词里沿用角色表已有的英文外貌短语，不要自行改写年龄、发型、服装与道具。
 5. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；避免与相邻镜头重复同一构图。
 6. narration 是这一镜的旁白或台词，可为空字符串（不要写"旁白："前缀）。
-7. title 是这一镜的小标题，4~8 个字。
-8. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
+7. 若是画面里的角色开口说话，speaker 必须是角色表里的名字；旁白或没有台词时 speaker 留空。
+8. title 是这一镜的小标题，4~8 个字。
+9. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
 JSON 结构：
 {
@@ -44,7 +35,8 @@ JSON 结构：
   "shotSize": "中景",
   "cameraMove": "缓慢推近",
   "videoPrompt": "English prompt for the text-to-video model",
-  "narration": "旁白或台词"
+  "narration": "旁白或台词",
+  "speaker": "说话的角色名，旁白留空"
 }`;
 }
 
@@ -130,8 +122,6 @@ export async function POST(request: Request) {
     });
 
     const obj = (raw ?? {}) as Record<string, unknown>;
-    const shotSize = str(obj.shotSize, '中景');
-    const cameraMove = str(obj.cameraMove, '固定机位');
     const videoPrompt = str(obj.videoPrompt);
 
     if (!videoPrompt) {
@@ -141,10 +131,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       shot: {
         title: str(obj.title),
-        shotSize: SHOT_SIZES.includes(shotSize) ? shotSize : '中景',
-        cameraMove: CAMERA_MOVES.includes(cameraMove) ? cameraMove : '固定机位',
+        shotSize: normalizeShotSize(obj.shotSize),
+        cameraMove: normalizeCameraMove(obj.cameraMove),
         videoPrompt,
-        narration: str(obj.narration),
+        narration: trimNarration(obj.narration, input.duration),
+        speaker: str(obj.speaker) || undefined,
       },
     });
   } catch (err) {

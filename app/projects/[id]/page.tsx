@@ -9,6 +9,17 @@ import ScriptView from '@/components/ScriptView';
 import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
 import { validateMedia } from '@/lib/media';
+import { collectCardMedia, hasManualFirstFrame, resolveShotMedia } from '@/lib/shot-media';
+import {
+  DEFAULT_VIDEO_RATIO,
+  DEFAULT_VIDEO_RESOLUTION,
+  RATIO_LABEL,
+  RESOLUTION_LABEL,
+  VIDEO_RATIOS,
+  VIDEO_RESOLUTIONS,
+  type VideoRatio,
+  type VideoResolution,
+} from '@/lib/video-options';
 import type {
   Character,
   ComposeResult,
@@ -33,10 +44,6 @@ const QUEUE_RETRY_DELAY_MS = 5000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** 自动注入的素材（抽帧或卡片配图），重新排队时会被新素材替换 */
-const isAutoFrame = (url: string) =>
-  url.includes('/api/frames/') || url.startsWith('/api/uploads/');
-
 /**
  * 是否是一个「真的在服务端跑」的任务。
  * 本地乐观任务（local- 前缀 / 没有 providerJobId）永远等不到终态，
@@ -44,96 +51,6 @@ const isAutoFrame = (url: string) =>
  */
 const isServerJob = (job: VideoJob | undefined): job is VideoJob =>
   !!job && !!job.providerJobId && (job.status === 'queued' || job.status === 'running');
-
-/**
- * 上一镜末帧拿不到时（第一镜 / 上一镜没成 / 抽帧失败 / 地址云端不可达），
- * 退回这一镜对应的场景卡 / 角色卡配图，但两者用途不同：
- *
- * - 场景图 → first_frame：场景空镜是一整帧真实构图，当首帧不易被带成棚拍；
- * - 角色图 → reference_image：设定图多半是纯色背景的单人像，只提供外貌参考，
- *   当首帧会把整段视频压成同样的背景。
- */
-function fallbackMedia(shot: Shot, script: Script | null): MediaInput | null {
-  if (!script) return null;
-  const scenes = script.scenes ?? [];
-  const withImage = (items: { name: string; imageUrl?: string }[]) =>
-    items.find((item) => item.name && item.imageUrl);
-
-  // 1. 分镜标注的场景，最准
-  for (const name of shot.sceneNames ?? []) {
-    const hit = scenes.find((scene) => scene.name === name && scene.imageUrl);
-    if (hit?.imageUrl) return { type: 'first_frame', url: hit.imageUrl };
-  }
-
-  // 2. 画面描述里提到过某个场景名
-  const text = [shot.title, shot.description, shot.videoPrompt, shot.narration]
-    .filter(Boolean)
-    .join('\n');
-  const mentioned = scenes.find(
-    (scene) => scene.name && scene.imageUrl && text.includes(scene.name),
-  );
-  if (mentioned?.imageUrl) return { type: 'first_frame', url: mentioned.imageUrl };
-
-  // 3. 任意一张有图的场景卡
-  const anyScene = withImage(scenes);
-  if (anyScene?.imageUrl) return { type: 'first_frame', url: anyScene.imageUrl };
-
-  // 4. 场景图都没有时，退到这一镜出镜角色的配图（只做外貌参考）
-  for (const name of shot.characterNames ?? []) {
-    const hit = script.characters.find(
-      (character) => character.name === name && character.imageUrl,
-    );
-    if (hit?.imageUrl) return { type: 'reference_image', url: hit.imageUrl };
-  }
-
-  return null;
-}
-
-/**
- * 决定这一镜的衔接素材：上一镜末帧优先，没有则退回场景卡 / 角色卡配图。
- * - 用户手选的首帧优先，不覆盖；
- * - 首帧与参考素材 / 文档 / 网页互斥，有这些素材时不注入；
- * - 上一轮自动注入的素材先摘掉，否则旧的自动参考图会把后来才有的末帧挡在外面。
- */
-function withCarryFrame(
-  media: MediaInput[],
-  carry: MediaInput | null,
-  fallback: MediaInput | null,
-): { next: MediaInput[]; source: 'carry' | 'fallback' | null; injected: MediaInput | null } {
-  const manualFirst = media.some((item) => item.type === 'first_frame' && !isAutoFrame(item.url));
-  if (manualFirst) return { next: media, source: null, injected: null };
-
-  // 上一轮自动补的素材，这一轮重新决定：抽出的末帧一律重抽，
-  // 卡片配图只认「这一轮算出来的那张」（用户手选的其他图保持不动）
-  const rest = media.filter((item) => {
-    if (item.type === 'first_frame' && item.url.includes('/api/frames/')) return false;
-    if (fallback && item.url === fallback.url) return false;
-    return true;
-  });
-
-  const hasReference = rest.some(
-    (item) => item.type !== 'first_frame' && item.type !== 'last_frame',
-  );
-  if (hasReference) return { next: media, source: null, injected: null };
-
-  const injected = carry ?? fallback;
-  if (!injected) return { next: media, source: null, injected: null };
-
-  // 尾帧和参考素材互斥：用户已经指定了尾帧，就不再塞参考图
-  if (injected.type === 'reference_image' && rest.some((item) => item.type === 'last_frame')) {
-    return { next: media, source: null, injected: null };
-  }
-
-  return {
-    next: [injected, ...rest],
-    source: carry ? 'carry' : 'fallback',
-    injected,
-  };
-}
-
-/** 自动注入的素材在提示里的叫法 */
-const injectedLabel = (media: MediaInput | null) =>
-  media?.type === 'reference_image' ? '参考图' : '首帧';
 
 function ProjectPageInner() {
   const params = useParams<{ id: string }>();
@@ -448,6 +365,11 @@ function ProjectPageInner() {
     setScript((prev) => (prev ? { ...prev, title } : prev));
   }, []);
 
+  /** 整体画风：角色卡 / 场景卡配图与分镜提示词都用它，改完重新生成配图即可对齐 */
+  const handleStyleChange = useCallback((style: string) => {
+    setScript((prev) => (prev ? { ...prev, style } : prev));
+  }, []);
+
   /**
    * 手动在剧本末尾加一镜：只插入空白骨架，
    * 内容由用户自己写（改完走既有的防抖自动保存落库）。
@@ -548,7 +470,7 @@ function ProjectPageInner() {
         error: null,
         prompt,
         duration: shot.duration,
-        resolution: health?.video.resolution ?? '720p',
+        resolution: project?.resolution ?? DEFAULT_VIDEO_RESOLUTION,
         media,
         createdAt: now,
         updatedAt: now,
@@ -560,6 +482,9 @@ function ProjectPageInner() {
           shotId: shot.id,
           prompt,
           duration: shot.duration,
+          // 画幅 / 画质按项目设置提交，服务端再校验一次
+          ratio: project?.ratio,
+          resolution: project?.resolution,
           media,
         });
         setJobs((prev) => ({ ...prev, [shot.id]: job }));
@@ -578,7 +503,7 @@ function ProjectPageInner() {
         return { job: null, retryable: true };
       }
     },
-    [health, projectId, showToast],
+    [health, project, projectId, showToast],
   );
 
   /** 轮询单个任务直到终态（或超时 / 连续查不到） */
@@ -642,9 +567,9 @@ function ProjectPageInner() {
   );
 
   /**
-   * 单镜生成：这一镜打开了「承接上一镜」才抽上一镜末帧，
-   * 没有可用的末帧时退回场景卡首帧 / 角色卡参考图。
-   * 与串行队列走同一套衔接素材决策。
+   * 单镜生成：这一镜打开了「承接上一镜」才抽上一镜末帧；
+   * 没有可用末帧时挂上本镜的角色卡 / 场景卡参考图。
+   * 与串行队列走同一套镜头素材决策（lib/shot-media）。
    */
   const handleGenerateOne = useCallback(
     async (shot: Shot) => {
@@ -656,9 +581,7 @@ function ProjectPageInner() {
       const live = list.find((item) => item.id === shot.id) ?? shot;
 
       /** 用户已经手选首帧时承接开关没有意义，省掉一次下载 + 抽帧 */
-      const manualFirst = (live.media ?? []).some(
-        (item) => item.type === 'first_frame' && !isAutoFrame(item.url),
-      );
+      const manualFrame = hasManualFirstFrame(live.media ?? [], current);
 
       /**
        * 承接开关默认关闭，只有显式打开才抽帧；
@@ -666,7 +589,7 @@ function ProjectPageInner() {
        */
       let carry: MediaInput | null = null;
       if (
-        !manualFirst &&
+        !manualFrame &&
         index > 0 &&
         live.continueFromPrev &&
         prevJob?.status === 'succeeded' &&
@@ -677,18 +600,19 @@ function ProjectPageInner() {
         carry = await extractCarryFrame(prevJob.videoUrl);
       }
 
-      const injected = withCarryFrame(live.media ?? [], carry, fallbackMedia(live, current));
+      const resolved = resolveShotMedia(
+        live.media ?? [],
+        carry,
+        collectCardMedia(live, current),
+        current,
+      );
 
-      if (injected.source === 'fallback') {
-        showToast(
-          live.continueFromPrev
-            ? `这一镜没有可用的上一镜末帧，已用配图作为${injectedLabel(injected.injected)}`
-            : `已用配图作为${injectedLabel(injected.injected)}`,
-        );
+      if (resolved.source === 'cards' && !carry && live.continueFromPrev) {
+        showToast('这一镜没有可用的上一镜末帧，已改用角色 / 场景卡作为参考图');
       }
-      if (injected.source) handleShotChange(shot.id, { media: injected.next });
+      if (resolved.changed) handleShotChange(shot.id, { media: resolved.next });
 
-      await generateShot(live, injected.next);
+      await generateShot(live, resolved.next);
     },
     [extractCarryFrame, generateShot, handleShotChange, showToast],
   );
@@ -792,15 +716,14 @@ function ProjectPageInner() {
                 (finished.status === 'succeeded' ? '任务没有返回视频地址' : '等待生成超时');
               console.warn('[queue] 已有任务未完成', label, finished.status, reason);
             } else {
-              // 上一镜末帧优先，没有则退回场景卡 / 角色卡配图；用户手选的首帧仍优先
-              const live = scriptRef.current?.shots.find((item) => item.id === shot.id) ?? shot;
+              // 上一镜末帧优先，没有则用角色卡 / 场景卡参考图；用户手选的首尾帧仍优先
+              const currentScript = scriptRef.current;
+              const live = currentScript?.shots.find((item) => item.id === shot.id) ?? shot;
 
               // 承接开关默认关闭：只有这一镜显式打开，才为它抽上一镜的末帧
-              const manualFirst = (live.media ?? []).some(
-                (item) => item.type === 'first_frame' && !isAutoFrame(item.url),
-              );
+              const manualFrame = hasManualFirstFrame(live.media ?? [], currentScript);
               let carry: MediaInput | null = null;
-              if (!manualFirst && i > 0 && live.continueFromPrev && prevVideoUrl) {
+              if (!manualFrame && i > 0 && live.continueFromPrev && prevVideoUrl) {
                 setQueueInfo(`第 ${i + 1}/${shots.length} 镜 · ${label}（抽取上一镜末帧）`);
                 carry = await extractCarryFrame(prevVideoUrl);
               }
@@ -811,19 +734,24 @@ function ProjectPageInner() {
                 break;
               }
 
-              const injected = withCarryFrame(
+              const resolved = resolveShotMedia(
                 live.media ?? [],
                 carry,
-                fallbackMedia(live, scriptRef.current),
+                collectCardMedia(live, currentScript),
+                currentScript,
               );
-              if (injected.source === 'fallback') {
+              if (resolved.source === 'carry' && resolved.skippedCards > 0) {
                 setQueueInfo(
-                  `第 ${i + 1}/${shots.length} 镜 · ${label}（用配图当${injectedLabel(injected.injected)}）`,
+                  `第 ${i + 1}/${shots.length} 镜 · ${label}（承接上一镜末帧，跳过 ${resolved.skippedCards} 张卡片参考图）`,
+                );
+              } else if (resolved.source === 'cards' && live.continueFromPrev && !carry) {
+                setQueueInfo(
+                  `第 ${i + 1}/${shots.length} 镜 · ${label}（无可用末帧，改用卡片参考图）`,
                 );
               }
-              if (injected.source) handleShotChange(shot.id, { media: injected.next });
+              if (resolved.changed) handleShotChange(shot.id, { media: resolved.next });
 
-              const created = await generateShot(live, injected.next);
+              const created = await generateShot(live, resolved.next);
               if (!created.job) {
                 // 具体原因 generateShot 里已经 toast 过；只有请求类错误才值得重试
                 reason = created.retryable ? '创建任务请求失败' : '任务被本地校验拦下';
@@ -972,7 +900,11 @@ function ProjectPageInner() {
     setComposeState('running');
     setComposeError(null);
     try {
-      const result = await api.compose(shotIds);
+      // 导出尺寸按项目画幅 / 画质，避免竖屏项目导出成横屏
+      const result = await api.compose(shotIds, {
+        ratio: project?.ratio,
+        resolution: project?.resolution,
+      });
       setComposeResult(result);
       setComposeState('done');
       showToast(`已合成 ${result.clips} 个镜头`);
@@ -982,7 +914,7 @@ function ProjectPageInner() {
       setComposeState('error');
       showToast(message, 'error');
     }
-  }, [script, jobs, composeState, showToast]);
+  }, [script, jobs, composeState, project, showToast]);
 
   /* 切换到本项目下的另一份剧本 */
   const handleSelectScript = useCallback(
@@ -1033,6 +965,30 @@ function ProjectPageInner() {
     }
   }, [project, projectName, projectId, showToast]);
 
+  /**
+   * 画幅 / 画质：创建项目时选定，这里允许就地修改。
+   * 只影响之后提交的镜头和合成导出，已经生成好的视频不会重跑。
+   */
+  const saveProjectVideoSettings = useCallback(
+    async (patch: { ratio?: VideoRatio; resolution?: VideoResolution }) => {
+      if (!project) return;
+      const previous = project;
+      setProject({ ...project, ...patch });
+      try {
+        const { project: saved } = await api.updateProject(projectId, patch);
+        setProject(saved);
+        showToast('画幅 / 画质已更新，后续生成的镜头按新设置执行');
+      } catch (err) {
+        setProject(previous);
+        showToast(
+          `保存设置失败：${err instanceof Error ? err.message : String(err)}`,
+          'error',
+        );
+      }
+    },
+    [project, projectId, showToast],
+  );
+
   if (loadState === 'missing') {
     return (
       <div className="app">
@@ -1063,6 +1019,37 @@ function ProjectPageInner() {
           placeholder="项目名称"
           aria-label="项目名称"
         />
+        <span className="topbar-sep" />
+        <select
+          className="select topbar-select"
+          value={project?.ratio ?? DEFAULT_VIDEO_RATIO}
+          onChange={(e) => void saveProjectVideoSettings({ ratio: e.target.value as VideoRatio })}
+          disabled={!project}
+          title="画幅比例：之后提交的镜头按这个比例出片；带首帧 / 尾帧的镜头跟随素材比例"
+          aria-label="画幅比例"
+        >
+          {VIDEO_RATIOS.map((value) => (
+            <option key={value} value={value}>
+              {RATIO_LABEL[value]}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select topbar-select"
+          value={project?.resolution ?? DEFAULT_VIDEO_RESOLUTION}
+          onChange={(e) =>
+            void saveProjectVideoSettings({ resolution: e.target.value as VideoResolution })
+          }
+          disabled={!project}
+          title="画质：之后提交的镜头按这个档位生成；合成导出尺寸也跟着它"
+          aria-label="画质"
+        >
+          {VIDEO_RESOLUTIONS.map((value) => (
+            <option key={value} value={value}>
+              {RESOLUTION_LABEL[value]}
+            </option>
+          ))}
+        </select>
       </TopBar>
 
       <main className="workspace workspace--single">
@@ -1093,6 +1080,7 @@ function ProjectPageInner() {
             onNewScript={handleNewScript}
             onDeleteScript={handleDeleteScript}
             onScriptTitleChange={handleScriptTitleChange}
+            onStyleChange={handleStyleChange}
             onEditIdea={handleEditIdea}
             onRecreateIdea={handleRecreateIdea}
             carryMuted={health ? health.video.audio && !health.video.audioOnCarry : true}

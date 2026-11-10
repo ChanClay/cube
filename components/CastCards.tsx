@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/client';
 import type { Character, Scene } from '@/lib/types';
 
@@ -40,6 +40,8 @@ interface Props {
   disabled?: boolean;
   onCharactersChange: (next: Character[]) => void;
   onScenesChange: (next: Scene[]) => void;
+  /** 传入后才显示「整体画风」编辑框 */
+  onStyleChange?: (style: string) => void;
 }
 
 /** 旧剧本的角色 / 场景没有 id，退化成按位置生成 */
@@ -55,7 +57,10 @@ export default function CastCards({
   disabled = false,
   onCharactersChange,
   onScenesChange,
+  onStyleChange,
 }: Props) {
+  /** 「整体画风」输入框的草稿值，失焦或回车时提交 */
+  const [styleDraft, setStyleDraft] = useState(style);
   /** 正在生成 / 上传的卡片 key */
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +69,28 @@ export default function CastCards({
     character: null,
     scene: null,
   });
+  /** 大图查看器；null 表示关闭 */
+  const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null);
+
+  // 查看大图时锁滚动，Esc 关闭；关闭后恢复原来的滚动状态
+  useEffect(() => {
+    if (!viewer) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewer(null);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [viewer]);
+
+  // 切换剧本 / 重新生成剧本后同步草稿，避免输入框留着上一份剧本的风格
+  useEffect(() => {
+    setStyleDraft(style);
+  }, [style]);
 
   const listOf = (kind: Kind): Card[] => (kind === 'character' ? characters : scenes);
 
@@ -177,19 +204,36 @@ export default function CastCards({
               const isOpen = current === key;
               const initial = nameOf(item).slice(0, 1);
               return (
-                <button
+                <div
                   key={key}
-                  type="button"
                   className={`cast-chip${isOpen ? ' is-open' : ''}`}
+                  role="button"
+                  tabIndex={0}
                   aria-expanded={isOpen}
                   onClick={() => toggle(kind, key)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggle(kind, key);
+                    }
+                  }}
                   title={item.desc || `点开编辑${LABEL[kind]}`}
                 >
-                  <span className="cast-chip-thumb">
+                  <span
+                    className={`cast-chip-thumb${item.imageUrl ? ' is-viewable' : ''}`}
+                    aria-hidden="true"
+                    title={item.imageUrl ? '点击查看大图' : undefined}
+                    onClick={(e) => {
+                      // 点缩略图看大图，点名字仍然展开编辑
+                      if (!item.imageUrl) return;
+                      e.stopPropagation();
+                      setViewer({ src: item.imageUrl, alt: nameOf(item) });
+                    }}
+                  >
                     {item.imageUrl ? <img src={item.imageUrl} alt="" /> : initial}
                   </span>
                   <span className="cast-chip-name">{nameOf(item)}</span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -208,7 +252,19 @@ export default function CastCards({
                 <div className="cast-thumb">
                   {hasImage ? (
                     <>
-                      <img src={item.imageUrl} alt={item.name || '配图'} />
+                      <button
+                        className="cast-thumb-view"
+                        type="button"
+                        onClick={() => {
+                          if (item.imageUrl) {
+                            setViewer({ src: item.imageUrl, alt: nameOf(item) });
+                          }
+                        }}
+                        title="点击查看大图"
+                        aria-label="查看大图"
+                      >
+                        <img src={item.imageUrl} alt={item.name || '配图'} />
+                      </button>
                       <button
                         className="cast-thumb-clear"
                         type="button"
@@ -296,9 +352,59 @@ export default function CastCards({
 
   return (
     <>
+      {onStyleChange && (
+        <div className="cast-style">
+          <span className="cast-style-label">整体画风</span>
+          <input
+            className="cast-style-input"
+            value={styleDraft}
+            onChange={(e) => setStyleDraft(e.target.value)}
+            onBlur={() => {
+              const next = styleDraft.trim();
+              if (next !== style.trim()) onStyleChange(next);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+            placeholder="例如：1990 年代港片胶片质感，暖调霓虹，轻微颗粒，浅景深"
+            aria-label="整体画风"
+            title="生成角色卡 / 场景卡配图时作为画面风格（严格遵循）；改完重新生成配图即可对齐画风"
+            disabled={disabled}
+          />
+        </div>
+      )}
+
       {error && <div className="cast-error">{error}</div>}
       {renderSection('character')}
       {renderSection('scene')}
+
+      {viewer && (
+        <div
+          className="image-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={viewer.alt || '查看大图'}
+          onClick={() => setViewer(null)}
+        >
+          <button
+            className="image-viewer-close"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewer(null);
+            }}
+            aria-label="关闭大图"
+            autoFocus
+          >
+            ×
+          </button>
+          <img
+            src={viewer.src}
+            alt={viewer.alt}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </>
   );
 }

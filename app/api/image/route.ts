@@ -1,6 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
+import {
+  CARD_IMAGE_SIZE,
+  CARD_NEGATIVE_PROMPT,
+  buildCardPrompt,
+} from '@/lib/image-prompt';
 import { generateImage } from '@/lib/providers/image/wan-image';
 import { UPLOAD_DIR } from '@/lib/uploads';
 import type { ProjectMedia } from '@/lib/types';
@@ -8,27 +13,6 @@ import type { ProjectMedia } from '@/lib/types';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
-
-/** 角色用竖构图，场景用横构图（万相 2.6 推荐的 3:4 / 16:9 档位） */
-const SIZE_BY_KIND = {
-  character: '1104*1472',
-  scene: '1696*960',
-} as const;
-
-/** 卡片类型决定的构图补充词，避免出图跑偏成海报或多人合影 */
-const FRAMING = {
-  character: '角色设定图，单人主体居中，全身正面，纯色简洁背景，无文字无水印',
-  scene: '场景空镜，无人物，广角电影感构图，光线自然，无文字无水印',
-} as const;
-
-const NEGATIVE = '文字, 水印, logo, 分屏, 畸形肢体, 多余手指, 低清晰度';
-
-function buildPrompt(prompt: string, kind: 'character' | 'scene', style: string): string {
-  const parts = [prompt.trim()];
-  if (style.trim()) parts.push(`整体视觉风格：${style.trim()}`);
-  parts.push(FRAMING[kind]);
-  return parts.join('。').slice(0, 2000);
-}
 
 /** 从临时 URL 的扩展名推断图片格式，拿不到就按 PNG 处理 */
 function extensionOf(url: string): string {
@@ -70,9 +54,10 @@ export async function POST(request: Request) {
 
   try {
     const remoteUrl = await generateImage({
-      prompt: buildPrompt(prompt, kind, style),
-      size: SIZE_BY_KIND[kind],
-      negativePrompt: NEGATIVE,
+      // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/image-prompt
+      prompt: buildCardPrompt({ kind, prompt, style }),
+      size: CARD_IMAGE_SIZE[kind],
+      negativePrompt: CARD_NEGATIVE_PROMPT,
     });
 
     const res = await fetch(remoteUrl, { signal: AbortSignal.timeout(120_000) });

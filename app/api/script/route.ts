@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { generateScript } from '@/lib/agents/storyboard';
+import { MAX_NOVEL_CHARS, MIN_NOVEL_CHARS } from '@/lib/shot-plan';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,23 @@ export async function POST(request: Request) {
 
   const payload = (body ?? {}) as Record<string, unknown>;
   const idea = typeof payload.idea === 'string' ? payload.idea.trim() : '';
-  if (idea.length < 4) {
+  /** 缺省仍按短创意处理，保持老调用方行为 */
+  const source = payload.source === 'novel' ? 'novel' : 'idea';
+
+  if (source === 'novel') {
+    if (idea.length < MIN_NOVEL_CHARS) {
+      return NextResponse.json(
+        { error: `小说片段至少 ${MIN_NOVEL_CHARS} 字，太短请直接当故事创意写` },
+        { status: 400 },
+      );
+    }
+    if (idea.length > MAX_NOVEL_CHARS) {
+      return NextResponse.json(
+        { error: `单次改编最多 ${MAX_NOVEL_CHARS} 字，请先选一章或分段生成` },
+        { status: 400 },
+      );
+    }
+  } else if (idea.length < 4) {
     return NextResponse.json({ error: '请至少输入 4 个字的创意描述' }, { status: 400 });
   }
 
@@ -29,15 +46,19 @@ export async function POST(request: Request) {
   const ensureCompleteness = payload.ensureCompleteness !== false;
 
   try {
-    const script = await generateScript({
+    const result = await generateScript({
       idea,
+      source,
       style,
       mode,
       shotCount: Number.isFinite(shotCount) ? shotCount : undefined,
       duration: Number.isFinite(duration) ? duration : undefined,
       ensureCompleteness,
     });
-    return NextResponse.json({ script, meta: { model: config.llm.model } });
+    return NextResponse.json({
+      script: result.script,
+      meta: { model: config.llm.model, adaptedIdea: result.adaptedIdea },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const status = message.includes('未配置 LLM_API_KEY') ? 400 : 502;

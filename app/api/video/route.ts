@@ -3,6 +3,7 @@ import { config } from '@/lib/config';
 import { absolutizeMediaUrl, sanitizeMedia, validateMedia } from '@/lib/media';
 import { listJobs } from '@/lib/store';
 import { syncAllJobs, startVideoJob } from '@/lib/video-service';
+import { normalizeRatio, normalizeResolution } from '@/lib/video-options';
 import type { MediaInput } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -50,7 +51,12 @@ export async function POST(request: Request) {
   const shotId = typeof payload.shotId === 'string' ? payload.shotId.trim() : '';
   const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
   const duration = Number(payload.duration);
-  const resolution = typeof payload.resolution === 'string' ? payload.resolution.trim() : '';
+
+  // 画幅 / 画质来自项目设置；没传（老客户端）时回落到全局 VIDEO_* 配置
+  const rawResolution = typeof payload.resolution === 'string' ? payload.resolution.trim() : '';
+  const rawRatio = typeof payload.ratio === 'string' ? payload.ratio.trim() : '';
+  const resolution = rawResolution ? normalizeResolution(rawResolution) : undefined;
+  const ratio = rawRatio ? normalizeRatio(rawRatio) : undefined;
 
   if (!shotId) return NextResponse.json({ error: '缺少 shotId' }, { status: 400 });
   if (prompt.length < 5) {
@@ -75,7 +81,8 @@ export async function POST(request: Request) {
     shotId,
     prompt,
     duration: Number.isFinite(duration) ? duration : undefined,
-    resolution: resolution || undefined,
+    resolution,
+    ratio,
     media: dedupeMedia(media),
   });
 

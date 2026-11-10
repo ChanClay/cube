@@ -21,17 +21,17 @@ type Mode = 'new' | 'edit' | 'copy';
 const HEAD_TEXT: Record<Mode, { title: string; desc: string; submit: string }> = {
   new: {
     title: '写下这个故事',
-    desc: '填写创意并生成分镜，剧本会自动保存到这个项目下。',
+    desc: '填写创意或粘贴小说 / 章节，生成分镜后自动保存到这个项目下。',
     submit: '生成剧本',
   },
   edit: {
     title: '编辑故事创意',
-    desc: '修改创意后重新生成，会用新分镜覆盖这份剧本的内容。',
+    desc: '修改创意或原文后重新生成，会用新分镜覆盖这份剧本的内容。',
     submit: '重新生成剧本',
   },
   copy: {
     title: '另存为新剧本',
-    desc: '这份剧本已经生成过视频，所以会带着当前创意新建一份。',
+    desc: '这份剧本已经生成过视频，所以会带着当前素材新建一份。',
     submit: '生成新剧本',
   },
 };
@@ -135,8 +135,9 @@ function IdeaPageInner() {
       setSubmitting(true);
       setError(null);
       try {
-        const { script: generated } = await api.createScript({
+        const { script: generated, meta } = await api.createScript({
           idea: formParams.idea,
+          source: formParams.source,
           style: formParams.style,
           mode: formParams.mode,
           shotCount: formParams.shotCount,
@@ -152,10 +153,16 @@ function IdeaPageInner() {
         const keepTitle = mode === 'edit' && customTitle.length > 0 && customTitle !== NEW_SCRIPT_TITLE;
         const next: Script = keepTitle ? { ...generated, title: customTitle } : generated;
 
+        /**
+         * 小说改编只保存压缩后的梗概：整章原文既塞不进剧本信息，
+         * 下次「编辑创意」时也不需要重新面对几万字。
+         */
+        const savedIdea = meta?.adaptedIdea?.trim() || formParams.idea;
+
         const { script: saved } = await api.saveScript({
           id: mode === 'edit' ? (editId ?? undefined) : undefined,
           projectId,
-          idea: formParams.idea,
+          idea: savedIdea,
           script: next,
         });
 

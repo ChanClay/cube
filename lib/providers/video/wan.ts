@@ -111,6 +111,15 @@ export class WanProvider implements VideoProvider {
     const url = `${this.baseUrl}/services/aigc/video-generation/video-synthesis`;
     const media = input.media ?? [];
 
+    /**
+     * 带首帧 / 尾帧时画面比例由素材决定，显式传比例会和素材冲突（裁切或直接拒单），
+     * 所以这类镜头固定用 adaptive；其余镜头跟随项目选的画幅。
+     */
+    const hasFrame = media.some(
+      (item) => item.type === 'first_frame' || item.type === 'last_frame',
+    );
+    const ratio = hasFrame ? DEFAULT_RATIO : toRatio(input.ratio || config.video.ratio);
+
     const body = {
       model: this.model,
       input: {
@@ -119,7 +128,7 @@ export class WanProvider implements VideoProvider {
       },
       parameters: {
         resolution: toResolution(input.resolution),
-        ratio: toRatio(config.video.ratio),
+        ratio,
         duration: toDuration(input.duration),
         prompt_extend: config.video.promptExtend,
         // 单个任务可以覆盖全局开关：承接上一镜末帧的镜头不出声，避免音频断档

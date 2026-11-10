@@ -81,6 +81,8 @@ const SCHEMA = [
     user_id     VARCHAR(64)  NULL,
     name        VARCHAR(255) NOT NULL DEFAULT '',
     description TEXT         NULL,
+    ratio       VARCHAR(16)  NOT NULL DEFAULT '16:9',
+    resolution  VARCHAR(16)  NOT NULL DEFAULT '480p',
     media_json  LONGTEXT     NULL,
     groups_json LONGTEXT     NULL,
     created_at  BIGINT       NOT NULL,
@@ -174,6 +176,14 @@ async function migrate(pool: Pool): Promise<void> {
     'ALTER TABLE video_jobs ADD COLUMN media_json TEXT NULL AFTER resolution',
   );
   await ensureColumn('ALTER TABLE projects ADD COLUMN groups_json LONGTEXT NULL AFTER media_json');
+
+  // 画幅 / 画质改为项目级设置（旧库补列，老项目落到默认值）
+  await ensureColumn(
+    "ALTER TABLE projects ADD COLUMN ratio VARCHAR(16) NOT NULL DEFAULT '16:9' AFTER description",
+  );
+  await ensureColumn(
+    "ALTER TABLE projects ADD COLUMN resolution VARCHAR(16) NOT NULL DEFAULT '480p' AFTER ratio",
+  );
 
   // 账号系统：三张业务表都挂上归属，旧数据先留 NULL，由第一个注册账号接管
   await ensureColumn('ALTER TABLE projects ADD COLUMN user_id VARCHAR(64) NULL AFTER id');

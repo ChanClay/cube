@@ -105,7 +105,10 @@ async function request<T>(url: string, init?: RequestInitWithTimeout): Promise<T
 }
 
 export interface ScriptBody {
+  /** 故事创意；source=novel 时是小说 / 章节原文 */
   idea: string;
+  /** idea=短创意（缺省），novel=小说 / 章节原文，服务端会先压缩改编 */
+  source?: 'idea' | 'novel';
   style: string;
   /** shots=按镜头数（缺省），duration=按视频总时长反推镜头数 */
   mode?: 'shots' | 'duration';
@@ -120,6 +123,9 @@ export interface VideoBody {
   shotId: string;
   prompt: string;
   duration: number;
+  /** 画幅 / 画质：取项目设置，缺省由服务端回落全局配置 */
+  ratio?: string;
+  resolution?: string;
   media?: MediaInput[];
 }
 
@@ -133,6 +139,18 @@ export interface SaveScriptBody {
 export interface UpdateProjectBody {
   name?: string;
   description?: string;
+  /** 画幅比例，见 lib/video-options */
+  ratio?: string;
+  /** 画质档位，见 lib/video-options */
+  resolution?: string;
+}
+
+/** 新建项目时的画幅 / 画质选择 */
+export interface CreateProjectBody {
+  name?: string;
+  description?: string;
+  ratio?: string;
+  resolution?: string;
 }
 
 /** 角色卡 / 场景卡的一键配图 */
@@ -160,7 +178,7 @@ export interface RefineShotBody {
 /** 重算后可变的字段，description 由用户自己维护 */
 export type RefinedShot = Pick<
   Shot,
-  'title' | 'shotSize' | 'cameraMove' | 'videoPrompt' | 'narration'
+  'title' | 'shotSize' | 'cameraMove' | 'videoPrompt' | 'narration' | 'speaker'
 >;
 
 /** 从已生成的视频里抽一帧，交给下一镜当首帧 */
@@ -214,7 +232,10 @@ export const api = {
   },
 
   createScript: (body: ScriptBody) =>
-    request<{ script: Script }>('/api/script', { method: 'POST', body: JSON.stringify(body) }),
+    request<{ script: Script; meta?: { model: string; adaptedIdea?: string } }>('/api/script', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   saveScript: (body: SaveScriptBody) =>
     request<{ script: StoredScript }>('/api/scripts', {
@@ -235,7 +256,7 @@ export const api = {
 
   listProjects: () => request<{ projects: ProjectSummary[] }>('/api/projects'),
 
-  createProject: (body: { name?: string; description?: string } = {}) =>
+  createProject: (body: CreateProjectBody = {}) =>
     request<{ project: Project }>('/api/projects', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -311,10 +332,10 @@ export const api = {
       timeoutMs: 180_000,
     }),
 
-  /** 把多个镜头视频合成为一个完整视频 */
-  compose: (shotIds: string[]) =>
+  /** 把多个镜头视频合成为一个完整视频，导出尺寸按项目画幅 / 画质 */
+  compose: (shotIds: string[], size: { ratio?: string; resolution?: string } = {}) =>
     request<ComposeResult>('/api/compose', {
       method: 'POST',
-      body: JSON.stringify({ shotIds }),
+      body: JSON.stringify({ shotIds, ...size }),
     }),
 };

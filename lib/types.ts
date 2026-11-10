@@ -1,3 +1,5 @@
+import type { VideoRatio, VideoResolution } from './video-options';
+
 /**
  * canceled：用户主动「放弃本镜」。只停本地跟踪，provider 上的任务仍会跑完，
  * 结果不再回收（接口没有取消能力）。
@@ -22,6 +24,11 @@ export type MediaType =
 export interface MediaInput {
   type: MediaType;
   url: string;
+  /**
+   * 由镜头素材关联自动挂上的素材（抽帧承接、角色卡 / 场景卡参考图）。
+   * 每次生成前会先摘掉重算，用户手选的素材不会有这个标记。
+   */
+  auto?: boolean;
 }
 
 export interface Character {
@@ -72,6 +79,12 @@ export interface Shot {
   narration: string;
   /** 这一镜台词的处理方式，见 NarrationType */
   narrationType?: NarrationType;
+  /**
+   * 说这句台词的角色名（仅 narrationType=dialogue 时有效）。
+   * 对应 Script.characters，必须同时出现在本镜的 characterNames 里，
+   * 否则视频模型不知道画面里该由谁开口。
+   */
+  speaker?: string;
   /** 这一镜出场的角色名（对应 Script.characters） */
   characterNames?: string[];
   /**
@@ -142,6 +155,10 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  /** 画幅比例：创建项目时选定，生成视频时按它提交 */
+  ratio: VideoRatio;
+  /** 画质档位：创建项目时选定，默认 480p */
+  resolution: VideoResolution;
   createdAt: number;
   updatedAt: number;
 }
@@ -151,6 +168,8 @@ export interface ProjectSummary {
   name: string;
   description: string;
   scriptCount: number;
+  ratio: VideoRatio;
+  resolution: VideoResolution;
   createdAt: number;
   updatedAt: number;
 }

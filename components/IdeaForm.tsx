@@ -1,19 +1,25 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
+  MAX_NOVEL_CHARS,
   MAX_SHOT_SECONDS,
   MAX_TOTAL_SECONDS,
+  MIN_NOVEL_CHARS,
   MIN_SHOT_SECONDS,
   MIN_TOTAL_SECONDS,
   splitByDuration,
   type ScriptMode,
 } from '@/lib/shot-plan';
+import { STYLE_LABELS } from '@/lib/style-presets';
 
-const STYLES = ['电影感写实', '日系动画', '3D 动画', '水墨国风', '赛博朋克', '复古胶片', '二维插画'];
+/** 预设风格标签（明细描述见 lib/style-presets，生成时自动展开） */
+const STYLES = STYLE_LABELS;
 
 export interface ScriptParams {
   idea: string;
+  /** idea=短创意；novel=小说 / 章节原文，由服务端先压缩改编 */
+  source: 'idea' | 'novel';
   style: string;
   /** 分镜方式：按镜头数 / 按总时长 */
   mode: ScriptMode;
@@ -62,6 +68,7 @@ export default function IdeaForm({
   onLoadDemo,
 }: Props) {
   const [idea, setIdea] = useState(initialIdea);
+  const [source, setSource] = useState<'idea' | 'novel'>('idea');
   const [style, setStyle] = useState(initialStyle || STYLES[0]);
   const [mode, setMode] = useState<ScriptMode>('shots');
   const [shotCount, setShotCount] = useState(initialShotCount ?? 6);
@@ -69,6 +76,19 @@ export default function IdeaForm({
   const [totalDuration, setTotalDuration] = useState(60);
   /** 默认开启：宁可少切几刀，也别把故事切碎 */
   const [ensureCompleteness, setEnsureCompleteness] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /** 导入 txt / md：直接切到小说模式，超长由下方提示拦下 */
+  const importTextFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setSource('novel');
+      setIdea(text.trim());
+    } catch {
+      window.alert('读取文件失败，请重试或直接粘贴原文');
+    }
+  };
 
   useEffect(() => {
     setIdea(initialIdea);
@@ -86,18 +106,23 @@ export default function IdeaForm({
     if (initialShotDuration) setShotDuration(initialShotDuration);
   }, [initialShotDuration]);
 
-  const ready = idea.trim().length >= 4 && !loading;
+  const ideaLength = idea.trim().length;
+  const minChars = source === 'novel' ? MIN_NOVEL_CHARS : 4;
+  const tooLong = source === 'novel' && ideaLength > MAX_NOVEL_CHARS;
+  const ready = ideaLength >= minChars && !tooLong && !loading;
 
   const submit = () => {
     if (!ready) return;
     onGenerate({
       idea: idea.trim(),
+      source,
       style,
-      mode,
+      // 小说模式下镜头数 / 时长交给剧本模型，下面这些字段只用于兼容旧接口
+      mode: source === 'novel' ? 'duration' : mode,
       shotCount,
       shotDuration,
       totalDuration,
-      ensureCompleteness,
+      ensureCompleteness: source === 'novel' ? false : ensureCompleteness,
     });
   };
 
@@ -145,22 +170,66 @@ export default function IdeaForm({
             </div>
           )}
 
+          <div className="field">
+            <div className="field-label">
+              素材类型
+              <span className="field-hint">
+                {source === 'novel' ? '先压缩成一条主线，再分镜' : '一段创意 / 梗概'}
+              </span>
+            </div>
+            <div className="seg" role="tablist" aria-label="素材类型">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={source === 'idea'}
+                className={`seg-btn${source === 'idea' ? ' is-active' : ''}`}
+                onClick={() => setSource('idea')}
+                disabled={loading}
+              >
+                故事创意
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={source === 'novel'}
+                className={`seg-btn${source === 'novel' ? ' is-active' : ''}`}
+                onClick={() => setSource('novel')}
+                disabled={loading}
+              >
+                小说 / 章节
+              </button>
+            </div>
+          </div>
+
           <div className="field idea-idea-field">
             <label className="field-label" htmlFor="idea">
-              故事创意
-              <span className="field-hint">{idea.trim().length} 字</span>
+              {source === 'novel' ? '小说 / 章节原文' : '故事创意'}
+              <span className={`field-hint${tooLong ? ' field-hint--error' : ''}`}>
+                {ideaLength} 字
+              </span>
             </label>
             <textarea
               id="idea"
               className="textarea"
-              rows={10}
+              rows={source === 'novel' ? 14 : 10}
               value={idea}
               onChange={(e) => setIdea(e.target.value)}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit();
               }}
-              placeholder={`写一个故事想法，越具体越好。例如：\n\n暴雨夜的灯塔里，一位老守塔人发现海面上有一艘本该十年前就沉没的渔船正在靠近，他点亮了最后一束灯光……`}
+              placeholder={
+                source === 'novel'
+                  ? `粘贴一章或一段完整故事，建议 ${MIN_NOVEL_CHARS}~${MAX_NOVEL_CHARS} 字。\n\n系统会先保留一条主线、2~4 个人物、关键转折与结局，再拆成 6 分钟内的分镜。副线、次要人物和过场会被删掉。`
+                  : `写一个故事想法，越具体越好。例如：\n\n暴雨夜的灯塔里，一位老守塔人发现海面上有一艘本该十年前就沉没的渔船正在靠近，他点亮了最后一束灯光……`
+              }
             />
+            {source === 'novel' && (
+              <div className={`field-hint${tooLong ? ' field-hint--error' : ''}`} style={{ marginTop: 7 }}>
+                {tooLong
+                  ? `超出单次改编上限（${MAX_NOVEL_CHARS} 字），请先选一章或分段生成`
+                  : `支持粘贴或导入 txt / md。会压缩成一条主线：删副线、次要人物与过场，保留主角、核心冲突、关键道具和结局。不足 ${MIN_NOVEL_CHARS} 字请改用「故事创意」。`}
+              </div>
+            )}
           </div>
         </div>
 
@@ -183,138 +252,150 @@ export default function IdeaForm({
             </select>
           </div>
 
-          <div className="field">
-            <div className="field-label">
-              分镜方式
-              <span className="field-hint">全片约 {overallSeconds} 秒</span>
-            </div>
-            <div className="seg" role="tablist" aria-label="分镜方式">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === 'shots'}
-                className={`seg-btn${mode === 'shots' ? ' is-active' : ''}`}
-                onClick={() => setMode('shots')}
-                disabled={loading}
-              >
-                按镜头数量
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === 'duration'}
-                className={`seg-btn${mode === 'duration' ? ' is-active' : ''}`}
-                onClick={() => setMode('duration')}
-                disabled={loading}
-              >
-                按总时长
-              </button>
-            </div>
-          </div>
-
-          {mode === 'shots' ? (
-            <>
-              <div className="field">
-                <div className="field-label">
-                  镜头数量
-                  <span className="field-hint">约 {shotCount * shotDuration} 秒</span>
-                </div>
-                <div className="range-row">
-                  <input
-                    className="range"
-                    type="range"
-                    min={1}
-                    max={12}
-                    step={1}
-                    value={shotCount}
-                    style={{ '--fill': `${fillPercent}%` } as CSSProperties}
-                    onChange={(e) => setShotCount(Number(e.target.value))}
-                    aria-label="镜头数量"
-                  />
-                  <span className="range-value">{shotCount}</span>
-                </div>
+          {source === 'novel' ? (
+            <div className="field">
+              <div className="field-label">分镜与时长</div>
+              <div className="field-hint">
+                由剧本 LLM 根据剧情决定镜头数量、每镜时长和总时长（1~12 镜、每镜 2~30 秒、
+                总时长 30~360 秒），用户不再手动指定。
               </div>
-
-              <div className="field">
-                <div className="field-label">
-                  单镜头时长
-                  <span className="field-hint">2~30 秒</span>
-                </div>
-                <div className="range-row">
-                  <input
-                    className="range"
-                    type="range"
-                    min={2}
-                    max={30}
-                    step={1}
-                    value={shotDuration}
-                    style={{ '--fill': `${durationFillPercent}%` } as CSSProperties}
-                    onChange={(e) => setShotDuration(Number(e.target.value))}
-                    aria-label="单镜头时长（秒）"
-                  />
-                  <span className="range-value">{shotDuration} 秒</span>
-                </div>
-              </div>
-            </>
+            </div>
           ) : (
             <>
               <div className="field">
                 <div className="field-label">
-                  视频总时长
-                  <span className="field-hint">
-                    {split.dynamic
-                      ? `AI 决定 ${split.minShotCount}~${split.maxShotCount} 镜`
-                      : `${split.shotCount} 个镜头`}
-                  </span>
+                  分镜方式
+                  <span className="field-hint">全片约 {overallSeconds} 秒</span>
                 </div>
-                <div className="range-row">
-                  <input
-                    className="range"
-                    type="range"
-                    min={MIN_TOTAL_SECONDS}
-                    max={MAX_TOTAL_SECONDS}
-                    step={1}
-                    value={totalDuration}
-                    style={{ '--fill': `${totalFillPercent}%` } as CSSProperties}
-                    onChange={(e) => setTotalDuration(Number(e.target.value))}
-                    aria-label="视频总时长（秒）"
-                  />
-                  <span className="range-value">{totalDuration} 秒</span>
-                </div>
-                <div className="field-hint" style={{ marginTop: 7 }}>
-                  {split.dynamic
-                    ? `单镜 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒，由 AI 按剧情分配`
-                    : `镜头时长：${split.durations.join(' / ')} 秒`}
+                <div className="seg" role="tablist" aria-label="分镜方式">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'shots'}
+                    className={`seg-btn${mode === 'shots' ? ' is-active' : ''}`}
+                    onClick={() => setMode('shots')}
+                    disabled={loading}
+                  >
+                    按镜头数量
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'duration'}
+                    className={`seg-btn${mode === 'duration' ? ' is-active' : ''}`}
+                    onClick={() => setMode('duration')}
+                    disabled={loading}
+                  >
+                    按总时长
+                  </button>
                 </div>
               </div>
 
-              <div className="field">
-                <div className="field-label">
-                  保证完整性
-                  <span className="field-hint">默认开启</span>
-                </div>
-                <label
-                  className="shot-switch"
-                  title="开启后分镜数量减少，每个镜头尽量凑满 30 秒，故事被切碎的风险更低；关闭则由 AI 分析剧情自行判断切几刀，只保证单镜不超过 30 秒、总时长不变"
-                >
-                  <input
-                    type="checkbox"
-                    className="shot-switch-input"
-                    checked={ensureCompleteness}
-                    disabled={loading}
-                    onChange={(e) => setEnsureCompleteness(e.target.checked)}
-                  />
-                  <span className="shot-switch-track" aria-hidden="true">
-                    <span className="shot-switch-thumb" />
-                  </span>
-                  <span>减少分镜、每镜凑满 30 秒</span>
-                </label>
-                <div className="field-hint" style={{ marginTop: 7 }}>
-                  {ensureCompleteness
-                    ? `固定 ${split.shotCount} 镜，每镜尽量凑满 30 秒`
-                    : `由 AI 判断切几刀（${split.minShotCount}~${split.maxShotCount} 镜）`}
-                </div>
-              </div>
+              {mode === 'shots' ? (
+                <>
+                  <div className="field">
+                    <div className="field-label">
+                      镜头数量
+                      <span className="field-hint">约 {shotCount * shotDuration} 秒</span>
+                    </div>
+                    <div className="range-row">
+                      <input
+                        className="range"
+                        type="range"
+                        min={1}
+                        max={12}
+                        step={1}
+                        value={shotCount}
+                        style={{ '--fill': `${fillPercent}%` } as CSSProperties}
+                        onChange={(e) => setShotCount(Number(e.target.value))}
+                        aria-label="镜头数量"
+                      />
+                      <span className="range-value">{shotCount}</span>
+                    </div>
+                  </div>
+    
+                  <div className="field">
+                    <div className="field-label">
+                      单镜头时长
+                      <span className="field-hint">2~30 秒</span>
+                    </div>
+                    <div className="range-row">
+                      <input
+                        className="range"
+                        type="range"
+                        min={2}
+                        max={30}
+                        step={1}
+                        value={shotDuration}
+                        style={{ '--fill': `${durationFillPercent}%` } as CSSProperties}
+                        onChange={(e) => setShotDuration(Number(e.target.value))}
+                        aria-label="单镜头时长（秒）"
+                      />
+                      <span className="range-value">{shotDuration} 秒</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="field">
+                    <div className="field-label">
+                      视频总时长
+                      <span className="field-hint">
+                        {split.dynamic
+                          ? `AI 决定 ${split.minShotCount}~${split.maxShotCount} 镜`
+                          : `${split.shotCount} 个镜头`}
+                      </span>
+                    </div>
+                    <div className="range-row">
+                      <input
+                        className="range"
+                        type="range"
+                        min={MIN_TOTAL_SECONDS}
+                        max={MAX_TOTAL_SECONDS}
+                        step={1}
+                        value={totalDuration}
+                        style={{ '--fill': `${totalFillPercent}%` } as CSSProperties}
+                        onChange={(e) => setTotalDuration(Number(e.target.value))}
+                        aria-label="视频总时长（秒）"
+                      />
+                      <span className="range-value">{totalDuration} 秒</span>
+                    </div>
+                    <div className="field-hint" style={{ marginTop: 7 }}>
+                      {split.dynamic
+                        ? `单镜 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒，由 AI 按剧情分配`
+                        : `镜头时长：${split.durations.join(' / ')} 秒`}
+                    </div>
+                  </div>
+    
+                  <div className="field">
+                    <div className="field-label">
+                      保证完整性
+                      <span className="field-hint">默认开启</span>
+                    </div>
+                    <label
+                      className="shot-switch"
+                      title="开启后分镜数量减少，每个镜头尽量凑满 30 秒，故事被切碎的风险更低；关闭则由 AI 分析剧情自行判断切几刀，只保证单镜不超过 30 秒、总时长不变"
+                    >
+                      <input
+                        type="checkbox"
+                        className="shot-switch-input"
+                        checked={ensureCompleteness}
+                        disabled={loading}
+                        onChange={(e) => setEnsureCompleteness(e.target.checked)}
+                      />
+                      <span className="shot-switch-track" aria-hidden="true">
+                        <span className="shot-switch-thumb" />
+                      </span>
+                      <span>减少分镜、每镜凑满 30 秒</span>
+                    </label>
+                    <div className="field-hint" style={{ marginTop: 7 }}>
+                      {ensureCompleteness
+                        ? `固定 ${split.shotCount} 镜，每镜尽量凑满 30 秒`
+                        : `由 AI 判断切几刀（${split.minShotCount}~${split.maxShotCount} 镜）`}
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -323,13 +404,41 @@ export default function IdeaForm({
               {loading ? (
                 <>
                   <span className="spinner" />
-                  串联分镜中…
+                  {source === 'novel' ? '改编分镜中…' : '串联分镜中…'}
                 </>
+              ) : source === 'novel' ? (
+                '改编成分镜'
               ) : (
                 submitText
               )}
             </button>
+            {loading && source === 'novel' && (
+              <div className="field-hint" style={{ marginTop: 7 }}>
+                正在分段摘要并压缩成蓝图，长文通常需要 1~2 分钟，请勿关闭页面。
+              </div>
+            )}
             <div className="idea-actions-sub">
+              {source === 'novel' && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.md,text/plain,text/markdown"
+                    hidden
+                    onChange={(e) => {
+                      void importTextFile(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={loading}
+                  >
+                    导入 txt / md
+                  </button>
+                </>
+              )}
               <button className="btn btn--ghost btn--sm" onClick={onLoadDemo} disabled={loading}>
                 加载示例剧本
               </button>

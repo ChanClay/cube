@@ -23,7 +23,7 @@ function withEnd(text: string): string {
 
 export function buildVideoPrompt(
   prompt: string,
-  shot: Pick<Shot, 'narration' | 'narrationType'>,
+  shot: Pick<Shot, 'narration' | 'narrationType' | 'speaker'>,
 ): string {
   const base = (prompt ?? '').trim();
   const line = (shot.narration ?? '').trim();
@@ -32,8 +32,14 @@ export function buildVideoPrompt(
   if (!line || shot.narrationType === 'none') return base;
 
   if (shot.narrationType === 'dialogue') {
+    /**
+     * 多人物镜头里只写 "The character" 会让模型挑错人开口，
+     * 所以把说话人名字写进提示词；没有 speaker 的旧剧本保持原行为。
+     */
+    const speaker = (shot.speaker ?? '').trim();
+    const who = speaker ? `The character named ${speaker}` : 'The on-screen character';
     return withEnd(
-      `${base} The character speaks with natural lip movement and matching facial expression: ${safeQuote(line)}`,
+      `${base} ${who} speaks with natural lip movement and matching facial expression: ${safeQuote(line)}`,
     );
   }
 

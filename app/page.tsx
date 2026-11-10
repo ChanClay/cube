@@ -7,6 +7,16 @@ import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
 import { timeAgo } from '@/lib/format';
 import type { ProjectSummary } from '@/lib/types';
+import {
+  DEFAULT_VIDEO_RATIO,
+  DEFAULT_VIDEO_RESOLUTION,
+  RATIO_LABEL,
+  RESOLUTION_LABEL,
+  VIDEO_RATIOS,
+  VIDEO_RESOLUTIONS,
+  type VideoRatio,
+  type VideoResolution,
+} from '@/lib/video-options';
 
 export default function HomePage() {
   const router = useRouter();
@@ -15,6 +25,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
+  /** 画幅 / 画质在创建时选定，之后在项目页还能改 */
+  const [ratio, setRatio] = useState<VideoRatio>(DEFAULT_VIDEO_RATIO);
+  const [resolution, setResolution] = useState<VideoResolution>(DEFAULT_VIDEO_RESOLUTION);
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
@@ -38,14 +51,18 @@ export default function HomePage() {
     if (creating) return;
     setCreating(true);
     try {
-      const { project } = await api.createProject({ name: name.trim() || undefined });
+      const { project } = await api.createProject({
+        name: name.trim() || undefined,
+        ratio,
+        resolution,
+      });
       // 新建项目先进故事创意页，写完创意生成第一份剧本
       router.push(`/projects/${project.id}/idea?fresh=1`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setCreating(false);
     }
-  }, [creating, name, router]);
+  }, [creating, name, ratio, resolution, router]);
 
   const removeProject = useCallback(
     async (event: React.MouseEvent, project: ProjectSummary) => {
@@ -87,6 +104,32 @@ export default function HomePage() {
               placeholder="新项目名称，可留空"
               aria-label="新项目名称"
             />
+            <select
+              className="select home-select"
+              value={ratio}
+              onChange={(e) => setRatio(e.target.value as VideoRatio)}
+              aria-label="画幅比例"
+              title="画幅比例：决定生成的视频是横屏还是竖屏"
+            >
+              {VIDEO_RATIOS.map((value) => (
+                <option key={value} value={value}>
+                  {RATIO_LABEL[value]}
+                </option>
+              ))}
+            </select>
+            <select
+              className="select home-select"
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value as VideoResolution)}
+              aria-label="画质"
+              title="画质：越高的档位越清晰，也越慢越贵"
+            >
+              {VIDEO_RESOLUTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {RESOLUTION_LABEL[value]}
+                </option>
+              ))}
+            </select>
             <button className="btn btn--primary" onClick={createProject} disabled={creating}>
               {creating ? <span className="spinner" /> : null}
               新建项目
@@ -131,6 +174,9 @@ export default function HomePage() {
 
                 <div className="project-card-meta">
                   <span className="tag">{project.scriptCount} 剧本</span>
+                  <span className="tag">
+                    {project.ratio} · {project.resolution}
+                  </span>
                   <span className="project-card-time">{timeAgo(project.updatedAt)}</span>
                 </div>
               </Link>

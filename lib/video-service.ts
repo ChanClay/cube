@@ -11,6 +11,8 @@ export interface StartVideoJobInput {
   prompt: string;
   duration?: number;
   resolution?: string;
+  /** 画幅比例，来自项目设置；缺省回落到全局 VIDEO_RATIO */
+  ratio?: string;
   media?: MediaInput[];
 }
 
@@ -34,6 +36,7 @@ export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob
   const duration =
     Number(input.duration) > 0 ? Number(input.duration) : config.video.defaultDuration;
   const resolution = input.resolution || config.video.resolution;
+  const ratio = input.ratio || config.video.ratio;
   const media = input.media ?? [];
 
   /**
@@ -68,6 +71,7 @@ export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob
       prompt: input.prompt,
       duration,
       resolution,
+      ratio,
       media,
       audio,
     });
