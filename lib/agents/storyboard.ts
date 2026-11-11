@@ -81,7 +81,7 @@ function buildSystemPrompt(): string {
 【三、镜头语言】
 7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
 8. ${SHOT_LANGUAGE_RULES}
-9. 角色一致性：同一角色全片复用蓝图给出的英文外貌短语（promptEn），服装、发型、道具不得变化；没有蓝图时自拟一段并在全片逐字复用。
+9. 角色一致性：同一角色全片复用蓝图给出的英文外貌短语（promptEn），服装、发型、装甲涂装、机械部件与道具不得变化。没有蓝图时自拟角色卡：先判断主体类型——人类写年龄感、发色、服装；机甲 / 机器人 / 巨兽等非人主体只写机型与体量、装甲材质与涂装、头部传感器、关节液压、武器与配色，不要给它写年龄、发型、上衣与鞋。
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
 11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。
 
@@ -112,7 +112,7 @@ JSON 结构：
   "title": "片名",
   "logline": "一句话故事梗概",
   "style": "整体视觉风格",
-  "characters": [{ "name": "角色名", "desc": "角色外形与身份描述", "promptEn": "fixed English appearance phrase" }],
+  "characters": [{ "name": "角色名", "desc": "外形与身份描述：人类写年龄 / 头部 / 服装 / 道具，机甲 / 非人主体写机型体量 / 装甲材质与涂装 / 传感器 / 关节 / 武器 / 编号", "promptEn": "fixed English appearance phrase" }],
   "scenes": [{ "name": "场景名", "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设", "promptEn": "fixed English location phrase" }],
   "shots": [
     {

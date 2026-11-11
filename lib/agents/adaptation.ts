@@ -216,8 +216,9 @@ export async function adaptStory(req: AdaptRequest): Promise<AdaptedStory | null
   }
 
   const system = buildBlueprintSystemPrompt('小说改编编剧 + 分镜串联导演', ADAPT_RULES);
+  // idea 在改编链路里只用于题材判断（机甲 / 巨兽等主体词可能出现在原文任意位置），不截断
   const baseReq: PlanRequest = {
-    idea: text.slice(0, 200),
+    idea: text,
     style: req.style,
     shotCount: req.shotCount,
     shotRange: req.shotRange,

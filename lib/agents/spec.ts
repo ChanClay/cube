@@ -188,7 +188,7 @@ export const VIDEO_PROMPT_RULES = `videoPrompt 是同一镜中文 description �
 - 不要写 "slow motion"（除非 cameraMove=升格慢动作）、"time-lapse"、"speed ramp"、"jump cut"、"flicker"、"morphing" 这类会让速度忽快忽慢或画面跳变的词；
 - 禁止字幕、文字、水印、logo、分屏、转场词、镜头编号（如 "shot 1" / "scene 2"）；
 - 只写可拍摄的名词与动词，不要用 "beautiful" / "sad" 单独代替画面；
-- 同一角色在全片复用同一段英文外貌短语，不要逐镜改写年龄、发型、服装与道具。`;
+- 同一角色在全片复用同一段英文外貌短语，不要逐镜改写年龄、发型、服装、装甲与涂装、道具。`;
 
 /**
  * 跨镜连贯性的写法约束。分镜写作与审片共用：
