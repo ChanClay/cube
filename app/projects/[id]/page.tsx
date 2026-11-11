@@ -9,6 +9,7 @@ import ScriptView from '@/components/ScriptView';
 import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
 import { validateMedia } from '@/lib/media';
+import { clearQueueMark, markQueueRunning, readQueueMark } from '@/lib/queue-store';
 import {
   collectCardMedia,
   hasManualFirstFrame,
@@ -75,6 +76,8 @@ function ProjectPageInner() {
   const [scriptId, setScriptId] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
   const [jobs, setJobs] = useState<Record<string, VideoJob>>({});
+  /** 历史任务已经拉回来：刷新后要靠它判断哪些镜头生成过，再决定续不续队列 */
+  const [jobsLoaded, setJobsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatingAll, setGeneratingAll] = useState(false);
   /** 已点过「停止」，排队退出中 */
@@ -138,6 +141,8 @@ function ProjectPageInner() {
         if (!prev || job.createdAt > prev.createdAt) latest[job.shotId] = job;
       }
       setJobs(latest);
+      // 历史任务到手才算「可以判断哪些镜头已经生成过」，续跑队列要等这一步
+      setJobsLoaded(true);
     } catch {
       // 拉取失败时保留现有状态
     }
@@ -337,6 +342,8 @@ function ProjectPageInner() {
 
     try {
       await api.deleteScript(id);
+      // 剧本没了就别再留着队列标记，免得下次打开页面白跑一遍
+      clearQueueMark(id);
 
       const remaining = scripts.filter((item) => item.id !== id);
       setScripts(remaining);
@@ -654,6 +661,13 @@ function ProjectPageInner() {
     stopRequestedRef.current = false;
     setStopping(false);
     setGeneratingAll(true);
+
+    /**
+     * 队列只活在浏览器里：留个标记，刷新页面后能接着把剩下的镜头跑完
+     * （已成功的镜头会跳过，云端正在跑的那一镜会等它出结果）。
+     */
+    const queueScriptId = scriptIdRef.current;
+    if (queueScriptId) markQueueRunning(queueScriptId);
     /** 上一镜成片地址：只在下一镜打开了「承接上一镜」时才抽帧 */
     let prevVideoUrl: string | null = null;
     let completed = 0;
@@ -871,6 +885,8 @@ function ProjectPageInner() {
         }
       }
     } finally {
+      // 队列已经结束（跑完 / 停下 / 用户点了停止）：撤掉标记，刷新后不再自动续跑
+      if (queueScriptId) clearQueueMark(queueScriptId);
       setQueueInfo(null);
       setGeneratingAll(false);
       setStopping(false);
@@ -886,6 +902,38 @@ function ProjectPageInner() {
     health,
     showToast,
   ]);
+
+  /** 刷新后续跑只做一次：任务状态每几秒就更新，不能每次都重开队列 */
+  const autoResumeRef = useRef(false);
+
+  /**
+   * 刷新页面后接上「全部生成」队列。
+   * 队列跑在浏览器里，刷新等于掐断：已提交到云端的那一镜会自己跑完，
+   * 后面的镜头却不会再提交。剧本和任务列表都到位后，如果库里还留着队列标记，
+   * 就把队列重新跑一遍——已成功的镜头跳过，云端在跑的那一镜等它出结果。
+   */
+  useEffect(() => {
+    if (autoResumeRef.current) return;
+    if (!jobsLoaded || !script || !scriptId) return;
+
+    autoResumeRef.current = true;
+
+    const startedAt = readQueueMark(scriptId);
+    if (startedAt === null) return;
+
+    // 队列其实已经跑完了（最后一下正好是刷新）：撤掉标记，不必再排队一次
+    const unfinished = script.shots.some(
+      (shot) => jobs[shot.id]?.status !== 'succeeded' || !jobs[shot.id]?.videoUrl,
+    );
+    if (!unfinished) {
+      clearQueueMark(scriptId);
+      return;
+    }
+
+    console.info('[queue] 接上刷新前的队列', { scriptId, startedAt });
+    showToast('已接上刷新前的「全部生成」队列，继续生成剩下的镜头');
+    void handleGenerateAll();
+  }, [jobsLoaded, script, scriptId, jobs, handleGenerateAll, showToast]);
 
   /**
    * 放弃本镜：把任务标成 canceled 并停止跟踪进度。
