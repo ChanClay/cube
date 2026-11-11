@@ -36,6 +36,8 @@ export interface Character {
   id?: string;
   name: string;
   desc: string;
+  /** 全片固定的英文外貌短语（来自蓝图，逐镜提示词逐字复用） */
+  promptEn?: string;
   /** 形象参考图（/api/uploads/xxx 或公网 URL）；上一镜末帧不可用时作为 reference_image 提交 */
   imageUrl?: string;
 }
@@ -46,6 +48,8 @@ export interface Scene {
   id?: string;
   name: string;
   desc: string;
+  /** 全片固定的英文空间短语（来自蓝图） */
+  promptEn?: string;
   /** 场景参考图；上一镜末帧不可用时作为首帧兜底（场景空镜更接近真实构图） */
   imageUrl?: string;
 }
@@ -57,6 +61,19 @@ export interface Scene {
  * - `none`：这一镜不要任何口播，narration 保留但不提交
  */
 export type NarrationType = 'dialogue' | 'voiceover' | 'none';
+
+/**
+ * 镜头内部的秒级节拍：这一段秒数里画面发生了什么变化。
+ * 秒数是相对本镜起点的偏移，第一段从 0 开始，最后一段到 duration 结束。
+ */
+export interface ShotBeat {
+  /** 起始秒（含） */
+  from: number;
+  /** 结束秒（不含） */
+  to: number;
+  /** 这一段里唯一一个可见动作，如「抬眼看向塔顶」 */
+  action: string;
+}
 
 export interface Shot {
   /** 本地唯一 id */
@@ -73,7 +90,16 @@ export interface Shot {
   cameraMove: string;
   /** 中文画面描述（给人看） */
   description: string;
-  /** 英文文生视频提示词（给模型看） */
+  /**
+   * 本镜第一帧的画面事实（谁 / 在哪 / 姿势 / 手持物），必须与上一镜 exitState 一致。
+   * 无蓝图、模型也没写时为空。
+   */
+  entryState?: string;
+  /** 本镜最后一帧的画面事实，下一镜的 entryState 要接住它 */
+  exitState?: string;
+  /** 这一镜内部的秒级节奏：几秒到几秒在发生什么（旧剧本没有这个字段） */
+  beatSheet?: ShotBeat[];
+  /** 英文文生视频提示词（给模型看），是 description 的忠实英译 */
   videoPrompt: string;
   /** 旁白 / 台词 */
   narration: string;

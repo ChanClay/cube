@@ -6,10 +6,18 @@
  * - `./adaptation` 小说 / 章节改编：把长文压缩成可拍蓝图
  * - `./continuity` 故事架构师：主题 / 人物 / 场景 + entry-exit 状态链
  * - `./storyboard` 分镜 agent：照着蓝图写画面与英文提示词，并做时长 / 引用收口
+ * - `./localize`   提示词译者：把定稿的中文描述逐镜翻成英文（保证中英一致）
  * - `./review`     审片 agent：确定性体检 + 只修复有硬伤的镜头
  */
 
 export { callChatJson, extractJson } from './llm';
+export {
+  localizePrompts,
+  type LocalizeCharacter,
+  type LocalizeInput,
+  type LocalizeScene,
+  type LocalizeShot,
+} from './localize';
 export { adaptStory, type AdaptRequest, type AdaptedStory } from './adaptation';
 export {
   planStory,

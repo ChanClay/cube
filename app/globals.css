@@ -2111,6 +2111,42 @@ a.btn:visited {
   margin: 0;
 }
 
+/* 秒级节奏：左侧时间码等宽，右侧是这一段的动作 */
+.shot-timeline {
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(26, 39, 66, 0.02);
+  display: grid;
+  gap: 3px;
+}
+
+.shot-timeline-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.shot-timeline-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.shot-timeline-action {
+  word-break: break-word;
+}
+
+.chip--tc {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
 .shot-refine {
   height: 24px;
   padding: 0 9px;

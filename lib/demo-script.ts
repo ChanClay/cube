@@ -22,6 +22,11 @@ export const demoScript: Script = {
       shotSize: '远景',
       cameraMove: '缓慢推近',
       description: '暴雨夜，白色灯塔孤零零立在黑色礁石上，巨浪拍岸，塔顶光束扫过海面。',
+      beatSheet: [
+        { from: 0, to: 2, action: '巨浪撞碎在礁石上，水花喷到画面中部' },
+        { from: 2, to: 4, action: '塔顶光束从右向左扫过海面' },
+        { from: 4, to: 5, action: '雨幕加重，灯塔被压成剪影' },
+      ],
       videoPrompt:
         'A lone white lighthouse standing on black volcanic rocks during a violent rainstorm at night, huge waves crashing against the cliff, the rotating beam of light sweeping across the dark sea, cold blue and teal color grading, volumetric rain, cinematic wide shot, slow dolly in, photorealistic, 35mm film grain, dramatic lighting',
       narration: '那晚，海面上没有一艘船回来。',
@@ -37,6 +42,11 @@ export const demoScript: Script = {
       shotSize: '中景',
       cameraMove: '缓慢推近',
       description: '白发老人站在塔内旋梯上抬头望向塔顶，油灯的暖光映着他满是皱纹的脸。',
+      beatSheet: [
+        { from: 0, to: 2, action: '老人扶着铁扶手抬头，视线越过旋梯' },
+        { from: 2, to: 3.5, action: '油灯火苗被穿堂风吹得一晃' },
+        { from: 3.5, to: 5, action: '他把灯举到脸侧，皱纹被暖光填满' },
+      ],
       videoPrompt:
         'Medium shot of an old lighthouse keeper with grey hair and a weathered face standing on a spiral iron staircase, looking up, warm oil lamp light flickering across his deep wrinkles, dust particles floating in the air, shallow depth of field, slow push in, cinematic portrait lighting, photorealistic, moody atmosphere, 50mm lens',
       narration: '他决定再点一次。',
@@ -52,6 +62,11 @@ export const demoScript: Script = {
       shotSize: '大远景',
       cameraMove: '升格慢动作',
       description: '从塔顶俯视，光束穿透暴雨，照亮海面上一艘正在下沉的旧渔船。',
+      beatSheet: [
+        { from: 0, to: 1.5, action: '光束从画面上方斜切进暴雨' },
+        { from: 1.5, to: 3.5, action: '光柱扫过海面，照出一艘倾斜的船影' },
+        { from: 3.5, to: 5, action: '船头沉入浪里，只剩桅杆' },
+      ],
       videoPrompt:
         'Aerial high angle view from the top of a lighthouse, a bright beam of light cutting through heavy rain and fog, revealing a small sinking wooden fishing boat in the churning dark sea below, slow motion, cold blue palette with warm beam glow, cinematic epic scale, volumetric fog, photorealistic, ultra detailed',
       narration: '光找到了它。',

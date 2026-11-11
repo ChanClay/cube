@@ -25,9 +25,35 @@ export const CARD_IMAGE_SIZE: Record<CardKind, string> = {
 
 /** 构图约束：避免出成海报、多人合影或带字的设定板 */
 const FRAMING: Record<CardKind, string> = {
-  character: '角色设定图，单人主体居中，全身正面站姿，姿态自然放松，画面里只出现这一个角色',
+  // 主体必须占满画面高度，否则全身图里服装与装备的细节会被压成一片糊
+  character:
+    '角色设定图，单人主体居中，全身正面站姿，姿态自然放松，人物高度占画面 85% 以上，' +
+    '从头到脚完整入画，画面里只出现这一个角色',
   scene: '场景空镜，画面中没有人物，广角电影感构图，透视与景深真实，光源方向明确',
 };
+
+/** 命中这些词说明是有机械 / 义体 / 装备细节的科技题材角色，需要补一层材质与结构描述 */
+const TECH_HINT =
+  /机甲|义体|外骨骼|装甲|机械|仿生|赛博|全息|芯片|神经接口|能量|激光|纳米|钛|碳纤维|聚合物|驱动器|推进器|模块化|无人机|机器人|科幻|未来科技|\bcyber\b|\bmech\b|\bexo\b|\bandroid\b|\bbionic\b|\bhologram\b|\bcircuit\b|\bneon\b|\barmou?r\b|\bimplant\b|\bprosthe/i;
+
+/**
+ * 科技题材的细节层。
+ * 文生图模型对「科技风」的默认输出是光滑的塑料块——没有分件、没有接缝、没有光源，
+ * 所以这里把「结构 / 材质 / 发光 / 磨损」四件事显式写出来。
+ */
+const TECH_DETAIL: Record<CardKind, string> = {
+  character:
+    '科技细节：装备与装甲有明显分件和层叠关系，接缝、螺栓与面板缝隙清晰可见，' +
+    '接缝处有细窄的发光线条，金属表面有真实反射与边缘高光，表面有细微划痕与使用磨损，' +
+    '透明件有折射与内部结构，局部指示灯与能量光点提供环境补光',
+  scene:
+    '科技细节：结构与管线分层清晰，接缝与面板有真实装配关系，' +
+    '光源来自可见的灯具与屏幕，金属与玻璃有真实反射，空气中有雾与尘埃形成体积光',
+};
+
+export function hasTechDetail(text: string): boolean {
+  return TECH_HINT.test(text);
+}
 
 /**
  * 画面质感：材质、光线、景深、镜头、颗粒。
@@ -55,24 +81,39 @@ export interface CardPromptInput {
   kind: CardKind;
   /** 角色外形 / 场景空间描述（名称 + desc） */
   prompt: string;
+  /**
+   * 蓝图锁定的固定英文外貌 / 空间短语。
+   * 角色卡和逐镜视频提示词用的是同一段英文，带上它卡片才会和成片长得一样。
+   */
+  promptEn?: string;
   /** 剧本的整体视觉风格，缺省时退回电影感写实 */
   style?: string;
 }
 
 /** 拼一条完整的文生图提示词 */
-export function buildCardPrompt({ kind, prompt, style }: CardPromptInput): string {
+export function buildCardPrompt({ kind, prompt, promptEn, style }: CardPromptInput): string {
   // 预设风格展开成明细描述，自定义风格原样使用
   const styleText = expandStyle(style);
   const head = styleText
     ? `画面风格（严格遵循，不要自行更换画风）：${styleText}`
     : '画面风格：电影感写实风格，35mm 胶片质感，自然光，浅景深';
-  const tail = [FRAMING[kind], TEXTURE[kind], `不要画面文字 / 水印 / logo / 分屏 / 畸形肢体`].join(
-    '。',
-  );
 
-  // 主体描述超长时先截主体，风格与质感必须完整保留
+  const tech = hasTechDetail(`${prompt} ${promptEn ?? ''}`);
+  const tail = [
+    FRAMING[kind],
+    TEXTURE[kind],
+    tech ? TECH_DETAIL[kind] : '',
+    `不要画面文字 / 水印 / logo / 分屏 / 畸形肢体`,
+  ]
+    .filter(Boolean)
+    .join('。');
+
+  // 主体描述超长时先截主体，风格与质感（含科技细节层）必须完整保留
   const budget = MAX_PROMPT_LENGTH - head.length - tail.length - 2;
-  const subject = truncate(prompt.trim(), Math.max(120, budget));
+  const subjectText = promptEn?.trim()
+    ? `${prompt.trim()}。固定外观（英文，必须逐字体现）：${promptEn.trim()}`
+    : prompt.trim();
+  const subject = truncate(subjectText, Math.max(120, budget));
 
   return [head, subject, tail].filter(Boolean).join('。');
 }

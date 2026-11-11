@@ -3,10 +3,12 @@ import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/logger';
 import { callChatJson } from '@/lib/agents/llm';
 import {
+  normalizeBeatSheet,
   normalizeCameraMove,
   normalizeShotSize,
   SHOT_LANGUAGE_RULES,
   str,
+  TIMELINE_RULES,
   trimNarration,
   VIDEO_PROMPT_RULES,
 } from '@/lib/agents/spec';
@@ -20,14 +22,16 @@ function buildSystemPrompt(): string {
 
 要求：
 1. ${VIDEO_PROMPT_RULES}
-2. description 不需要你重写（用户已经改好），不要返回它。
-3. ${SHOT_LANGUAGE_RULES}
-4. 若提供了角色表，本镜出镜角色的外貌必须与角色表一致；视频提示词里沿用角色表已有的英文外貌短语，不要自行改写年龄、发型、服装与道具。
-5. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；避免与相邻镜头重复同一构图。
-6. narration 是这一镜的旁白或台词，可为空字符串（不要写"旁白："前缀）。
-7. 若是画面里的角色开口说话，speaker 必须是角色表里的名字；旁白或没有台词时 speaker 留空。
-8. title 是这一镜的小标题，4~8 个字。
-9. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
+2. videoPrompt 的唯一依据是用户改好的「画面描述」：描述里写到的主体、动作、道具、环境、光线逐项翻进英文；描述里没有的元素一个都不许加。
+3. description 不需要你重写（用户已经改好），不要返回它。
+4. ${SHOT_LANGUAGE_RULES}
+5. 若提供了角色表，本镜出镜角色的外貌必须与角色表一致；视频提示词里沿用角色表已有的英文外貌短语，不要自行改写年龄、发型、服装与道具。
+6. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；避免与相邻镜头重复同一构图。
+7. narration 是这一镜的旁白或台词，可为空字符串（不要写"旁白："前缀）。
+8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字；旁白或没有台词时 speaker 留空。
+9. title 是这一镜的小标题，4~8 个字。
+10. ${TIMELINE_RULES}
+11. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
 JSON 结构：
 {
@@ -36,7 +40,8 @@ JSON 结构：
   "cameraMove": "缓慢推近",
   "videoPrompt": "English prompt for the text-to-video model",
   "narration": "旁白或台词",
-  "speaker": "说话的角色名，旁白留空"
+  "speaker": "说话的角色名，旁白留空",
+  "beatSheet": [{ "from": 0, "to": 2, "action": "这一段里发生的可见动作" }]
 }`;
 }
 
@@ -136,6 +141,7 @@ export async function POST(request: Request) {
         videoPrompt,
         narration: trimNarration(obj.narration, input.duration),
         speaker: str(obj.speaker) || undefined,
+        beatSheet: normalizeBeatSheet(obj.beatSheet, input.duration),
       },
     });
   } catch (err) {

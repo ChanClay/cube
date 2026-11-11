@@ -24,11 +24,14 @@ const HINT: Record<Kind, string> = {
 const PLACEHOLDER: Record<Kind, { name: string; desc: string }> = {
   character: {
     name: '角色名',
-    desc: '外形与身份：年龄 / 发型 / 服装颜色材质 / 随身道具',
+    // 顺序与蓝图的角色卡规则一致：写得越分件越具体，配图与视频的细节才立得住
+    desc:
+      '廓形（年龄 / 身高体型）｜头部（脸型 / 发型发色 / 神态）｜上装（版型 / 颜色 / 材质）｜' +
+      '下装与鞋｜装备或义体（位置 / 材质 / 发光处）｜配色（主色 / 辅色 / 发光色）｜随身道具｜气质体态',
   },
   scene: {
     name: '场景名，如 灯塔内部',
-    desc: '空间描述：地点 / 时间 / 光线 / 主要陈设',
+    desc: '地点 / 空间尺度 / 时间 / 光源方向与色温 / 主要陈设与材质',
   },
 };
 
@@ -159,7 +162,8 @@ export default function CastCards({
     setBusy(key);
     setError(null);
     try {
-      const { media } = await api.generateImage({ prompt, kind, style });
+      // 带上蓝图锁定的固定英文短语，卡片才会和逐镜视频里的长相 / 空间一致
+      const { media } = await api.generateImage({ prompt, promptEn: item?.promptEn, kind, style });
       patchAt(kind, index, { imageUrl: media.url });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

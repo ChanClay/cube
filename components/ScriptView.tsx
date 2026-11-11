@@ -413,6 +413,7 @@ export default function ScriptView({
                   beforeDescription={script.shots[index - 1]?.description ?? ''}
                   afterDescription={script.shots[index + 1]?.description ?? ''}
                   isFirst={index === 0}
+                  startAt={script.shots.slice(0, index).reduce((sum, prev) => sum + prev.duration, 0)}
                   carryMuted={carryMuted}
                   onAbandon={onAbandonShot ? () => onAbandonShot(shot) : undefined}
                 />

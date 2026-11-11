@@ -156,6 +156,8 @@ export interface CreateProjectBody {
 /** 角色卡 / 场景卡的一键配图 */
 export interface ImageBody {
   prompt: string;
+  /** 蓝图锁定的固定英文外貌 / 空间短语，保证卡片与逐镜视频一致 */
+  promptEn?: string;
   /** 决定出图比例：角色用竖图，场景用横图 */
   kind: 'character' | 'scene';
   /** 沿用剧本的视觉风格 */
@@ -178,7 +180,7 @@ export interface RefineShotBody {
 /** 重算后可变的字段，description 由用户自己维护 */
 export type RefinedShot = Pick<
   Shot,
-  'title' | 'shotSize' | 'cameraMove' | 'videoPrompt' | 'narration' | 'speaker'
+  'title' | 'shotSize' | 'cameraMove' | 'videoPrompt' | 'narration' | 'speaker' | 'beatSheet'
 >;
 
 /** 从已生成的视频里抽一帧，交给下一镜当首帧 */

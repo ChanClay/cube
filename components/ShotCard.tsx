@@ -34,6 +34,8 @@ interface Props {
   afterDescription?: string;
   /** 第一镜没有上一镜可承接，开关固定关闭 */
   isFirst?: boolean;
+  /** 这一镜在成片里的起始秒数（前面所有镜头时长之和），用于显示绝对时间码 */
+  startAt?: number;
   /** 承接上一镜末帧的镜头不生成音频（服务端默认行为，用于提示） */
   carryMuted?: boolean;
   /** 放弃这一镜：停止跟踪进度（云端任务仍会跑完） */
@@ -63,6 +65,12 @@ const STATUS_TEXT = {
   canceled: '已放弃',
 } as const;
 
+/** 秒 → 成片时间码（01:23） */
+const timecode = (seconds: number): string => {
+  const safe = Math.max(0, Math.round(seconds));
+  return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
+};
+
 export default function ShotCard({
   shot,
   job,
@@ -73,6 +81,7 @@ export default function ShotCard({
   beforeDescription = '',
   afterDescription = '',
   isFirst = false,
+  startAt,
   carryMuted = true,
   onAbandon,
 }: Props) {
@@ -159,6 +168,8 @@ export default function ShotCard({
       if (next.title) patch.title = next.title;
       // 模型给了说话人就更新；没给时保留原值，避免重算把已选的人清掉
       if (next.speaker) patch.speaker = next.speaker;
+      // 时间轴按新描述重算过才覆盖，没拿到就保留原来的
+      if (next.beatSheet?.length) patch.beatSheet = next.beatSheet;
       onChange(patch);
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : String(err));
@@ -208,6 +219,11 @@ export default function ShotCard({
           aria-label="镜头标题"
         />
         <div className="shot-meta">
+          {startAt !== undefined && (
+            <span className="chip chip--tc" title="这一镜在成片里的绝对时间码">
+              {timecode(startAt)}–{timecode(startAt + shot.duration)}
+            </span>
+          )}
           <span className="chip">{shot.shotSize}</span>
           <span className="chip">{shot.cameraMove}</span>
           <label className="chip chip--time" title="镜头时长，2~30 秒，可单独调整">
@@ -252,6 +268,22 @@ export default function ShotCard({
         onChange={(e) => onChange({ description: e.target.value })}
       />
       {refineError && <div className="shot-refine-error">{refineError}</div>}
+
+      {shot.beatSheet && shot.beatSheet.length > 0 && (
+        <>
+          <label className="shot-label">秒级节奏（相对本镜，覆盖 {shot.duration} 秒）</label>
+          <ol className="shot-timeline">
+            {shot.beatSheet.map((beat, i) => (
+              <li className="shot-timeline-row" key={`${beat.from}-${beat.to}-${i}`}>
+                <span className="shot-timeline-time">
+                  {beat.from}–{beat.to}s
+                </span>
+                <span className="shot-timeline-action">{beat.action}</span>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
 
       <label className="shot-label">视频提示词（直接提交给视频模型）</label>
       <textarea

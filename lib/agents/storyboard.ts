@@ -14,10 +14,13 @@ import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types'
 import { adaptStory } from './adaptation';
 import { planStory, type Beat, type StoryPlan } from './continuity';
 import { callChatJson } from './llm';
+import { localizePrompts } from './localize';
 import { auditScript, needsRepair, requestRepair, type ScriptIssue } from './review';
 import {
   clamp,
+  CONTINUITY_RULES,
   dedupeByName,
+  normalizeBeatSheet,
   normalizeCameraMove,
   normalizeShotSize,
   PROMPT_MAX_WORDS,
@@ -25,6 +28,7 @@ import {
   SHOT_LANGUAGE_RULES,
   str,
   stripForbiddenPromptPhrases,
+  TIMELINE_RULES,
   trimNarration,
   VIDEO_PROMPT_RULES,
 } from './spec';
@@ -66,50 +70,64 @@ function buildSystemPrompt(): string {
 
 【一、故事与蓝图】
 1. 有蓝图时严格使用蓝图的人物、场景与节拍，不得新增会改变空间或人物关系的内容；蓝图节拍数与目标镜数不一致时，多了就合并相邻节拍（不丢高潮与结尾），少了就拆解（不新增剧情）。
-2. 每个镜头从该节拍的 entry 状态开始，在 exit 状态结束；entry 写「开场」的镜次负责交代空间关系。
-3. 第一镜要在开头就让观众看懂「谁、在哪、发生了什么异常」，最后一镜留下情绪余韵，不要用总结性旁白收尾。
-4. 禁止用台词 / 旁白解释画面已经说清楚的信息；不要写「他心想」这类拍不出来的内容。
+2. 合并或拆分节拍时 entry / exit 必须整体继承：合并后第一镜用前一节的 entry、最后一镜用后一节的 exit；拆分后新增镜头的 entry 等于上一镜的 exit。
+3. 每个镜头从该节拍的 entry 状态开始，在 exit 状态结束；entry 写「开场」的镜次负责交代空间关系。
+4. 第一镜要在开头就让观众看懂「谁、在哪、发生了什么异常」，最后一镜留下情绪余韵，不要用总结性旁白收尾。
+5. 禁止用台词 / 旁白解释画面已经说清楚的信息；不要写「他心想」这类拍不出来的内容。
 
-【二、镜头语言】
-5. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
-6. ${SHOT_LANGUAGE_RULES}
-7. 角色一致性：同一角色全片复用蓝图给出的英文外貌短语（promptEn），服装、发型、道具不得变化；没有蓝图时自拟一段并在全片逐字复用。
-8. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
-9. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。
+【二、跨镜连贯性（整份剧本最重要的部分）】
+6. ${CONTINUITY_RULES}
 
-【三、videoPrompt】
-10. ${VIDEO_PROMPT_RULES}
-11. 一段话写完，不要分点、不要重复同一信息；提示词只描述这一镜能拍到的东西。
+【三、镜头语言】
+7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
+8. ${SHOT_LANGUAGE_RULES}
+9. 角色一致性：同一角色全片复用蓝图给出的英文外貌短语（promptEn），服装、发型、道具不得变化；没有蓝图时自拟一段并在全片逐字复用。
+10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
+11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。
 
-【四、台词】
-12. narration 是这一镜要说出来的唯一一句话，10~20 字；不要写进 description 或 videoPrompt，也不要写「旁白：」前缀。
-13. narrationType：dialogue = 画面里的人物开口说话（会驱动口型）；voiceover = 画外旁白（画面里的人物闭嘴）；none = 这一镜完全无口播（此时 narration 必须为空字符串）。
-14. dialogue 必须同时给 speaker（说话的角色名），speaker 必须逐字来自本镜 characters；不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。
-15. 有人物出镜、且这一镜承载情绪或冲突时，优先写一句人物台词；全片至少 1 句 dialogue（创意明确要求无对白时除外）。
-16. 台词长度不能超过这一镜能说完的量：5 秒镜最多约 20 字，长镜头最多 60 字；一句台词只表达一个意思，要口语、有潜台词，不要念设定。
+【四、videoPrompt】
+12. ${VIDEO_PROMPT_RULES}
+13. 写作顺序固定：先用中文把这一镜的 description 写清楚（景别 + 谁 + 在做什么 + 环境 + 光线），再把这段中文逐项翻成 videoPrompt。禁止脱离 description 另写画面。
+14. videoPrompt 写完后逐项核对：主体、动作、道具、环境、光线是否每个都在英文里出现？英文里有没有中文没写的元素？多出来的删掉，漏掉的补上。一段话写完，不要分点、不要重复同一信息。
 
-【五、数据完整性】
-17. 每个镜头的 characters 是这一镜真正出镜的角色名数组，必须逐字使用角色表名字（无人物出镜时给空数组）；每个镜头里的 scenes 必须逐字使用场景表名字。
-18. JSON 顶层的 scenes 是全片复用的场景卡（1~4 个），有蓝图时直接沿用蓝图；不要按镜头重复写场景卡。
-19. 所有镜头 duration 之和必须等于用户要求的总时长；给了「镜头时长分配」就逐条照抄，不要改动。
-20. shots 数组长度必须精确等于目标镜数。
-21. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
+【五、分镜时间轴】
+15. ${TIMELINE_RULES}
+
+【六、台词】
+16. narration 是这一镜要说出来的唯一一句话，10~20 字；不要写进 description 或 videoPrompt，也不要写「旁白：」前缀。
+17. narrationType：dialogue = 画面里的人物开口说话（会驱动口型）；voiceover = 画外旁白（画面里的人物闭嘴）；none = 这一镜完全无口播（此时 narration 必须为空字符串）。
+18. dialogue 必须同时给 speaker（说话的角色名），speaker 必须逐字来自本镜 characters；不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。
+19. 有人物出镜、且这一镜承载情绪或冲突时，优先写一句人物台词；全片至少 1 句 dialogue（创意明确要求无对白时除外）。
+20. 台词长度不能超过这一镜能说完的量：5 秒镜最多约 20 字，长镜头最多 60 字；一句台词只表达一个意思，要口语、有潜台词，不要念设定。
+
+【七、数据完整性】
+21. 每个镜头的 characters 是这一镜真正出镜的角色名数组，必须逐字使用角色表名字（无人物出镜时给空数组）；每个镜头里的 scenes 必须逐字使用场景表名字。
+22. JSON 顶层的 scenes 是全片复用的场景卡（1~4 个），有蓝图时直接沿用蓝图；不要按镜头重复写场景卡。
+23. 所有镜头 duration 之和必须等于用户要求的总时长；给了「镜头时长分配」就逐条照抄，不要改动。
+24. shots 数组长度必须精确等于目标镜数。
+25. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
 JSON 结构：
 {
   "title": "片名",
   "logline": "一句话故事梗概",
   "style": "整体视觉风格",
-  "characters": [{ "name": "角色名", "desc": "角色外形与身份描述" }],
-  "scenes": [{ "name": "场景名", "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设" }],
+  "characters": [{ "name": "角色名", "desc": "角色外形与身份描述", "promptEn": "fixed English appearance phrase" }],
+  "scenes": [{ "name": "场景名", "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设", "promptEn": "fixed English location phrase" }],
   "shots": [
     {
       "title": "镜头小标题",
       "duration": 5,
       "shotSize": "中景",
       "cameraMove": "缓慢推近",
+      "entryState": "本镜第一帧的画面事实，与上一镜 exitState 一致",
+      "exitState": "本镜最后一帧的画面事实，供下一镜接住",
+      "beatSheet": [
+        { "from": 0, "to": 2, "action": "抬眼看向塔顶" },
+        { "from": 2, "to": 5, "action": "伸手拧开灯罩" }
+      ],
       "description": "中文画面描述",
-      "videoPrompt": "English prompt for text-to-video model",
+      "videoPrompt": "这一镜 description 的忠实英文翻译",
       "narration": "这一镜要说的话，可为空",
       "narrationType": "dialogue | voiceover | none",
       "speaker": "说这句台词的角色名（仅 dialogue 时填写，其余留空）",
@@ -150,14 +168,19 @@ ${req.idea}
 
   const selfCheck = `输出前自检（不通过就改，不要把自检写进 JSON）：
 1) shots 是否正好 ${expectedShots} 个？
-2) 每镜是否从上一镜的 exit 开始、以自己的 exit 结束？
-3) 角色名 / 场景名是否逐字来自上方清单？
-4) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，且只含一个运镜？
-5) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
-6) 所有 duration 之和是否等于 ${totalDuration} 秒？`;
+2) 第 2 镜起，每镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么），只是换了措辞？
+3) 第 1 镜到最后一镜连起来读，是否是一条没有跳跃、没有凭空换场地、没有道具凭空出现的连续动作链？
+4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作？
+5) 角色名 / 场景名是否逐字来自上方清单？
+6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
+7) 每个 videoPrompt 是否逐项对应本镜 description：主体、动作、道具、环境、光线都在英文里，且没有中文没写过的元素？
+8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
+9) 所有 duration 之和是否等于 ${totalDuration} 秒？`;
 
   if (!plan) {
     return `${head}
+
+没有故事蓝图。请先在脑子里排出一条完整的动作链（谁从哪开始、每个镜头推进到什么状态），再逐镜写；写完回读一遍，确认相邻镜头之间没有跳跃。
 
 请输出 ${expectedShots} 个镜头的分镜脚本 JSON。
 
@@ -180,9 +203,11 @@ ${selfCheck}`;
     .map((b) => {
       const emotion = b.emotion ? `｜情绪：${b.emotion}/5` : '';
       return (
-        `${b.index}. [${b.beat}] 任务：${b.purpose}｜主体：${b.subject}｜动作：${b.action}｜` +
-        `entry（承接）：${b.entry}｜exit（交棒）：${b.exit}｜` +
-        `景别：${b.shotSize}｜运镜：${b.cameraMove}｜到下一镜：${b.transition}${emotion}`
+        `${b.index}. [${b.beat}] 任务：${b.purpose}\n` +
+        `   主体：${b.subject}｜动作：${b.action}\n` +
+        `   entryState（与上一镜 exitState 是同一个状态）：${b.entry}\n` +
+        `   exitState（下一镜要能直接接住）：${b.exit}\n` +
+        `   景别：${b.shotSize}｜运镜：${b.cameraMove}｜到下一镜：${b.transition}${emotion}`
       );
     })
     .join('\n');
@@ -210,7 +235,7 @@ ${scenes || '（无）'}
 镜头状态链（共 ${plan.beats.length} 个节拍）：
 ${beats}${mergeHint}
 
-请输出 ${expectedShots} 个镜头的分镜脚本 JSON。每一镜都要接住上一镜的 exit，并以自己的 exit 结束。
+请输出 ${expectedShots} 个镜头的分镜脚本 JSON。每一镜的 entryState 都必须是上一镜 exitState 的延续，出口的 exitState 必须能被下一镜直接接住——这条状态链比任何单镜画面都重要。
 
 ${selfCheck}`;
 }
@@ -283,6 +308,9 @@ function normalizeShot(raw: Record<string, unknown>, index: number): Shot {
     duration,
     shotSize: normalizeShotSize(raw.shotSize),
     cameraMove: normalizeCameraMove(raw.cameraMove),
+    entryState: str(raw.entryState ?? raw.entry ?? raw.stateIn) || undefined,
+    exitState: str(raw.exitState ?? raw.exit ?? raw.stateOut) || undefined,
+    beatSheet: normalizeBeatSheet(raw.beatSheet ?? raw.beats ?? raw.timeline, duration),
     description: str(raw.description),
     videoPrompt: prompt,
     narration,
@@ -319,6 +347,7 @@ function normalizeScript(raw: unknown, fallbackStyle: string, userStyle?: string
         id: crypto.randomUUID(),
         name: str(c.name, '角色'),
         desc: str(c.desc),
+        promptEn: str(c.promptEn) || undefined,
       })),
   );
 
@@ -331,6 +360,7 @@ function normalizeScript(raw: unknown, fallbackStyle: string, userStyle?: string
         id: crypto.randomUUID(),
         name: str(s.name, '场景'),
         desc: str(s.desc),
+        promptEn: str(s.promptEn) || undefined,
       }))
       .filter((s) => s.name.trim() || s.desc.trim()),
   );
@@ -362,6 +392,7 @@ function applyPlanFoundation(script: Script, plan: StoryPlan | null): void {
       id: crypto.randomUUID(),
       name: c.name,
       desc: c.desc,
+      promptEn: c.promptEn,
     }));
   }
   if (plan.scenes.length > 0) {
@@ -369,9 +400,32 @@ function applyPlanFoundation(script: Script, plan: StoryPlan | null): void {
       id: crypto.randomUUID(),
       name: s.name,
       desc: s.desc,
+      promptEn: s.promptEn,
     }));
   }
   if (!script.logline) script.logline = plan.logline;
+
+  // 蓝图的状态链是确定性锚点：分镜稿缺首尾状态时以蓝图补上
+  const first = script.shots[0];
+  const last = script.shots[script.shots.length - 1];
+  if (first && !first.entryState && plan.beats[0]?.entry) {
+    first.entryState = str(plan.beats[0].entry) || undefined;
+  }
+  if (last && !last.exitState && plan.beats.length > 0) {
+    last.exitState = str(plan.beats[plan.beats.length - 1].exit) || undefined;
+  }
+}
+
+/**
+ * 状态链兜底：缺 entryState 的镜头直接沿用上一镜的 exitState。
+ * 不花模型调用，但能保证每一镜都有可承接的入口，审片与修复也有据可依。
+ */
+function stabilizeStateChain(script: Script): void {
+  script.shots.forEach((shot, i) => {
+    if (i === 0 || shot.entryState) return;
+    const prevExit = script.shots[i - 1]?.exitState;
+    if (prevExit) shot.entryState = prevExit;
+  });
 }
 
 /** 名字对齐：精确 → 忽略大小写 → 包含关系（模型常写「老陈」/「守塔人老陈」） */
@@ -597,7 +651,54 @@ function finalizeScript(
   if (budget) applyDurationBudget(script, budget);
   else alignTotalDuration(script, totalDuration);
 
+  // 镜头时长被预算改过之后时间轴要跟着重算，否则「0~5 秒」对不上一个 3 秒的镜头
+  script.shots.forEach((shot) => {
+    if (shot.beatSheet) shot.beatSheet = normalizeBeatSheet(shot.beatSheet, shot.duration);
+  });
+
   reconcileReferences(script, plan);
+  stabilizeStateChain(script);
+}
+
+/**
+ * 中 → 英提示词本地化：把每一镜已定稿的中文 description 单独翻成英文，
+ * 带上角色 / 场景的固定英文短语与标准景别、运镜词。
+ *
+ * 分镜阶段也会写英文（作为回退稿），但「一边构思画面一边写英文」很容易写漂；
+ * 让模型只做翻译，中英对不上的概率会低一个量级。
+ */
+async function localizeScriptPrompts(script: Script, plan: StoryPlan | null): Promise<Script> {
+  if (!config.llm.localize || script.shots.length === 0) return script;
+
+  const characters = (plan && plan.characters.length > 0 ? plan.characters : script.characters).map(
+    (c) => ({ name: c.name, promptEn: c.promptEn || undefined }),
+  );
+  const scenes = (plan && plan.scenes.length > 0 ? plan.scenes : (script.scenes ?? [])).map((s) => ({
+    name: s.name,
+    promptEn: s.promptEn || undefined,
+  }));
+
+  const translated = await localizePrompts({
+    shots: script.shots.map((shot) => ({
+      index: shot.index,
+      description: shot.description,
+      shotSize: shot.shotSize,
+      cameraMove: shot.cameraMove,
+      characters: shot.characterNames ?? [],
+      scenes: shot.sceneNames ?? [],
+    })),
+    characters,
+    scenes,
+    style: script.style,
+  });
+
+  if (!translated) return script;
+
+  for (const shot of script.shots) {
+    const next = translated.get(shot.index);
+    if (next) shot.videoPrompt = next;
+  }
+  return script;
 }
 
 /** 把修复稿合并回原剧本：同镜数时保留原 id / 时长 / 素材，避免打断已有生成结果 */
@@ -617,6 +718,10 @@ function mergeRepairedShots(
       if (prev.continueFromPrev !== undefined) {
         shot.continueFromPrev = prev.continueFromPrev;
       }
+      // 修复稿漏写状态链 / 时间轴时继承原稿，别让一次修复把整条链清空
+      if (!shot.entryState && prev.entryState) shot.entryState = prev.entryState;
+      if (!shot.exitState && prev.exitState) shot.exitState = prev.exitState;
+      if (!shot.beatSheet && prev.beatSheet) shot.beatSheet = prev.beatSheet;
     });
   }
 
@@ -681,7 +786,9 @@ async function requestStoryboard(
 ): Promise<Script> {
   const system = buildSystemPrompt();
   const user = buildUserPrompt(req, expectedShots, totalDuration, plan, durations);
-  const first = await callChatJson({ system, user, temperature: 0.8, maxTokens: 6000 });
+  // 每镜多了秒级节奏，输出比以前长；预算跟随 LLM_MAX_TOKENS，被截断时 callChatJson 还会放大重试
+  const budget = Math.max(config.llm.maxTokens, 6000);
+  const first = await callChatJson({ system, user, temperature: 0.8, maxTokens: budget });
 
   try {
     return normalizeScript(first, style, userStyle);
@@ -698,7 +805,7 @@ async function requestStoryboard(
       system,
       user: `${user}\n\n注意：上一次输出没有 shots 数组，请重新输出完整的 JSON，不要只给片段。`,
       temperature: 0.7,
-      maxTokens: 6000,
+      maxTokens: budget,
     });
     return normalizeScript(retry, style, userStyle);
   }
@@ -826,7 +933,10 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
   );
   finalizeScript(script, plan, expectedShots, budget, totalDuration);
 
-  // 第三步：审片。有硬伤时让模型修一次，仍然失败就保留原稿，不让生成失败
+  // 第三步：中文定稿后单独翻英文提示词，保证英文严格对应中文
+  script = await localizeScriptPrompts(script, plan);
+
+  // 第四步：审片。有硬伤时让模型修一次，仍然失败就保留原稿，不让生成失败
   script = await reviewAndRepair(script, plan, expectedShots, style);
 
   // 修复稿可能改了镜数 / 引用，重新收口一次

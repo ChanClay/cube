@@ -61,9 +61,9 @@ export async function logVideoError(
   return logEvent('video', scope, detail, 'error');
 }
 
-/** 剧本 agent 链路异常（改编 / 蓝图 / 审片失败会降级，属于告警） */
+/** 剧本 agent 链路异常（改编 / 蓝图 / 翻译 / 审片失败会降级，属于告警） */
 export async function logAgentWarn(
-  scope: 'adapt' | 'plan' | 'script' | 'review',
+  scope: 'adapt' | 'plan' | 'script' | 'localize' | 'review',
   detail: Record<string, unknown>,
 ): Promise<void> {
   return logEvent('agent', scope, detail, 'warn');

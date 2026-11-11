@@ -26,6 +26,11 @@ export const config = {
      * 只在检测到硬伤时才会额外发请求，正常输出不会变慢。
      */
     review: bool(process.env.SCRIPT_REVIEW, true),
+    /**
+     * 中文定稿后是否再调一次模型，把每镜的中文描述单独翻成英文提示词。
+     * 关掉后退回「分镜阶段顺手写英文」，中英容易对不上；正常只在生成剧本时多一次调用。
+     */
+    localize: bool(process.env.SCRIPT_LOCALIZE, true),
   },
   video: {
     /** 通义万相 wan3.0（唯一支持的视频模型） */

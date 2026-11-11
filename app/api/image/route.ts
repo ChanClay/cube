@@ -45,6 +45,8 @@ export async function POST(request: Request) {
 
   const payload = (body ?? {}) as Record<string, unknown>;
   const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
+  /** 蓝图锁定的固定英文短语：带上它，卡片和逐镜视频才长得一样 */
+  const promptEn = typeof payload.promptEn === 'string' ? payload.promptEn.trim() : '';
   const style = typeof payload.style === 'string' ? payload.style.trim() : '';
   const kind = payload.kind === 'scene' ? 'scene' : 'character';
 
@@ -55,7 +57,7 @@ export async function POST(request: Request) {
   try {
     const remoteUrl = await generateImage({
       // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/image-prompt
-      prompt: buildCardPrompt({ kind, prompt, style }),
+      prompt: buildCardPrompt({ kind, prompt, promptEn, style }),
       size: CARD_IMAGE_SIZE[kind],
       negativePrompt: CARD_NEGATIVE_PROMPT,
     });
