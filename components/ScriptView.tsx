@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CastCards from './CastCards';
 import ShotCard from './ShotCard';
 import { isSameTakeShot, prevFrameCast } from '@/lib/shot-media';
@@ -76,6 +76,15 @@ const SAVE_TEXT = {
   error: '保存失败',
 } as const;
 
+/** 镜头 tab 上的状态文案（悬浮提示用） */
+const JOB_TEXT = {
+  queued: '排队中',
+  running: '生成中',
+  succeeded: '已完成',
+  failed: '生成失败',
+  canceled: '已放弃',
+} as const;
+
 const FilmIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
     <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
@@ -130,6 +139,48 @@ export default function ScriptView({
   /** 合成结果不再常驻页面，点按钮才弹窗看 */
   const [composeOpen, setComposeOpen] = useState(false);
   const composed = composeState === 'done' && !!composeResult;
+
+  /**
+   * 分镜改成 tab：一次只渲染一镜，页面高度不再随镜头数增长。
+   * activeShotId 为 null（刚进页面 / 切了剧本）时回落到第一镜。
+   */
+  const shots = script?.shots ?? [];
+  const [activeShotId, setActiveShotId] = useState<string | null>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setActiveShotId(null);
+  }, [currentScriptId]);
+
+  const activeIndex = Math.max(
+    0,
+    shots.findIndex((shot) => shot.id === activeShotId),
+  );
+  const activeShot = shots[activeIndex] ?? null;
+
+  /** 切到某一镜，并把它滚进 tab 栏的可见范围 */
+  const goToShot = (id: string) => {
+    setActiveShotId(id);
+    requestAnimationFrame(() => {
+      tabsRef.current
+        ?.querySelector<HTMLElement>(`[data-shot-tab="${id}"]`)
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  };
+
+  /** 手动「＋ 添加镜头」后自动跳过去，省得自己再点一下 */
+  const prevShotCount = useRef(0);
+  useEffect(() => {
+    const prev = prevShotCount.current;
+    prevShotCount.current = shots.length;
+    if (prev > 0 && shots.length > prev) goToShot(shots[shots.length - 1].id);
+  }, [shots]);
+
+  /** 上一镜 / 下一镜：串着检查时不用每次回去点 tab */
+  const stepShot = (delta: number) => {
+    const next = shots[activeIndex + delta];
+    if (next) goToShot(next.id);
+  };
 
   useEffect(() => {
     if (!composeOpen) return;
@@ -290,116 +341,131 @@ export default function ScriptView({
         {!loading && script && (
           <>
             <header className="script-head">
-              <input
-                className="script-title script-title-input"
-                value={script.title}
-                onChange={(e) => onScriptTitleChange?.(e.target.value)}
-                placeholder="剧本名称"
-                aria-label="剧本名称"
-                readOnly={!onScriptTitleChange}
-              />
-              {script.logline && <p className="script-logline">{script.logline}</p>}
-              <div className="tag-row">
-                <span className="tag tag--accent">{script.style}</span>
-                <span className="tag">{script.shots.length} 个镜头</span>
-                <span className="tag">总时长 {totalDuration}s</span>
-                {script.shots.length > 1 && (
-                  <span
-                    className="tag"
-                    title={
-                      '承接上一镜的镜头会抽取上一镜末帧当首帧，这类镜头不能再传角色卡参考图' +
-                      '（wan3.0 首帧与参考图互斥），人物一致性靠后续关键帧层保证；' +
-                      '硬切的镜头走角色卡 / 场景卡参考图。'
-                    }
-                  >
-                    {sameTakeCount} 处承接 · {script.shots.length - 1 - sameTakeCount} 处硬切
-                  </span>
+              {/* 第一行：剧本名 + 一句话简介 + 合成，剩下的都收进下面的「剧本信息」 */}
+              <div className="script-title-row">
+                <input
+                  className="script-title script-title-input"
+                  value={script.title}
+                  onChange={(e) => onScriptTitleChange?.(e.target.value)}
+                  placeholder="剧本名称"
+                  aria-label="剧本名称"
+                  readOnly={!onScriptTitleChange}
+                />
+                {/* 简介跟在剧名后面吃掉中间的空档，单行省略，全文见悬浮提示 */}
+                {script.logline && (
+                  <p className="script-logline" title={script.logline}>
+                    {script.logline}
+                  </p>
                 )}
-                {saveState !== 'idle' && (
-                  <span
-                    className={`tag ${saveState === 'error' ? 'tag--error' : 'tag--accent'}`}
-                    title="剧本保存在本地 SQLite（.data/app.db）"
-                  >
-                    {SAVE_TEXT[saveState]}
-                  </span>
+                {/* 右侧：保存状态 + 合成成片，和剧本名共用一行，省掉单独一行 */}
+                {(saveState !== 'idle' || doneCount >= 2) && (
+                  <div className="script-title-actions">
+                    {saveState !== 'idle' && (
+                      <span
+                        className={`tag ${saveState === 'error' ? 'tag--error' : 'tag--accent'}`}
+                        title="剧本保存在本地 SQLite（.data/app.db）"
+                      >
+                        {SAVE_TEXT[saveState]}
+                      </span>
+                    )}
+                    {doneCount >= 2 && (
+                      <>
+                        <button
+                          className="btn btn--sm"
+                          onClick={onCompose}
+                          disabled={composeState === 'running' || !composeReady}
+                          title={
+                            !composeReady
+                              ? '未检测到 ffmpeg'
+                              : composeState === 'running'
+                                ? `正在下载并重新编码 ${doneCount} 个镜头，请勿关闭页面`
+                                : `把 ${doneCount} 个已生成镜头按顺序拼接为一个 MP4`
+                          }
+                        >
+                          {composeState === 'running' ? (
+                            <>
+                              <span className="spinner" />
+                              合成中…
+                            </>
+                          ) : composed ? (
+                            '重新合成'
+                          ) : (
+                            '合成成片'
+                          )}
+                        </button>
+                        {/* 合成过才出现：点开弹窗看视频，不在页面里铺大播放器 */}
+                        {composed && (
+                          <button
+                            className="btn btn--sm btn--primary"
+                            onClick={() => setComposeOpen(true)}
+                            title="弹窗查看已合成的成片"
+                          >
+                            ▶ 查看成片
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
 
-              {(onEditIdea || onRecreateIdea) && (
-                <div className="script-idea">
-                  <div className="script-idea-main">
-                    <span className="characters-title">故事创意</span>
-                    <p className="script-idea-text">
-                      {idea || '还没有填写故事创意'}
-                    </p>
-                  </div>
-                  {/* 已经生成过视频就改成另存新剧本，避免重新生成把成片对应的分镜覆盖掉 */}
-                  {doneCount === 0 && onEditIdea ? (
-                    <button
-                      className="btn btn--sm btn--ghost"
-                      type="button"
-                      onClick={onEditIdea}
-                      title="把这份剧本的故事创意回填到创意表单"
-                    >
-                      {idea ? '编辑' : '填写创意'}
-                    </button>
-                  ) : onRecreateIdea ? (
-                    <button
-                      className="btn btn--sm"
-                      type="button"
-                      onClick={onRecreateIdea}
-                      title="已有镜头生成过视频，会带着当前创意另存为新剧本，不改动这份"
-                    >
-                      另存新剧本
-                    </button>
-                  ) : null}
-                </div>
-              )}
-
-              {doneCount >= 2 && (
-                <div className="compose-bar">
-                  <button
-                    className="btn btn--sm"
-                    onClick={onCompose}
-                    disabled={composeState === 'running' || !composeReady}
-                    title={composeReady ? '按剧本顺序拼接为一个 MP4' : '未检测到 ffmpeg'}
-                  >
-                    {composeState === 'running' ? (
-                      <>
-                        <span className="spinner" />
-                        合成中…
-                      </>
-                    ) : composed ? (
-                      '重新合成'
-                    ) : (
-                      '合成成片'
+              {/* 创意 / 画风 / 角色卡 / 场景卡：默认收起，只看一行摘要 */}
+              <details className="script-info">
+                <summary>
+                  <span className="script-info-title">剧本信息</span>
+                  <span className="script-info-hint">
+                    <b>{script.style || '未设置画风'}</b>
+                    <span>· {(script.characters ?? []).length} 角色</span>
+                    <span>· {(script.scenes ?? []).length} 场景</span>
+                    <span>· {idea ? '有故事创意' : '无故事创意'}</span>
+                    {script.shots.length > 1 && (
+                      <span title="承接的镜头抽上一镜末帧当首帧，这类镜头不能再传角色卡参考图">
+                        · {sameTakeCount} 处承接
+                      </span>
                     )}
-                  </button>
-                  {/* 合成过才出现：点开弹窗看视频，不再把大播放器铺在页面里 */}
-                  {composed && (
-                    <button
-                      className="btn btn--sm btn--primary"
-                      onClick={() => setComposeOpen(true)}
-                      title="弹窗查看已合成的成片"
-                    >
-                      ▶ 查看成片
-                    </button>
-                  )}
-                  <span className="field-hint">
-                    {composeState === 'running'
-                      ? `正在下载并重新编码 ${doneCount} 个镜头，请勿关闭页面`
-                      : `把 ${doneCount} 个已生成镜头按顺序拼接为一个 MP4`}
                   </span>
+                </summary>
+
+                <div className="script-info-body">
+                  {(onEditIdea || onRecreateIdea) && (
+                    <div className="script-idea">
+                      <div className="script-idea-main">
+                        <span className="characters-title">故事创意</span>
+                        <p className="script-idea-text">{idea || '还没有填写故事创意'}</p>
+                      </div>
+                      {/* 已经生成过视频就改成另存新剧本，避免重新生成把成片对应的分镜覆盖掉 */}
+                      {doneCount === 0 && onEditIdea ? (
+                        <button
+                          className="btn btn--sm btn--ghost"
+                          type="button"
+                          onClick={onEditIdea}
+                          title="把这份剧本的故事创意回填到创意表单"
+                        >
+                          {idea ? '编辑' : '填写创意'}
+                        </button>
+                      ) : onRecreateIdea ? (
+                        <button
+                          className="btn btn--sm"
+                          type="button"
+                          onClick={onRecreateIdea}
+                          title="已有镜头生成过视频，会带着当前创意另存为新剧本，不改动这份"
+                        >
+                          另存新剧本
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+
+                  <CastCards
+                    characters={script.characters}
+                    scenes={script.scenes ?? []}
+                    style={script.style}
+                    onCharactersChange={onCharactersChange ?? (() => undefined)}
+                    onScenesChange={onScenesChange ?? (() => undefined)}
+                    onStyleChange={onStyleChange}
+                  />
                 </div>
-              )}
-              <CastCards
-                characters={script.characters}
-                scenes={script.scenes ?? []}
-                style={script.style}
-                onCharactersChange={onCharactersChange ?? (() => undefined)}
-                onScenesChange={onScenesChange ?? (() => undefined)}
-                onStyleChange={onStyleChange}
-              />
+              </details>
 
             </header>
 
@@ -418,41 +484,118 @@ export default function ScriptView({
               </div>
             )}
 
-            <div className="shot-list">
-              {script.shots.map((shot, index) => (
-                <ShotCard
-                  key={shot.id}
-                  shot={shot}
-                  job={jobs[shot.id]}
-                  onChange={(patch) => onShotChange(shot.id, patch)}
-                  onGenerate={() => onGenerate(shot)}
-                  characters={script.characters}
-                  style={script.style}
-                  beforeDescription={script.shots[index - 1]?.description ?? ''}
-                  afterDescription={script.shots[index + 1]?.description ?? ''}
-                  isFirst={index === 0}
-                  startAt={script.shots.slice(0, index).reduce((sum, prev) => sum + prev.duration, 0)}
-                  carryMuted={carryMuted}
-                  prevSceneName={script.shots[index - 1]?.sceneNames?.[0] ?? ''}
-                  prevCast={prevFrameCast(script.shots[index - 1] ?? null)}
-                  prevExitState={script.shots[index - 1]?.exitState ?? ''}
-                  prevFrameRefEnabled={prevFrameRefEnabled}
-                  onAbandon={onAbandonShot ? () => onAbandonShot(shot) : undefined}
-                />
-              ))}
+            {/* 分镜 tab：名字上直接带生成状态，点哪镜看哪镜 */}
+            <div className="shot-tabs-bar">
+              <div
+                className="shot-tabs"
+                role="tablist"
+                aria-label="分镜列表"
+                ref={tabsRef}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    stepShot(1);
+                  } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    stepShot(-1);
+                  }
+                }}
+              >
+                {shots.map((shot, index) => {
+                  const job = jobs[shot.id];
+                  const isActive = shot.id === activeShot?.id;
+                  return (
+                    <button
+                      key={shot.id}
+                      type="button"
+                      role="tab"
+                      data-shot-tab={shot.id}
+                      aria-selected={isActive}
+                      className={`shot-tab${isActive ? ' is-active' : ''}${
+                        job ? ` is-${job.status}` : ''
+                      }`}
+                      onClick={() => setActiveShotId(shot.id)}
+                      title={`第 ${index + 1} 镜 · ${shot.title || '未命名'}｜${
+                        job ? JOB_TEXT[job.status] : '尚未生成'
+                      }${job?.error ? `｜${job.error}` : ''}`}
+                    >
+                      <span className="shot-tab-no">{String(shot.index).padStart(2, '0')}</span>
+                      <span className="shot-tab-name">{shot.title || `第 ${index + 1} 镜`}</span>
+                      {/* 状态点：绿=已完成、蓝=生成中、黄=排队、红=失败、灰=未生成/已放弃 */}
+                      <span className="shot-tab-dot" aria-hidden="true" />
+                      {job?.status === 'running' && job.progress ? (
+                        <span className="shot-tab-progress">{job.progress}%</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+
+                {onAddShot && (
+                  <button
+                    className="shot-tab shot-tab--add"
+                    type="button"
+                    onClick={onAddShot}
+                    disabled={generatingAll}
+                    title="在剧本末尾手动新增一镜，画面描述和视频提示词自己写"
+                    aria-label="添加镜头"
+                  >
+                    ＋
+                  </button>
+                )}
+              </div>
+
+              {shots.length > 1 && (
+                <div className="shot-pager">
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    type="button"
+                    onClick={() => stepShot(-1)}
+                    disabled={activeIndex <= 0}
+                    title="上一镜（←）"
+                    aria-label="上一镜"
+                  >
+                    ‹
+                  </button>
+                  <span className="shot-pager-text">
+                    {activeIndex + 1}/{shots.length}
+                  </span>
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    type="button"
+                    onClick={() => stepShot(1)}
+                    disabled={activeIndex >= shots.length - 1}
+                    title="下一镜（→）"
+                    aria-label="下一镜"
+                  >
+                    ›
+                  </button>
+                </div>
+              )}
             </div>
 
-            {onAddShot && (
-              <button
-                className="shot-add"
-                type="button"
-                onClick={onAddShot}
-                disabled={generatingAll}
-                title="在剧本末尾手动新增一镜，画面描述和视频提示词自己写；也可以写完描述点「重新生成分镜信息」"
-              >
-                <b>＋ 添加镜头</b>
-                <span className="shot-add-hint">手动加一镜，自己写画面描述与视频提示词</span>
-              </button>
+            {activeShot && (
+              <ShotCard
+                key={activeShot.id}
+                shot={activeShot}
+                job={jobs[activeShot.id]}
+                onChange={(patch) => onShotChange(activeShot.id, patch)}
+                onGenerate={() => onGenerate(activeShot)}
+                characters={script.characters}
+                style={script.style}
+                beforeDescription={shots[activeIndex - 1]?.description ?? ''}
+                afterDescription={shots[activeIndex + 1]?.description ?? ''}
+                isFirst={activeIndex === 0}
+                startAt={shots
+                  .slice(0, activeIndex)
+                  .reduce((sum, prev) => sum + prev.duration, 0)}
+                carryMuted={carryMuted}
+                prevSceneName={shots[activeIndex - 1]?.sceneNames?.[0] ?? ''}
+                prevCast={prevFrameCast(shots[activeIndex - 1] ?? null)}
+                prevExitState={shots[activeIndex - 1]?.exitState ?? ''}
+                prevFrameRefEnabled={prevFrameRefEnabled}
+                onAbandon={onAbandonShot ? () => onAbandonShot(activeShot) : undefined}
+                hideIndex
+              />
             )}
           </>
         )}

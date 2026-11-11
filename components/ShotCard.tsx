@@ -54,6 +54,8 @@ interface Props {
   prevFrameRefEnabled?: boolean;
   /** 放弃这一镜：停止跟踪进度（云端任务仍会跑完） */
   onAbandon?: () => void;
+  /** 序号已在镜头 tab 上显示过，卡片里不必重复 */
+  hideIndex?: boolean;
 }
 
 /** 与上一镜的衔接方式，顺序即下拉顺序 */
@@ -105,6 +107,7 @@ export default function ShotCard({
   prevExitState = '',
   prevFrameRefEnabled = true,
   onAbandon,
+  hideIndex = false,
 }: Props) {
   const [newType, setNewType] = useState<MediaType>('first_frame');
   const [newUrl, setNewUrl] = useState('');
@@ -251,10 +254,25 @@ export default function ShotCard({
     onChange({ media: next });
   };
 
+  /** 生成状态徽标 */
+  const statusBadge = (
+    <div
+      className={`status-badge ${job ? `status--${job.status}` : ''}`}
+      title={job?.error ?? undefined}
+    >
+      {job && <span className="dot" />}
+      <span>
+        {job
+          ? `${STATUS_TEXT[job.status]}${job.status === 'running' && job.progress ? ` ${job.progress}%` : ''}`
+          : '尚未生成'}
+      </span>
+    </div>
+  );
+
   return (
     <article className="shot-card">
       <div className="shot-head">
-        <span className="shot-no">{String(shot.index).padStart(2, '0')}</span>
+        {!hideIndex && <span className="shot-no">{String(shot.index).padStart(2, '0')}</span>}
         <input
           className="shot-title-input"
           value={shot.title}
@@ -435,68 +453,70 @@ export default function ShotCard({
         />
       </div>
 
-      <details className="media-panel" open={media.length > 0}>
+      {/**
+        * 已加的素材平铺成一行缩略图：一条素材不再占一整行（缩略图 + 类型 + URL），
+        * 加几张图也只涨一行高度。点图看大图，悬停出删除，URL 收进 title。
+        */}
+      {media.length > 0 && (
+        <div className="media-strip">
+          {media.map((item, index) => {
+            const broken = brokenThumbs.includes(item.url);
+            return (
+              <div className="media-chip" key={`${item.type}-${index}`}>
+                <button
+                  className={`media-chip-thumb${broken ? ' is-broken' : ''}`}
+                  type="button"
+                  onClick={() => setPreviewing(item)}
+                  title={`${MEDIA_LABEL[item.type]}${item.auto ? ' · 自动' : ''}\n${item.url}`}
+                  aria-label={`预览${MEDIA_LABEL[item.type]}`}
+                >
+                  {isImageMedia(item.type) ? (
+                    broken ? (
+                      <span className="media-chip-glyph">无图</span>
+                    ) : (
+                      <img
+                        src={item.url}
+                        alt={MEDIA_LABEL[item.type]}
+                        loading="lazy"
+                        onError={() =>
+                          setBrokenThumbs((prev) =>
+                            prev.includes(item.url) ? prev : [...prev, item.url],
+                          )
+                        }
+                      />
+                    )
+                  ) : item.type === 'reference_video' ? (
+                    <video src={item.url} preload="metadata" muted playsInline />
+                  ) : (
+                    <span className="media-chip-glyph">{MEDIA_GLYPH[item.type]}</span>
+                  )}
+                  <span className="media-chip-tag">
+                    {MEDIA_LABEL[item.type]}
+                    {item.auto ? ' · 自动' : ''}
+                  </span>
+                </button>
+                <button
+                  className="media-chip-remove"
+                  onClick={() => removeMedia(index)}
+                  aria-label={`移除${MEDIA_LABEL[item.type]}`}
+                  title={`移除这个${MEDIA_LABEL[item.type]}`}
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <details className="media-panel">
         <summary>
           <span>多模态素材</span>
           <span className={`media-count ${media.length > 0 ? 'media-count--on' : ''}`}>
             {mediaSummary(media)}
           </span>
         </summary>
-
-        {media.length > 0 && (
-          <div className="media-list">
-            {media.map((item, index) => {
-              const broken = brokenThumbs.includes(item.url);
-              return (
-                <div className="media-item" key={`${item.type}-${index}`}>
-                  <button
-                    className={`media-thumb${broken ? ' media-thumb--broken' : ''}`}
-                    type="button"
-                    onClick={() => setPreviewing(item)}
-                    title="点击预览"
-                    aria-label={`预览${MEDIA_LABEL[item.type]}`}
-                  >
-                    {isImageMedia(item.type) ? (
-                      broken ? (
-                        <span>无图</span>
-                      ) : (
-                        <img
-                          src={item.url}
-                          alt={MEDIA_LABEL[item.type]}
-                          loading="lazy"
-                          onError={() =>
-                            setBrokenThumbs((prev) =>
-                              prev.includes(item.url) ? prev : [...prev, item.url],
-                            )
-                          }
-                        />
-                      )
-                    ) : item.type === 'reference_video' ? (
-                      <video src={item.url} preload="metadata" muted playsInline />
-                    ) : (
-                      <span>{MEDIA_GLYPH[item.type]}</span>
-                    )}
-                  </button>
-                  <span className="media-type">
-                    {MEDIA_LABEL[item.type]}
-                    {item.auto ? ' · 自动' : ''}
-                  </span>
-                  <span className="media-url" title={item.url}>
-                    {item.url}
-                  </span>
-                  <button
-                    className="media-remove"
-                    onClick={() => removeMedia(index)}
-                    aria-label="移除素材"
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         <div className="media-add">
           <select
@@ -534,17 +554,7 @@ export default function ShotCard({
         <aside className="shot-preview">
           <div className="preview-head">
             <span className="shot-label">成果视频</span>
-            <div
-              className={`status-badge ${job ? `status--${job.status}` : ''}`}
-              title={job?.error ?? undefined}
-            >
-              {job && <span className="dot" />}
-              <span>
-                {job
-                  ? `${STATUS_TEXT[job.status]}${job.status === 'running' && job.progress ? ` ${job.progress}%` : ''}`
-                  : '尚未生成'}
-              </span>
-            </div>
+            {statusBadge}
           </div>
 
           {job?.status === 'succeeded' && job.videoUrl ? (

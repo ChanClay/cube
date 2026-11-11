@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/client';
+import { STYLE_LABELS } from '@/lib/style-presets';
 import type { Character, Scene } from '@/lib/types';
 
 /**
@@ -48,6 +49,9 @@ interface Props {
   onStyleChange?: (style: string) => void;
 }
 
+/** 画风下拉里的「自定义」哨兵值：不是合法画风，只用来把光标交给输入框 */
+const CUSTOM_STYLE = '__custom__';
+
 /** 旧剧本的角色 / 场景没有 id，退化成按位置生成 */
 const keyOf = (kind: Kind, item: Card, index: number) => item.id ?? `${kind}-${index}`;
 
@@ -65,6 +69,13 @@ export default function CastCards({
 }: Props) {
   /** 「整体画风」输入框的草稿值，失焦或回车时提交 */
   const [styleDraft, setStyleDraft] = useState(style);
+  /** 选「自定义」时把光标丢进输入框 */
+  const styleInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * 文本正好等于某个预设标签时，下拉选中它；否则下拉显示「自定义」。
+   * 旧剧本 / 手改过的长描述都会落到「自定义」，文本原样保留。
+   */
+  const presetLabel = STYLE_LABELS.find((label) => label === styleDraft.trim()) ?? null;
   /** 正在生成 / 上传的卡片 key */
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -360,7 +371,34 @@ export default function CastCards({
       {onStyleChange && (
         <div className="cast-style">
           <span className="cast-style-label">整体画风</span>
+          {/* 预设下拉：选完立刻生效；「自定义」只是把光标交给右边的输入框 */}
+          <select
+            className="select cast-style-select"
+            value={presetLabel ?? CUSTOM_STYLE}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === CUSTOM_STYLE) {
+                styleInputRef.current?.focus();
+                styleInputRef.current?.select();
+                return;
+              }
+              setStyleDraft(value);
+              if (value !== style.trim()) onStyleChange(value);
+            }}
+            title="预设画风：生成配图与分镜提示词时会展开成完整的风格描述"
+            aria-label="画风预设"
+            disabled={disabled}
+          >
+            {STYLE_LABELS.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+            <option value={CUSTOM_STYLE}>自定义…</option>
+          </select>
+
           <input
+            ref={styleInputRef}
             className="cast-style-input"
             value={styleDraft}
             onChange={(e) => setStyleDraft(e.target.value)}
@@ -371,9 +409,9 @@ export default function CastCards({
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur();
             }}
-            placeholder="例如：1990 年代港片胶片质感，暖调霓虹，轻微颗粒，浅景深"
+            placeholder="选预设，或自己写：1990 年代港片胶片质感，暖调霓虹，轻微颗粒"
             aria-label="整体画风"
-            title="生成角色卡 / 场景卡配图时作为画面风格（严格遵循）；改完重新生成配图即可对齐画风"
+            title="生成角色卡 / 场景卡配图与分镜提示词时作为画面风格（严格遵循）。选预设会展开成完整描述；手工改过的文本按原样使用"
             disabled={disabled}
           />
         </div>
