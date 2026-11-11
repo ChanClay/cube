@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import CastCards from './CastCards';
 import ShotCard from './ShotCard';
-import { isSameTakeShot } from '@/lib/shot-media';
+import { isSameTakeShot, prevFrameCast } from '@/lib/shot-media';
 import type {
   Character,
   ComposeResult,
@@ -434,6 +434,8 @@ export default function ScriptView({
                   startAt={script.shots.slice(0, index).reduce((sum, prev) => sum + prev.duration, 0)}
                   carryMuted={carryMuted}
                   prevSceneName={script.shots[index - 1]?.sceneNames?.[0] ?? ''}
+                  prevCast={prevFrameCast(script.shots[index - 1] ?? null)}
+                  prevExitState={script.shots[index - 1]?.exitState ?? ''}
                   prevFrameRefEnabled={prevFrameRefEnabled}
                   onAbandon={onAbandonShot ? () => onAbandonShot(shot) : undefined}
                 />

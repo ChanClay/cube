@@ -175,6 +175,10 @@ export interface RefineShotBody {
   /** 上一镜 / 下一镜的画面描述，用于承接与衔接 */
   before?: string;
   after?: string;
+  /** 上一镜末帧里实际在场的人物名：本镜会带上那张末帧当参考图，提示词要按这份名单点名 */
+  prevCast?: string[];
+  /** 上一镜的结尾状态（分镜写的画面事实），用来对齐动作与位置 */
+  prevExitState?: string;
   /** 全片角色卡，保证重算后角色外貌不漂移 */
   characters?: { name: string; desc: string }[];
 }

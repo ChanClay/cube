@@ -46,6 +46,10 @@ interface Props {
   carryMuted?: boolean;
   /** 上一镜的场景名：判断能不能把上一镜末帧当同场景的风格参考 */
   prevSceneName?: string;
+  /** 上一镜末帧里实际在场的人物：重算提示词时按这份名单点名，避免凭空多出人 */
+  prevCast?: string[];
+  /** 上一镜的结尾状态，用于对齐动作与位置 */
+  prevExitState?: string;
   /** 全局开关（VIDEO_REFERENCE_PREV_FRAME）：关掉时这个选项不可用 */
   prevFrameRefEnabled?: boolean;
   /** 放弃这一镜：停止跟踪进度（云端任务仍会跑完） */
@@ -97,6 +101,8 @@ export default function ShotCard({
   startAt,
   carryMuted = true,
   prevSceneName = '',
+  prevCast = [],
+  prevExitState = '',
   prevFrameRefEnabled = true,
   onAbandon,
 }: Props) {
@@ -187,6 +193,8 @@ export default function ShotCard({
         duration: shot.duration,
         before: beforeDescription,
         after: afterDescription,
+        prevCast,
+        prevExitState,
         characters: characters.map(({ name, desc }) => ({ name, desc })),
       });
 

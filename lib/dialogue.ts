@@ -23,24 +23,52 @@ function withEnd(text: string): string {
 }
 
 /**
- * 带上一镜末帧当参考图时追加的限定句。
+ * 带上一镜末帧当参考图时追加的稳定句。
  *
  * 必须把作用范围写死：wan3.0 的 reference_image 是「角色 / 物品 / 风格参考」，
- * 不给边界它会连构图和机位一起抄，硬切就白切了。这里只借光线与材质，
+ * 不给边界它会连构图和机位一起抄。这里只借光线与材质，
  * 景别、机位、构图回到本镜自己的描述。
  */
-const FRAME_REFERENCE_CLAUSE =
+const FRAME_REFERENCE_STYLE =
   'Match the lighting, color temperature and scene materials of the reference image, ' +
   'but keep the framing, shot size and camera angle described above exactly.';
+
+/** 英文并列：A / A and B / A, B and C */
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * 限定句 + 点名参考图里的人物。
+ *
+ * 不点名的话模型只会把末帧当调色板用，人物身份信息全部浪费——这正是
+ * 「参考图有效果，但人物对不上」的直接原因。名字取不到时退回只限制风格。
+ */
+function frameReferenceClause(cast: string[]): string {
+  const names = cast
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  if (names.length === 0) return FRAME_REFERENCE_STYLE;
+  return (
+    `The reference image is the last frame of the previous shot and shows ${joinNames(names)}; ` +
+    'keep their faces, wardrobe and positions consistent with it. ' +
+    FRAME_REFERENCE_STYLE
+  );
+}
 
 export function buildVideoPrompt(
   prompt: string,
   shot: Pick<Shot, 'narration' | 'narrationType' | 'speaker'>,
   media: MediaInput[] = [],
+  /** 参考图里实际在场的人物名（见 lib/shot-media 的 prevFrameCast） */
+  refCast: string[] = [],
 ): string {
   const base = (prompt ?? '').trim();
   const line = (shot.narration ?? '').trim();
-  const reference = hasPrevFrameReference(media) ? ` ${FRAME_REFERENCE_CLAUSE}` : '';
+  const reference = hasPrevFrameReference(media) ? ` ${frameReferenceClause(refCast)}` : '';
 
   // 没写台词，或明确选了「都不要」：画面描述原样提交，模型只出环境音/BGM
   if (!line || shot.narrationType === 'none') {

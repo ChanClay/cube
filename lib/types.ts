@@ -138,6 +138,15 @@ export interface Shot {
    */
   referencePrevFrame?: boolean;
   /**
+   * 这一镜最后一帧里**实际**在场的人物名。
+   *
+   * 只有「视觉识别」或「人工确认」才写入；为空时调用方回落到 characterNames。
+   * 和 characterNames 的区别是「事实」与「意图」：分镜写的是这一镜该有谁，
+   * 视频模型自己加的人、中途入场的人都会让两者不一致，而写下一镜提示词时
+   * 必须以画面事实为准，否则会凭空多出末帧里没有的人。
+   */
+  lastFrameCast?: string[];
+  /**
    * @deprecated 旧字段，等价于 transition='same-take'。
    * 新剧本由 transition 决定，这里只用于读取历史数据。
    */

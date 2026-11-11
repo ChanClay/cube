@@ -46,6 +46,18 @@ export function isSameTakeShot(shot: Shot): boolean {
  */
 export type PrevFrameUsage = 'first_frame' | 'reference_image' | null;
 
+/**
+ * 上一镜末帧里实际在场的人物。
+ *
+ * 优先用视觉识别 / 人工确认写入的 `lastFrameCast`；没有时退回本镜的出镜角色，
+ * 那只是分镜时的「意图」，但总比让模型瞎猜强。
+ */
+export function prevFrameCast(prev: Shot | null): string[] {
+  if (!prev) return [];
+  if (prev.lastFrameCast && prev.lastFrameCast.length > 0) return prev.lastFrameCast;
+  return (prev.characterNames ?? []).filter(Boolean);
+}
+
 export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   if (!prev) return null;
   if (isSameTakeShot(shot)) return 'first_frame';
@@ -155,6 +167,8 @@ export interface ResolvedShotMedia {
   skippedCards: number;
   /** 是否把上一镜末帧作为参考图带了进去（硬切镜头的风格锚点） */
   withPrevFrameRef: boolean;
+  /** 参考图里实际在场的人物，用于在提示词里点名（没带参考图时为空） */
+  prevFrameCast: string[];
   /** next 与传入的 media 是否不同（不同才需要写回剧本） */
   changed: boolean;
 }
@@ -189,6 +203,7 @@ export function resolveShotMedia(
   const carryFrame = usage === 'first_frame' ? prevFrame : null;
   const referenceFrame = usage === 'reference_image' ? prevFrame : null;
   let usedRef = false;
+  let usedCast: string[] = [];
 
   const finish = (
     next: MediaInput[],
@@ -201,6 +216,7 @@ export function resolveShotMedia(
     injected,
     skippedCards,
     withPrevFrameRef: usedRef,
+    prevFrameCast: usedCast,
     changed: !sameMedia(next, media),
   });
 
@@ -257,6 +273,8 @@ export function resolveShotMedia(
   const additions = cards.filter((item) => !existingUrls.has(item.url)).slice(0, slots);
 
   usedRef = !!refFrame;
+  // 参考图里是谁：写提示词时要点名，否则视频模型只把它当调色板
+  usedCast = refFrame ? prevFrameCast(prev) : [];
 
   return finish(
     [...additions, ...rest, ...(refFrame ? [refFrame] : [])],

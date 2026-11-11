@@ -26,7 +26,7 @@ function buildSystemPrompt(): string {
 3. description 不需要你重写（用户已经改好），不要返回它。
 4. ${SHOT_LANGUAGE_RULES}
 5. 若提供了角色表，本镜出镜角色的外貌必须与角色表一致；视频提示词里沿用角色表已有的英文外貌短语，不要自行改写年龄、发型、服装、装甲与涂装、道具。
-6. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；避免与相邻镜头重复同一构图。
+6. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；避免与相邻镜头重复同一构图。若给出了「上一镜末帧里实际在场的人物」，本镜开头的人物必须与这份名单完全一致，不许增删；需要新角色出场时，写成在这一镜的过程里走进画面，而不是一开始就站在那里。
 7. narration 是这一镜的旁白或台词，可为空字符串（不要写"旁白："前缀）。
 8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字；旁白或没有台词时 speaker 留空。
 9. title 是这一镜的小标题，4~8 个字。
@@ -52,6 +52,8 @@ function buildUserPrompt(input: {
   duration: number;
   before: string;
   after: string;
+  prevCast: string[];
+  prevExitState: string;
   characters: { name: string; desc: string }[];
 }): string {
   const lines = [
@@ -70,6 +72,23 @@ function buildUserPrompt(input: {
   lines.push('', '修改后的画面描述（必须严格照此生成）：', input.description);
 
   if (input.before) lines.push('', `上一镜的画面描述（用于承接）：${input.before}`);
+
+  /**
+   * 末帧是像素，只给「画面描述」模型并不知道图里站的是谁，于是会凭空多出
+   * 名单以外的人。这里把名单当成硬事实喂进去，并说明它会作为参考图一起提交。
+   */
+  if (input.prevCast.length > 0) {
+    lines.push(
+      '',
+      `上一镜末帧里实际在场的人物：${input.prevCast.join('、')}`,
+      '本镜会带上这张末帧作为参考图。提示词里指代这些人时必须使用上面的名字；' +
+        '这份名单就是本镜开头画面里允许出现的人物，不许增删——需要新角色时写成在这一镜过程中进入画面。',
+    );
+  }
+  if (input.prevExitState) {
+    lines.push(`上一镜的结尾状态（本镜从这里接着演）：${input.prevExitState}`);
+  }
+
   if (input.after) lines.push('', `下一镜的画面描述（用于衔接）：${input.after}`);
 
   lines.push('', '请输出这一镜的分镜信息 JSON。');
@@ -89,6 +108,12 @@ function parseCharacters(raw: unknown): { name: string; desc: string }[] {
     if (result.length >= 8) break;
   }
   return result;
+}
+
+/** 末帧在场人物：只取非空名字 */
+function parseCast(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => str(item)).filter(Boolean).slice(0, 8);
 }
 
 export async function POST(request: Request) {
@@ -113,6 +138,8 @@ export async function POST(request: Request) {
     duration: Number.isFinite(durationRaw) && durationRaw > 0 ? durationRaw : 5,
     before: str(payload.before),
     after: str(payload.after),
+    prevCast: parseCast(payload.prevCast),
+    prevExitState: str(payload.prevExitState),
     characters: parseCharacters(payload.characters),
   };
 

@@ -442,6 +442,8 @@ function ProjectPageInner() {
     async (
       shot: Shot,
       mediaOverride?: MediaInput[],
+      /** 带末帧参考图时，参考图里实际在场的人物名（提示词里要点名） */
+      refCast: string[] = [],
     ): Promise<{ job: VideoJob | null; retryable: boolean }> => {
       // 队列运行中镜头可能被编辑，按 id 取最新的一份
       const live = scriptRef.current?.shots.find((item) => item.id === shot.id) ?? shot;
@@ -457,9 +459,9 @@ function ProjectPageInner() {
 
       /**
        * 台词拼在画面描述后面：wan3.0 原生生成人声，但台词必须写进 prompt 才会说出来。
-       * 带上一镜末帧当参考图时再追一句作用范围限定（只借光线 / 色调，不改构图）。
+       * 带上一镜末帧当参考图时再追一句限定：点名图里的人物 + 只借光线 / 色调，不改构图。
        */
-      const prompt = buildVideoPrompt(basePrompt, live, media);
+      const prompt = buildVideoPrompt(basePrompt, live, media, refCast);
 
       const mediaError = validateMedia(media);
       if (mediaError) {
@@ -634,7 +636,7 @@ function ProjectPageInner() {
       }
       if (resolved.changed) handleShotChange(shot.id, { media: resolved.next });
 
-      await generateShot(live, resolved.next);
+      await generateShot(live, resolved.next, resolved.prevFrameCast);
     },
     [extractCarryFrame, generateShot, handleShotChange, health, showToast],
   );
@@ -790,7 +792,7 @@ function ProjectPageInner() {
               }
               if (resolved.changed) handleShotChange(shot.id, { media: resolved.next });
 
-              const created = await generateShot(live, resolved.next);
+              const created = await generateShot(live, resolved.next, resolved.prevFrameCast);
               if (!created.job) {
                 // 具体原因 generateShot 里已经 toast 过；只有请求类错误才值得重试
                 reason = created.retryable ? '创建任务请求失败' : '任务被本地校验拦下';
