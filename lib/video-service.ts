@@ -65,6 +65,12 @@ export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob
   };
 
   // 先提交给 provider：没提交成功的任务不写库，避免库里堆无用记录
+  /**
+   * 提交前只保留 provider 认识的字段：`auto` / `name` 是本地用来识别素材归属的
+   * （抽帧承接、角色卡去重），不该出现在请求体里。
+   */
+  const providerMedia = media.map((item) => ({ type: item.type, url: item.url }));
+
   let providerJobId: string;
   try {
     const created = await provider.createTask({
@@ -72,7 +78,7 @@ export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob
       duration,
       resolution,
       ratio,
-      media,
+      media: providerMedia,
       audio,
     });
     providerJobId = created.providerJobId;

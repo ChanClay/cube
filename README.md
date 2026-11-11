@@ -126,7 +126,10 @@ VIDEO_AUDIO=true
      - 默认值在生成分镜时写进剧本：同场硬切 = `true`，承接动作 / `time-jump` / 换场景 = `false`（见 `storyboard.ts` 的 `resolveReferenceFrames`）。模型写 `true` 只在同场硬切里被采纳，写 `false` 一律尊重。
      - 镜头卡片上可以直接改（「末帧参考」勾选框）；换场景或选成「承接上一镜」时该选项自动不可用。
      - `VIDEO_REFERENCE_PREV_FRAME` 是全局总开关，置 `0` 后所有镜头都不带。
-     - **参考图里是谁必须点名**：末帧是像素，模型不知道图里站的是谁，只写「匹配光线」的话它只会把参考图当调色板。所以提交时会追加 `The reference image is the last frame of the previous shot and shows 老陈 and 阿七; keep their faces, wardrobe and positions consistent with it.`，后面才是「只借光线 / 材质、构图按本镜描述」的限定。名字来自 `prevFrameCast(prev)`：优先用 `Shot.lastFrameCast`（留给视觉识别 / 人工确认写入），没有时退回上一镜的 `characterNames`——那只是分镜时的意图，精度有限。
+     - **参考图里是谁必须点名**：末帧是像素，模型不知道图里站的是谁，只写「匹配光线」的话它只会把参考图当调色板。所以提交时会追加 `The reference image is the last frame of the previous shot and shows 老陈 — the same person described above, not an additional character. Keep only their faces and wardrobe consistent; do not duplicate them.`，后面才是「只借光线 / 材质、构图按本镜描述」的限定。名字来自 `prevFrameCast(prev)`：优先用 `Shot.lastFrameCast`（留给视觉识别 / 人工确认写入），没有时退回上一镜的 `characterNames`——那只是分镜时的意图，精度有限。
+     - **不许说「保持位置」**：换机位时位置必然变，`keep positions` 会和 `keep the camera angle described above` 直接冲突，模型会把参考图里的人留在原位、再按文字画一个，于是同一个人出现两次。只锁脸和服装，并显式 `do not duplicate`。
+     - **单人镜头给人数上限**：`characterNames` 只有一个时追加 `Only one person appears in frame`。
+     - **卡片与末帧同时传，不做身份去重**：试过「末帧里已经出现的人就不传他的卡」，结果整段视频彻底失去参考——末帧是一张整帧场景图，wan3.0 把它当环境 / 光线 / 风格参考，不会当成某个具体人物，删掉角色卡等于把身份参考一起删了。重复人物改由提示词约束（只锁脸和服装、`do not duplicate`、单人镜头给人数上限）。
      - 重算某镜提示词（`/api/shot/refine`）时也会把同一份名单与上一镜 `exitState` 一起喂给模型，并要求「本镜开头的人物与名单完全一致，需要新角色时写成过程中走进画面」。
    - 两条路径的音频策略不同：接帧镜头默认静音（声音重新生成会断档），参考图镜头正常出音轨，还能同时传 `reference_audio` 锁音色。
 4. **合成成片**：2 个以上镜头完成后点「合成成片」，服务端下载各镜头并用 ffmpeg 拼接为一个 MP4，可播放/下载。

@@ -118,6 +118,8 @@ export default function ShotCard({
   const [previewing, setPreviewing] = useState<MediaInput | null>(null);
   /** 加载失败的缩略图地址：显示占位，不留破图 */
   const [brokenThumbs, setBrokenThumbs] = useState<string[]>([]);
+  /** 「复制提示词」的短暂反馈 */
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   useEffect(() => {
     if (!previewing) return;
@@ -218,6 +220,8 @@ export default function ShotCard({
   };
 
   const busy = job?.status === 'queued' || job?.status === 'running';
+  /** 这次任务实际提交的素材（旧任务记录可能没有这个字段） */
+  const submittedMedia = job?.media ?? [];
   const disabled = busy || shot.videoPrompt.trim().length < 5 || !!mediaError;
 
   const buttonText = busy
@@ -581,6 +585,48 @@ export default function ShotCard({
               <span>尚未生成视频</span>
               <span className="shot-preview-hint">点下方「生成视频」</span>
             </div>
+          )}
+
+          {/**
+           * 提交时真正发出去的东西，用来核对「衔接方式 / 末帧参考」有没有生效：
+           * 提示词里应该能看到 "The reference image is the last frame…"，
+           * 素材里应该能看到那张 frame-xxx.png。看不到就是分流没走到。
+           */}
+          {job && (
+            <details className="prompt-panel">
+              <summary>
+                <span>实际提交的提示词</span>
+                <span className="prompt-panel-hint">{submittedMedia.length} 个素材</span>
+              </summary>
+              <div className="prompt-panel-body">
+                <pre className="prompt-text">{job.prompt}</pre>
+
+                {submittedMedia.length > 0 && (
+                  <ul className="prompt-media">
+                    {submittedMedia.map((item, index) => (
+                      <li key={`${item.type}-${index}`}>
+                        <span className="prompt-media-type">{MEDIA_LABEL[item.type]}</span>
+                        <span className="prompt-media-url" title={item.url}>
+                          {item.url}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <button
+                  className="btn btn--sm"
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(job.prompt);
+                    setCopiedPrompt(true);
+                    window.setTimeout(() => setCopiedPrompt(false), 1500);
+                  }}
+                >
+                  {copiedPrompt ? '已复制' : '复制提示词'}
+                </button>
+              </div>
+            </details>
           )}
         </aside>
       </div>

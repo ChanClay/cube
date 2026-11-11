@@ -1,6 +1,9 @@
 import { hasPrevFrameReference } from './media';
 import type { MediaInput, Shot } from './types';
 
+type PromptShot = Pick<Shot, 'narration' | 'narrationType' | 'speaker'> &
+  Partial<Pick<Shot, 'characterNames'>>;
+
 /**
  * 把台词拼进视频提示词。
  *
@@ -43,32 +46,44 @@ function joinNames(names: string[]): string {
 /**
  * 限定句 + 点名参考图里的人物。
  *
- * 不点名的话模型只会把末帧当调色板用，人物身份信息全部浪费——这正是
- * 「参考图有效果，但人物对不上」的直接原因。名字取不到时退回只限制风格。
+ * 两个坑必须同时堵住：
+ * 1. 不点名 —— 模型只会把末帧当调色板，人物身份信息全浪费；
+ * 2. 说「保持位置」—— 换机位时位置必然变，模型会把参考图里的人留在原位，
+ *    再按文字描述画一个，于是同一个人出现两次。所以只锁脸和服装，并显式禁止重复。
  */
-function frameReferenceClause(cast: string[]): string {
+function frameReferenceClause(cast: string[], characterCount = 0): string {
   const names = cast
     .map((name) => name.trim())
     .filter(Boolean)
     .slice(0, 4);
-  if (names.length === 0) return FRAME_REFERENCE_STYLE;
-  return (
-    `The reference image is the last frame of the previous shot and shows ${joinNames(names)}; ` +
-    'keep their faces, wardrobe and positions consistent with it. ' +
-    FRAME_REFERENCE_STYLE
-  );
+
+  const identity =
+    names.length === 0
+      ? 'The reference image is the last frame of the previous shot; ' +
+        'do not duplicate or add any character from it.'
+      : `The reference image is the last frame of the previous shot and shows ${joinNames(names)} ` +
+        `— the same ${names.length > 1 ? 'characters' : 'person'} described above, not ` +
+        `${names.length > 1 ? 'additional characters' : 'an additional character'}. ` +
+        'Keep only their faces and wardrobe consistent; do not duplicate them.';
+
+  // 单人镜头多出一个人是最常见的错误，直接给个人数上限
+  const count = characterCount === 1 ? ' Only one person appears in frame.' : '';
+
+  return `${identity}${count} ${FRAME_REFERENCE_STYLE}`;
 }
 
 export function buildVideoPrompt(
   prompt: string,
-  shot: Pick<Shot, 'narration' | 'narrationType' | 'speaker'>,
+  shot: PromptShot,
   media: MediaInput[] = [],
   /** 参考图里实际在场的人物名（见 lib/shot-media 的 prevFrameCast） */
   refCast: string[] = [],
 ): string {
   const base = (prompt ?? '').trim();
   const line = (shot.narration ?? '').trim();
-  const reference = hasPrevFrameReference(media) ? ` ${frameReferenceClause(refCast)}` : '';
+  const reference = hasPrevFrameReference(media)
+    ? ` ${frameReferenceClause(refCast, (shot.characterNames ?? []).length)}`
+    : '';
 
   // 没写台词，或明确选了「都不要」：画面描述原样提交，模型只出环境音/BGM
   if (!line || shot.narrationType === 'none') {

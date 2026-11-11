@@ -13,7 +13,9 @@ import type { MediaInput, Script, Shot, ShotTransition } from './types';
  *    same-take 才接帧，hard-cut / time-jump 一律走参考图。
  * 4. 硬切镜头也不是完全不带上一镜的画面：同场景时把末帧当 reference_image
  *    一起传，只借光线 / 色调 / 场景材质，让接缝看起来还在同一个片场。
- *    参考图不会变成底图，所以不会把上一镜的构图或人数带进来。
+ * 5. 卡片与末帧同时传，不做身份去重：末帧是一张整帧场景图，wan3.0 把它当
+ *    环境 / 光线 / 风格参考，不会当成某个具体人物；身份仍然只能靠角色卡。
+ *    重复人物靠提示词约束（只锁脸和服装、禁止 duplicate、单人镜头给人数上限）。
  */
 
 export const TRANSITION_LABEL: Record<ShotTransition, string> = {
@@ -109,30 +111,31 @@ export function collectCardMedia(shot: Shot, script: Script | null): MediaInput[
   const result: MediaInput[] = [];
   const seen = new Set<string>();
 
-  const push = (url: string) => {
+  /** name 记下这张卡属于谁，用于和末帧里的人物去重（同一个身份只留一份参考） */
+  const push = (url: string, name: string) => {
     if (!url || seen.has(url) || result.length >= MAX_REFERENCE_IMAGES) return;
     seen.add(url);
-    result.push({ type: 'reference_image', url, auto: true });
+    result.push({ type: 'reference_image', url, name, auto: true });
   };
 
   // 角色在前：人物的长相一致性比背景更关键
   for (const character of script.characters) {
     if (!character.imageUrl) continue;
     const mentioned = character.name && text.includes(character.name);
-    if (characterNames.has(character.name) || mentioned) push(character.imageUrl);
+    if (characterNames.has(character.name) || mentioned) push(character.imageUrl, character.name);
   }
 
   for (const scene of script.scenes ?? []) {
     if (!scene.imageUrl) continue;
     const mentioned = scene.name && text.includes(scene.name);
-    if (sceneNames.has(scene.name) || mentioned) push(scene.imageUrl);
+    if (sceneNames.has(scene.name) || mentioned) push(scene.imageUrl, scene.name);
   }
 
   // 全片只有一个场景、镜头又没标场景：默认就是它
   const scenes = script.scenes ?? [];
   if (result.length === 0 && sceneNames.size === 0 && scenes.length === 1) {
     const only = scenes[0];
-    if (only.imageUrl) push(only.imageUrl);
+    if (only.imageUrl) push(only.imageUrl, only.name);
   }
 
   return result;
@@ -163,7 +166,7 @@ export interface ResolvedShotMedia {
   source: 'carry' | 'cards' | null;
   /** 本次新挂上的素材 */
   injected: MediaInput[];
-  /** 因为首帧 / 参考图互斥而没挂上的卡片数量 */
+  /** 因为首帧 / 参考图互斥、或槽位不足而没挂上的卡片数量 */
   skippedCards: number;
   /** 是否把上一镜末帧作为参考图带了进去（硬切镜头的风格锚点） */
   withPrevFrameRef: boolean;
@@ -263,6 +266,18 @@ export function resolveShotMedia(
       : null;
   const reserve = refFrame ? 1 : 0;
 
+  usedRef = !!refFrame;
+  // 参考图里是谁：写提示词时要点名，否则视频模型只把它当调色板
+  usedCast = refFrame ? prevFrameCast(prev) : [];
+
+  /**
+   * 卡片和末帧都要，不去重。
+   *
+   * 曾经试过「末帧里已经出现的人就不再传他的角色卡」，结果整段视频彻底失去参考：
+   * 末帧是一张整帧场景图，wan3.0 对它更接近「环境 / 光线 / 风格参考」，
+   * 不会把它当成某个具体人物；一旦删掉角色卡，身份参考就没了。
+   * 重复人物改由提示词约束（只锁脸和服装、禁止 duplicate、单人镜头给人数上限）。
+   */
   const slots = Math.max(
     0,
     Math.min(
@@ -271,10 +286,6 @@ export function resolveShotMedia(
     ),
   );
   const additions = cards.filter((item) => !existingUrls.has(item.url)).slice(0, slots);
-
-  usedRef = !!refFrame;
-  // 参考图里是谁：写提示词时要点名，否则视频模型只把它当调色板
-  usedCast = refFrame ? prevFrameCast(prev) : [];
 
   return finish(
     [...additions, ...rest, ...(refFrame ? [refFrame] : [])],
