@@ -654,8 +654,8 @@ export default function ShotCard({
                 transition: next,
                 // 旧字段一并写，避免两个来源打架（历史数据仍在读 continueFromPrev）
                 continueFromPrev: next === 'same-take',
-                // 承接动作改用首帧，参考图开关就没意义了，顺手关掉避免脏数据
-                ...(next === 'same-take' ? { referencePrevFrame: false } : {}),
+                // 衔接方式变了就回到「自动」：硬切默认也接帧，别被上一个值卡住
+                referencePrevFrame: undefined,
               });
             }}
           >
@@ -674,7 +674,7 @@ export default function ShotCard({
                   ? '已由 VIDEO_REFERENCE_PREV_FRAME=0 全局关闭'
                   : !sameSceneAsPrev
                     ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
-                    : '把上一镜末帧作为参考图：只借光线 / 色调 / 场景材质，构图与景别仍按本镜描述走'
+                    : '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（wan3.0 首尾帧与参考图互斥）。关掉就是纯硬切'
               }
             >
               <input
@@ -683,7 +683,7 @@ export default function ShotCard({
                 disabled={!canReferencePrevFrame}
                 onChange={(e) => onChange({ referencePrevFrame: e.target.checked })}
               />
-              <span>末帧参考</span>
+              <span>末帧接住</span>
             </label>
           )}
         </div>

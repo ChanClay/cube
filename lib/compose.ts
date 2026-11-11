@@ -110,6 +110,14 @@ interface ClipProbe {
   hasAudio: boolean;
   /** 视频流帧率，解析失败时为 0 */
   fps: number;
+  /** 视频流的帧数（素材自身的帧，不是成片帧），解析失败时为 0 */
+  frames: number;
+}
+
+/** "30000/1001" → 29.970029，少数容器给 "N/A" */
+function parseRate(value: string | undefined): number {
+  const [num, den] = (value ?? '').split('/').map(Number);
+  return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : 0;
 }
 
 /**
@@ -125,7 +133,7 @@ function probeWithFfprobe(ffprobe: string, file: string): ClipProbe | null {
       '-v',
       'error',
       '-show_entries',
-      'stream=codec_type,duration,r_frame_rate',
+      'stream=codec_type,duration,r_frame_rate,avg_frame_rate,nb_frames',
       '-show_entries',
       'format=duration',
       '-of',
@@ -138,7 +146,13 @@ function probeWithFfprobe(ffprobe: string, file: string): ClipProbe | null {
 
   try {
     const data = JSON.parse(res.stdout ?? '{}') as {
-      streams?: { codec_type?: string; duration?: string; r_frame_rate?: string }[];
+      streams?: {
+        codec_type?: string;
+        duration?: string;
+        r_frame_rate?: string;
+        avg_frame_rate?: string;
+        nb_frames?: string;
+      }[];
       format?: { duration?: string };
     };
     const streams = data.streams ?? [];
@@ -154,14 +168,20 @@ function probeWithFfprobe(ffprobe: string, file: string): ClipProbe | null {
           ? formatDuration
           : 0;
 
-    // r_frame_rate 形如 "30/1"，少数容器给 "N/A"
-    const [num, den] = (video.r_frame_rate ?? '').split('/').map(Number);
-    const fps = Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : 0;
+    /**
+     * avg_frame_rate 才是「实际每秒多少帧」；r_frame_rate 只是容器里推出来的
+     * 最大瞬时帧率，VFR / 头部写 60fps 的素材会被它抬成 60，逼着全片补帧。
+     */
+    const avgFps = parseRate(video.avg_frame_rate);
+    const fps = avgFps > 0 ? avgFps : parseRate(video.r_frame_rate);
+
+    const frames = Number(video.nb_frames);
 
     return {
       duration,
       hasAudio: streams.some((stream) => stream.codec_type === 'audio'),
       fps,
+      frames: Number.isFinite(frames) && frames > 0 ? frames : 0,
     };
   } catch {
     return null;
@@ -179,22 +199,48 @@ function probeClip(bin: string, file: string): ClipProbe {
   // 形如 "Video: h264 ..., 854x480, 30 fps, 30 tbr"，只在本行内匹配，别串到音频流
   const fpsMatch = text.match(/Video:[^\n]*?(\d+(?:\.\d+)?)\s*fps/);
   const fps = fpsMatch ? Number(fpsMatch[1]) : 0;
-  return { duration, hasAudio: /Stream #\d+:\d+.*: Audio:/.test(text), fps };
+  // 文件头里没有帧数，只能靠时长兜底
+  return { duration, hasAudio: /Stream #\d+:\d+.*: Audio:/.test(text), fps, frames: 0 };
 }
 
 /**
  * 成片帧率取素材里的最高值。
  * 原来写死 fps=30：24fps 的素材会被整段补重复帧，运动看着就是「一顿一顿」的抖，
  * 30fps 素材则完全不受影响。取最高值只会给低帧率素材补帧，不会给高帧率素材丢帧。
+ * 上限 60：120fps 的素材降到 60 出片，帧数翻倍只会让文件变大、观感没区别。
  */
 function targetFps(probes: ClipProbe[]): number {
   const values = probes
     .map((probe) => probe.fps)
     .filter((fps) => Number.isFinite(fps) && fps >= 1 && fps <= 120);
   if (values.length === 0) return 30;
-  // 29.97 / 23.976 这类保留两位小数，整数帧率仍按整数走
-  return Math.round(Math.max(...values) * 100) / 100;
+  // 23.976 / 29.97 保留三位小数，整数帧率仍按整数走
+  return Math.round(Math.min(Math.max(...values), 60) * 1000) / 1000;
 }
+
+/**
+ * 把一段素材的时长对齐到成片帧率的整帧边界。
+ *
+ * 视频流时长经常比真实画面多几十毫秒（音频尾巴），按它 trim 的话每段的画面
+ * 会比音轨短一点；concat 只能把这个零头算进段长，下一段第一帧就落在帧网格
+ * 之外，输出时被丢掉、上一帧多显示一帧时长——观众看到的就是拼接处卡一下。
+ * 用「帧数 / 素材帧率」换算出的真实时长最准，换算到成片帧率后必须落在整帧上。
+ */
+function alignDuration(probe: ClipProbe, fps: number): number {
+  if (!(fps > 0)) return probe.duration;
+
+  if (probe.frames > 0 && probe.fps > 0) {
+    const frames = Math.round((probe.frames / probe.fps) * fps);
+    if (frames > 0) return frames / fps;
+  }
+
+  if (!(probe.duration > 0)) return probe.duration;
+  // 只有时长时向下取整：宁可少一帧，也不要靠补帧凑整
+  return Math.max(1, Math.floor(probe.duration * fps + 1e-6)) / fps;
+}
+
+/** 时间戳参数写成定点小数，避免 1/3 这类帧率把 trim 的值带成无限小数 */
+const seconds = (value: number): string => String(Number(value.toFixed(9)));
 
 async function pruneExports(): Promise<void> {
   try {
@@ -274,7 +320,10 @@ export async function composeVideos(
       `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps}`;
 
     for (let i = 0; i < files.length; i += 1) {
-      const { duration, hasAudio } = probes[i];
+      const probe = probes[i];
+      const { hasAudio } = probe;
+      // 音视频都按同一条整帧长度裁剪，段与段之间才不会留出不足一帧的缝隙
+      const duration = seconds(alignDuration(probe, fps));
 
       chains.push(
         keepAudio
@@ -328,9 +377,10 @@ export async function composeVideos(
       'medium',
       '-crf',
       '18',
-      // 锁定恒定帧率，避免拼接处出现时间戳抖动
-      '-r',
-      String(fps),
+      // filter 里的 fps 已经锁成恒定帧率了，再叠一次 -r 等于二次重采样：
+      // 两套帧网格对不上时会在接缝处丢帧/补帧，也就是成片里突然卡一下。
+      '-fps_mode',
+      'passthrough',
       '-pix_fmt',
       'yuv420p',
       '-movflags',

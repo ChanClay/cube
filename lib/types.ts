@@ -89,9 +89,9 @@ export interface ShotBeat {
  *
  * wan3.0 的首帧 / 尾帧与 reference_* 互斥，所以「要不要接帧」必须是一个
  * 明确的叙事判断，不能靠「上一镜恰好有成品」临时决定：
- * - same-take：同一个动作被切成两镜（景别 / 机位连续）→ 抽上一镜末帧当首帧，本镜不能再传参考图
- * - hard-cut：换景别 / 换角度 / 正反打 → 用角色卡 / 场景卡当参考图，画面不接帧
- * - time-jump：时间或地点跳转，处理方式同 hard-cut
+ * - same-take：同一个动作被切成两镜（景别 / 机位连续）→ 抽上一镜末帧当首帧
+ * - hard-cut：换景别 / 换角度 / 正反打 → 同一场戏仍抽上一镜末帧当首帧（接缝不跳），本镜不能再传参考图
+ * - time-jump：时间或地点跳转 → 不接帧，走角色卡 / 场景卡参考图
  */
 export type ShotTransition = 'same-take' | 'hard-cut' | 'time-jump';
 
@@ -141,9 +141,10 @@ export interface Shot {
   /** 衔接方式的判断依据 / 否决原因，UI 上展示，便于人工复核 */
   transitionReason?: string;
   /**
-   * 是否把上一镜末帧作为 reference_image 一起传（只对「同一场戏、硬切换机位」有意义）。
-   * 由分镜阶段给出默认值：同场硬切为 true，承接动作 / 时间跳转 / 换场景为 false。
-   * 打开后只借上一镜的光线与场景材质，构图仍按本镜描述走。
+   * 本镜是否接住上一镜的最后一帧。
+   * 由分镜阶段给出默认值：同一场戏（承接动作 / 硬切换机位）为 true，时间跳转 / 换场景为 false。
+   * true 时该末帧作为本镜首帧（接缝完全连续，但本镜传不了卡片），
+   * 跨场景手动打开时才退化成 reference_image，只借光线与色调。
    */
   referencePrevFrame?: boolean;
   /**

@@ -142,10 +142,10 @@ export function hasCarryFrame(media: MediaInput[] = []): boolean {
 }
 
 /**
- * 这一镜是否把上一镜末帧当**参考图**带进来了（硬切镜头用它继承光线与色调）。
+ * 这一镜是否把上一镜末帧当**参考图**带进来了。
  *
  * 和 `hasCarryFrame` 的区别很关键：那个是「画面接住上一镜」（首帧，与参考图互斥），
- * 这个是「同一场戏的视觉锚点」，不改变构图，也不影响能否同时传角色卡。
+ * 这个只借光线 / 色调、不改构图，只有跨场景手动打开才会出现。
  */
 export function hasPrevFrameReference(media: MediaInput[] = []): boolean {
   return media.some((item) => item.type === 'reference_image' && isCarryFrameUrl(item.url));

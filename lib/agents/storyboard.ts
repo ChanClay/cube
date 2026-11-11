@@ -81,13 +81,13 @@ function buildSystemPrompt(): string {
 
 【二、跨镜连贯性（整份剧本最重要的部分）】
 6. ${CONTINUITY_RULES}
-   每一镜还必须写 transition（这一镜怎么交到下一镜），它决定下一镜能不能抽这一镜的末帧当首帧，只能取三个值：
+   每一镜还必须写 transition（这一镜怎么交到下一镜），分镜据此决定下一镜的机位是否接着这一镜，只能取三个值：
    - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续（景别、机位、人物姿势都不变），这一镜不超过 8 秒。全片连续使用不得超过 2 次。
-   - hard-cut：换景别 / 换角度 / 正反打。下一镜是新的机位，不接帧。绝大多数镜头应该是这个。
+   - hard-cut：换景别 / 换角度 / 正反打。下一镜是新机位；同一场戏里画面仍会从这一镜的最后一帧接住（接缝不跳），换场景才不接帧。绝大多数镜头应该是这个。
    - time-jump：时间或地点跳转。
    判断标准：摄影机有没有停机。还在同一次拍摄里才是 same-take，停机换机位就是 hard-cut。
-   transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take——两个不同机位的镜头接帧，画面会明显跳。
-   同时给出 referencePrevFrame（这一镜要不要带上一镜末帧作为风格参考）：只有「换机位但仍在同一场戏」的 hard-cut 才写 true，它只借上一镜的光线、色调与场景材质，构图与景别仍由本镜决定；same-take（已经用首帧接住）、time-jump、换场景一律写 false。拿不准时写 false，接缝宁可硬切，也不要让旧场景的光把新场景带歪。
+   transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take。
+   同时给出 referencePrevFrame（这一镜要不要接住上一镜的最后一帧）：同一场戏的 hard-cut 写 true——本镜第一帧与上一镜最后一帧完全相同，接缝不会跳，代价是本镜传不了角色卡 / 场景卡；time-jump、换场景一律写 false，改走卡片参考图。拿不准时写 false。
 
 【三、镜头语言】
 7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
@@ -133,7 +133,7 @@ JSON 结构：
       "cameraMove": "缓慢推近",
       "transition": "same-take | hard-cut | time-jump",
       "transitionReason": "一句话说明为什么这样衔接到下一镜",
-      "referencePrevFrame": "true / false：是否带上一镜末帧作为光线与场景材质的参考",
+      "referencePrevFrame": "true / false：本镜是否从上一镜最后一帧接住（同场景 hard-cut 写 true）",
       "entryState": "本镜第一帧的画面事实，与上一镜 exitState 一致",
       "exitState": "本镜最后一帧的画面事实，供下一镜接住",
       "beatSheet": [
@@ -781,13 +781,12 @@ function resolveTransitions(script: Script): void {
 }
 
 /**
- * 末帧参考图开关的定稿层（在 transition 定稿之后跑）。
+ * 接帧开关的定稿层（在 transition 定稿之后跑）。
  *
- * 只有「换机位但仍在同一场戏」才值得带上上一镜末帧：借光线、色调、场景材质，
- * 让接缝看起来还在同一个片场。其余情况一律关掉——
- * 承接动作的镜头已经在用首帧（首帧与参考图互斥），时间跳转和换场景参考过去
- * 只会把新场景拉回旧色调。分镜可以显式写 false 表示这一镜不需要，
- * 但写 true 只有在同场硬切里才被采纳。
+ * 同一场戏的镜头都用上一镜的真末帧当首帧：本镜第一帧与上一镜最后一帧完全
+ * 相同，接缝处不会跳。时间跳转和换场景不接——上一镜的光线本来就不属于新场景，
+ * 接过去只会把画面拉回旧色调。分镜可以显式写 false 表示这一镜要纯硬切，
+ * 写 true 只在同场景里被采纳。
  */
 function resolveReferenceFrames(script: Script): void {
   script.shots.forEach((shot, i) => {
