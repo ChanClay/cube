@@ -51,6 +51,15 @@ export const config = {
      */
     audioOnCarry: bool(process.env.VIDEO_AUDIO_ON_CARRY, false),
     /**
+     * 硬切镜头是否把上一镜末帧当 reference_image 一起传（默认开）。
+     *
+     * 硬切不能传首帧（那是承接的动作），但「同一场戏」的光线、色调、场景材质
+     * 需要延续，否则接缝看起来像换了片场。末帧作为参考图只借这些视觉属性，
+     * 不会变成底图，所以不会把上一镜的构图或人数带进来。
+     * 拿去 A/B 的那次关掉即可（改 .env.local 后重启）。
+     */
+    referencePrevFrame: bool(process.env.VIDEO_REFERENCE_PREV_FRAME, true),
+    /**
      * 提示词智能扩写。默认关：本项目的提示词是逐镜对齐过的（固定英文外貌 / 空间短语 +
      * 标准景别运镜），交给服务端二次改写会被换成另一套景别与运镜，
      * 人物长相和镜头语言都会漂移，运动也更难控。提示词很短时再打开它。

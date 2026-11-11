@@ -75,6 +75,17 @@ export interface ShotBeat {
   action: string;
 }
 
+/**
+ * 这一镜与上一镜的衔接方式。由分镜阶段产出，素材决策据此分流。
+ *
+ * wan3.0 的首帧 / 尾帧与 reference_* 互斥，所以「要不要接帧」必须是一个
+ * 明确的叙事判断，不能靠「上一镜恰好有成品」临时决定：
+ * - same-take：同一个动作被切成两镜（景别 / 机位连续）→ 抽上一镜末帧当首帧，本镜不能再传参考图
+ * - hard-cut：换景别 / 换角度 / 正反打 → 用角色卡 / 场景卡当参考图，画面不接帧
+ * - time-jump：时间或地点跳转，处理方式同 hard-cut
+ */
+export type ShotTransition = 'same-take' | 'hard-cut' | 'time-jump';
+
 export interface Shot {
   /** 本地唯一 id */
   id: string;
@@ -114,8 +125,21 @@ export interface Shot {
   /** 这一镜出场的角色名（对应 Script.characters） */
   characterNames?: string[];
   /**
-   * 是否承接上一镜：打开后用上一镜视频的末帧当本镜首帧。
-   * 缺省（undefined）即关闭；第一镜没有上一镜，始终视为关闭。
+   * 与上一镜的衔接方式；第一镜恒为 undefined。
+   * 旧剧本没有这个字段时回落到 continueFromPrev（见 lib/shot-media 的 isSameTakeShot）。
+   */
+  transition?: ShotTransition;
+  /** 衔接方式的判断依据 / 否决原因，UI 上展示，便于人工复核 */
+  transitionReason?: string;
+  /**
+   * 是否把上一镜末帧作为 reference_image 一起传（只对「同一场戏、硬切换机位」有意义）。
+   * 由分镜阶段给出默认值：同场硬切为 true，承接动作 / 时间跳转 / 换场景为 false。
+   * 打开后只借上一镜的光线与场景材质，构图仍按本镜描述走。
+   */
+  referencePrevFrame?: boolean;
+  /**
+   * @deprecated 旧字段，等价于 transition='same-take'。
+   * 新剧本由 transition 决定，这里只用于读取历史数据。
    */
   continueFromPrev?: boolean;
   /** 这一镜所在的场景名（对应 Script.scenes），用于取场景卡配图当首帧 */

@@ -9,7 +9,12 @@ import ScriptView from '@/components/ScriptView';
 import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
 import { validateMedia } from '@/lib/media';
-import { collectCardMedia, hasManualFirstFrame, resolveShotMedia } from '@/lib/shot-media';
+import {
+  collectCardMedia,
+  hasManualFirstFrame,
+  prevFrameUsage,
+  resolveShotMedia,
+} from '@/lib/shot-media';
 import {
   DEFAULT_VIDEO_RATIO,
   DEFAULT_VIDEO_RESOLUTION,
@@ -448,10 +453,14 @@ function ProjectPageInner() {
         return { job: null, retryable: false };
       }
 
-      // 台词拼在画面描述后面：wan3.0 原生生成人声，但台词必须写进 prompt 才会说出来
-      const prompt = buildVideoPrompt(basePrompt, live);
-
       const media = mediaOverride ?? live.media ?? [];
+
+      /**
+       * 台词拼在画面描述后面：wan3.0 原生生成人声，但台词必须写进 prompt 才会说出来。
+       * 带上一镜末帧当参考图时再追一句作用范围限定（只借光线 / 色调，不改构图）。
+       */
+      const prompt = buildVideoPrompt(basePrompt, live, media);
+
       const mediaError = validateMedia(media);
       if (mediaError) {
         showToast(mediaError, 'error');
@@ -539,7 +548,10 @@ function ProjectPageInner() {
   /** 「衔接帧云端不可达」只提示一次，避免每个镜头都弹 */
   const warnedUnreachableRef = useRef(false);
 
-  /** 抽某个视频的末帧，作为下一镜的首帧；拿不到时返回 null，交给配图兜底 */
+  /**
+   * 抽某个视频的末帧，交给下一镜用（具体用法见 prevFrameUsage）：
+   * 承接动作时当首帧，同场硬切时当风格参考图。拿不到时返回 null，交给配图兜底。
+   */
   const extractCarryFrame = useCallback(
     async (videoUrl: string): Promise<MediaInput | null> => {
       try {
@@ -567,7 +579,7 @@ function ProjectPageInner() {
   );
 
   /**
-   * 单镜生成：这一镜打开了「承接上一镜」才抽上一镜末帧；
+   * 单镜生成：按这一镜的 transition 决定上一镜末帧当首帧还是当参考图；
    * 没有可用末帧时挂上本镜的角色卡 / 场景卡参考图。
    * 与串行队列走同一套镜头素材决策（lib/shot-media）。
    */
@@ -584,42 +596,52 @@ function ProjectPageInner() {
       const manualFrame = hasManualFirstFrame(live.media ?? [], current);
 
       /**
-       * 承接开关默认关闭，只有显式打开才抽帧；
+       * 上一镜末帧什么时候要抽：
+       * - same-take：当首帧，必须抽（用户手选首帧时让位）；
+       * - 同场硬切：当参考图，只有开关打开时才抽（见 VIDEO_REFERENCE_PREV_FRAME）。
        * 上一镜还必须已经生成成功（跑着的等不了）。
        */
-      let carry: MediaInput | null = null;
-      if (
-        !manualFrame &&
-        index > 0 &&
-        live.continueFromPrev &&
+      const usage = prevFrameUsage(live, prev);
+      const canUsePrevFrame =
+        !!usage &&
+        (usage !== 'first_frame' || !manualFrame) &&
+        (usage !== 'reference_image' || health?.video.referencePrevFrame !== false) &&
         prevJob?.status === 'succeeded' &&
-        prevJob.videoUrl
-      ) {
+        !!prevJob.videoUrl;
+
+      let prevFrame: MediaInput | null = null;
+      if (canUsePrevFrame && prevJob?.videoUrl) {
         // 要下载整段视频再跑 ffmpeg，给个提示免得以为卡住
-        showToast('正在抽取上一镜末帧作为首帧…');
-        carry = await extractCarryFrame(prevJob.videoUrl);
+        showToast(
+          usage === 'first_frame'
+            ? '正在抽取上一镜末帧作为首帧…'
+            : '正在抽取上一镜末帧作为风格参考…',
+        );
+        prevFrame = await extractCarryFrame(prevJob.videoUrl);
       }
 
       const resolved = resolveShotMedia(
         live.media ?? [],
-        carry,
+        prevFrame,
         collectCardMedia(live, current),
         current,
+        live,
+        prev,
       );
 
-      if (resolved.source === 'cards' && !carry && live.continueFromPrev) {
+      if (usage === 'first_frame' && resolved.source === 'cards' && !prevFrame) {
         showToast('这一镜没有可用的上一镜末帧，已改用角色 / 场景卡作为参考图');
       }
       if (resolved.changed) handleShotChange(shot.id, { media: resolved.next });
 
       await generateShot(live, resolved.next);
     },
-    [extractCarryFrame, generateShot, handleShotChange, showToast],
+    [extractCarryFrame, generateShot, handleShotChange, health, showToast],
   );
 
   /**
    * 串行队列（并发 = 1）：一次只生成一镜。
-   * 是否用上一镜的末帧衔接，由下一镜自己的「承接上一镜末帧」开关决定，默认不用。
+   * 上一镜末帧怎么用由下一镜自己的 transition 决定（same-take 当首帧、同场硬切当参考图）。
    */
   const handleGenerateAll = useCallback(async () => {
     if (!script || generatingAll) return;
@@ -720,12 +742,23 @@ function ProjectPageInner() {
               const currentScript = scriptRef.current;
               const live = currentScript?.shots.find((item) => item.id === shot.id) ?? shot;
 
-              // 承接开关默认关闭：只有这一镜显式打开，才为它抽上一镜的末帧
+              /**
+               * 上一镜末帧的两种用法：same-take 当首帧；同场硬切当风格参考图
+               * （后者受 VIDEO_REFERENCE_PREV_FRAME 控制，关掉就完全不带）。
+               */
               const manualFrame = hasManualFirstFrame(live.media ?? [], currentScript);
-              let carry: MediaInput | null = null;
-              if (!manualFrame && i > 0 && live.continueFromPrev && prevVideoUrl) {
+              const prevShot = i > 0 ? shots[i - 1] : null;
+              const usage = prevFrameUsage(live, prevShot);
+              const canUsePrevFrame =
+                !!usage &&
+                (usage !== 'first_frame' || !manualFrame) &&
+                (usage !== 'reference_image' || health?.video.referencePrevFrame !== false) &&
+                !!prevVideoUrl;
+
+              let prevFrame: MediaInput | null = null;
+              if (canUsePrevFrame && prevVideoUrl) {
                 setQueueInfo(`第 ${i + 1}/${shots.length} 镜 · ${label}（抽取上一镜末帧）`);
-                carry = await extractCarryFrame(prevVideoUrl);
+                prevFrame = await extractCarryFrame(prevVideoUrl);
               }
 
               // 抽帧期间点了停止：别再提交新的生成任务
@@ -736,15 +769,21 @@ function ProjectPageInner() {
 
               const resolved = resolveShotMedia(
                 live.media ?? [],
-                carry,
+                prevFrame,
                 collectCardMedia(live, currentScript),
                 currentScript,
+                live,
+                prevShot,
               );
               if (resolved.source === 'carry' && resolved.skippedCards > 0) {
                 setQueueInfo(
                   `第 ${i + 1}/${shots.length} 镜 · ${label}（承接上一镜末帧，跳过 ${resolved.skippedCards} 张卡片参考图）`,
                 );
-              } else if (resolved.source === 'cards' && live.continueFromPrev && !carry) {
+              } else if (resolved.withPrevFrameRef) {
+                setQueueInfo(
+                  `第 ${i + 1}/${shots.length} 镜 · ${label}（带上一镜末帧作风格参考）`,
+                );
+              } else if (usage === 'first_frame' && resolved.source === 'cards' && !prevFrame) {
                 setQueueInfo(
                   `第 ${i + 1}/${shots.length} 镜 · ${label}（无可用末帧，改用卡片参考图）`,
                 );
@@ -842,6 +881,7 @@ function ProjectPageInner() {
     waitForJob,
     extractCarryFrame,
     handleShotChange,
+    health,
     showToast,
   ]);
 
@@ -1084,6 +1124,7 @@ function ProjectPageInner() {
             onEditIdea={handleEditIdea}
             onRecreateIdea={handleRecreateIdea}
             carryMuted={health ? health.video.audio && !health.video.audioOnCarry : true}
+            prevFrameRefEnabled={health ? health.video.referencePrevFrame : true}
             onAddShot={handleAddShot}
             onAbandonShot={handleAbandonShot}
             onStopGenerate={handleStopGenerate}

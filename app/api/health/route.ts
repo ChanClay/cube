@@ -46,6 +46,8 @@ export async function GET() {
       audio: config.video.audio,
       /** 承接上一镜末帧的镜头是否会保留音轨（默认关，避免音频断档） */
       audioOnCarry: config.video.audioOnCarry,
+      /** 硬切镜头是否会带上一镜末帧作为风格参考图 */
+      referencePrevFrame: config.video.referencePrevFrame,
       promptExtend: config.video.promptExtend,
     },
     pollIntervalMs: config.pollIntervalMs,

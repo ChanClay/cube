@@ -1,4 +1,5 @@
-import type { Shot } from './types';
+import { hasPrevFrameReference } from './media';
+import type { MediaInput, Shot } from './types';
 
 /**
  * 把台词拼进视频提示词。
@@ -21,15 +22,30 @@ function withEnd(text: string): string {
   return /[.!?。！？…"”]$/.test(text) ? text : `${text}.`;
 }
 
+/**
+ * 带上一镜末帧当参考图时追加的限定句。
+ *
+ * 必须把作用范围写死：wan3.0 的 reference_image 是「角色 / 物品 / 风格参考」，
+ * 不给边界它会连构图和机位一起抄，硬切就白切了。这里只借光线与材质，
+ * 景别、机位、构图回到本镜自己的描述。
+ */
+const FRAME_REFERENCE_CLAUSE =
+  'Match the lighting, color temperature and scene materials of the reference image, ' +
+  'but keep the framing, shot size and camera angle described above exactly.';
+
 export function buildVideoPrompt(
   prompt: string,
   shot: Pick<Shot, 'narration' | 'narrationType' | 'speaker'>,
+  media: MediaInput[] = [],
 ): string {
   const base = (prompt ?? '').trim();
   const line = (shot.narration ?? '').trim();
+  const reference = hasPrevFrameReference(media) ? ` ${FRAME_REFERENCE_CLAUSE}` : '';
 
   // 没写台词，或明确选了「都不要」：画面描述原样提交，模型只出环境音/BGM
-  if (!line || shot.narrationType === 'none') return base;
+  if (!line || shot.narrationType === 'none') {
+    return reference ? `${withEnd(base)}${reference}` : base;
+  }
 
   if (shot.narrationType === 'dialogue') {
     /**
@@ -38,13 +54,13 @@ export function buildVideoPrompt(
      */
     const speaker = (shot.speaker ?? '').trim();
     const who = speaker ? `The character named ${speaker}` : 'The on-screen character';
-    return withEnd(
+    return `${withEnd(
       `${base} ${who} speaks with natural lip movement and matching facial expression: ${safeQuote(line)}`,
-    );
+    )}${reference}`;
   }
 
   // 缺省按画外旁白处理：人物闭嘴，避免旧剧本全变成人物在说话
-  return withEnd(
+  return `${withEnd(
     `${base} Voiceover by an off-screen narrator (no lip movement, the character's mouth stays closed): ${safeQuote(line)}`,
-  );
+  )}${reference}`;
 }

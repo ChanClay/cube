@@ -6,7 +6,15 @@ import {
 } from '@/lib/shot-plan';
 import { logAgentWarn } from '@/lib/logger';
 import { expandStyle } from '@/lib/style-presets';
-import { clamp, dedupeByName, normalizeCameraMove, normalizeShotSize, str } from './spec';
+import type { ShotTransition } from '@/lib/types';
+import {
+  clamp,
+  dedupeByName,
+  normalizeCameraMove,
+  normalizeShotSize,
+  normalizeTransition,
+  str,
+} from './spec';
 import { callChatJson } from './llm';
 
 /**
@@ -56,8 +64,11 @@ export interface Beat {
   exit: string;
   shotSize: string;
   cameraMove: string;
-  /** 到下一镜的衔接方式 */
-  transition: string;
+  /**
+   * 这一镜怎么交到下一镜，决定下一镜能不能抽这一镜的末帧当首帧。
+   * 见 ShotTransition：same-take / hard-cut / time-jump。
+   */
+  transition: ShotTransition;
   /** 情绪强度 1~5，整条链要形成曲线 */
   emotion?: number;
   /** 这一镜的时长（秒）；模型没给时为空，由调用方摊平 */
@@ -174,10 +185,14 @@ export function buildBlueprintSystemPrompt(
 6. 场景 1~4 个：desc 写地点、空间尺度、时间、光源方向与色温、主要陈设与其材质；promptEn 写 15~25 个单词的固定英文空间短语，覆盖空间类型 + 关键陈设 + 光源与色调。同一个空间只写一次，不要按镜头重复。
 
 【串联层】
-7. entry 必须是上一镜 exit 的直接延续（第一镜的 entry 写「开场」）。不许出现「之后」「过了一会儿」这类含糊表述，除非 entry 里写明时间跳转。
+7. entry 写这一镜开始时「谁 / 在哪 / 什么姿势 / 手里拿着什么」（第一镜写「开场」）。上一镜 transition=same-take 时必须与它的 exit 是同一个画面事实；hard-cut / time-jump 允许换机位，但人物、场景、光线必须与上一镜一致——换机位不换世界。
 8. exit 必须是一个可以直接拍出来的画面状态：谁、在哪里、什么姿势、朝向哪里、手里拿着什么。不要写情绪或抽象概念。
-9. 相邻两镜的 action 首尾相接：上一镜没做完的动作，下一镜接着做完；不许出现动作凭空完成、人物凭空换位、道具凭空出现。
-10. 空间连续：全片尽量在同一个空间内完成。开场用大远景 / 全景把空间关系交代清楚，之后的镜头不得凭空换场地；确实需要转场时，用 transition 明确写出过渡方式。
+9. transition=same-take 的两镜，action 必须首尾相接：上一镜没做完的动作，下一镜接着做完；hard-cut / time-jump 允许动作跳，但不许人物凭空换位、道具凭空出现。
+10. 空间连续：全片尽量在同一个空间内完成，开场用大远景 / 全景把空间关系交代清楚。每一镜都必须写 transition，说明这一镜怎么交到下一镜，只能取三个值：
+    - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续，景别与机位都不许变。全片连续出现不得超过 2 次——每接一次画面都会掉一点细节，接多了人物就漂了。
+    - hard-cut：换景别 / 换角度 / 正反打。下一镜是新的机位，观众本来就不期待画面接住。绝大多数镜头都应该是这个。
+    - time-jump：时间或地点跳转（次日、片刻后、换场地）。
+    判断标准只有一句：摄影机有没有停机。还在同一次拍摄里就是 same-take，停机换了机位就是 hard-cut。
 11. 镜头语言成组：相邻镜头避免同样的景别 + 运镜，景别按「建立 → 逼近 → 细节 → 释放」的节奏推进。
 12. 情绪曲线：给每一镜 emotion（1~5）。不要一开场就 5，也不要全程 3；最高点落在全片后 1/3 的高潮镜。
 13. 镜头数量：给了明确的「镜头数量」就必须精确等于这个数量；如果给的是一段区间，则按故事节奏自己决定用几个镜头，必须落在区间内——不要为了凑数硬切，也不要把几个本该分开的节拍硬塞进一个镜头。
@@ -225,7 +240,7 @@ JSON 结构：
       "exit": "结束时留下的可拍摄状态",
       "shotSize": "特写/近景/中景/全景/远景/大远景",
       "cameraMove": "固定机位/缓慢推近/缓慢拉远/横向移动/环绕/跟随/手持晃动/升格慢动作",
-      "transition": "到下一镜的衔接方式"
+      "transition": "same-take | hard-cut | time-jump"
     }
   ]
 }`;
@@ -311,7 +326,7 @@ function normalizeBeat(raw: Record<string, unknown>, index: number): Beat {
     exit: str(raw.exit),
     shotSize: normalizeShotSize(raw.shotSize),
     cameraMove: normalizeCameraMove(raw.cameraMove),
-    transition: str(raw.transition),
+    transition: normalizeTransition(raw.transition),
     emotion,
     duration,
   };

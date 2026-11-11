@@ -141,6 +141,16 @@ export function hasCarryFrame(media: MediaInput[] = []): boolean {
   return media.some((item) => item.type === 'first_frame' && isCarryFrameUrl(item.url));
 }
 
+/**
+ * 这一镜是否把上一镜末帧当**参考图**带进来了（硬切镜头用它继承光线与色调）。
+ *
+ * 和 `hasCarryFrame` 的区别很关键：那个是「画面接住上一镜」（首帧，与参考图互斥），
+ * 这个是「同一场戏的视觉锚点」，不改变构图，也不影响能否同时传角色卡。
+ */
+export function hasPrevFrameReference(media: MediaInput[] = []): boolean {
+  return media.some((item) => item.type === 'reference_image' && isCarryFrameUrl(item.url));
+}
+
 /** 给任务记录用的一句话摘要 */
 export function mediaSummary(media: MediaInput[]): string {
   if (media.length === 0) return '纯文本';

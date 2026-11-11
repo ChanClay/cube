@@ -11,12 +11,18 @@ import {
   validateMedia,
 } from '@/lib/media';
 import { api } from '@/lib/client';
+import {
+  TRANSITION_HINT,
+  TRANSITION_LABEL,
+  isSameTakeShot,
+} from '@/lib/shot-media';
 import type {
   Character,
   MediaInput,
   MediaType,
   NarrationType,
   Shot,
+  ShotTransition,
   VideoJob,
 } from '@/lib/types';
 
@@ -38,9 +44,16 @@ interface Props {
   startAt?: number;
   /** 承接上一镜末帧的镜头不生成音频（服务端默认行为，用于提示） */
   carryMuted?: boolean;
+  /** 上一镜的场景名：判断能不能把上一镜末帧当同场景的风格参考 */
+  prevSceneName?: string;
+  /** 全局开关（VIDEO_REFERENCE_PREV_FRAME）：关掉时这个选项不可用 */
+  prevFrameRefEnabled?: boolean;
   /** 放弃这一镜：停止跟踪进度（云端任务仍会跑完） */
   onAbandon?: () => void;
 }
+
+/** 与上一镜的衔接方式，顺序即下拉顺序 */
+const TRANSITION_OPTIONS: ShotTransition[] = ['same-take', 'hard-cut', 'time-jump'];
 
 /** 图片类素材画缩略图，视频用首帧，其余类型用符号占位 */
 const isImageMedia = (type: MediaType): boolean =>
@@ -83,6 +96,8 @@ export default function ShotCard({
   isFirst = false,
   startAt,
   carryMuted = true,
+  prevSceneName = '',
+  prevFrameRefEnabled = true,
   onAbandon,
 }: Props) {
   const [newType, setNewType] = useState<MediaType>('first_frame');
@@ -120,9 +135,25 @@ export default function ShotCard({
   const hasManualFirstFrame = media.some(
     (item) => item.type === 'first_frame' && !isCarryFrameUrl(item.url),
   );
+  /** 衔接方式：新剧本读 transition，旧剧本回落到「承接上一镜」开关 */
+  const transition: ShotTransition =
+    shot.transition ?? (shot.continueFromPrev ? 'same-take' : 'hard-cut');
+  /**
+   * 上一镜末帧当参考图，只在「同一场戏、换了机位」时成立：
+   * 承接动作的镜头已经在用首帧（互斥），跨场景参考过去会把新场景拉回旧色调。
+   */
+  const sameSceneAsPrev =
+    !!prevSceneName && (shot.sceneNames ?? []).includes(prevSceneName);
+  const canReferencePrevFrame =
+    !isFirst &&
+    prevFrameRefEnabled &&
+    transition === 'hard-cut' &&
+    sameSceneAsPrev;
+  const referencePrevFrame =
+    canReferencePrevFrame && (shot.referencePrevFrame ?? true);
   const silentForCarry =
     carryMuted &&
-    (hasCarryFrame(media) || (!isFirst && shot.continueFromPrev === true && !hasManualFirstFrame));
+    (hasCarryFrame(media) || (!isFirst && isSameTakeShot(shot) && !hasManualFirstFrame));
 
   useEffect(() => {
     setDurationText(String(shot.duration));
@@ -547,26 +578,61 @@ export default function ShotCard({
       </div>
 
       <div className="shot-actions">
-        <label
-          className={`shot-switch${isFirst ? ' is-disabled' : ''}`}
+        <div
+          className={`shot-transition${isFirst ? ' is-disabled' : ''}`}
           title={
             isFirst
               ? '第一镜没有上一镜，无法承接'
-              : '打开后生成前会抽取上一镜视频的末帧，作为本镜首帧，保证画面接得住'
+              : `${TRANSITION_LABEL[transition]}：${TRANSITION_HINT[transition]}${
+                  shot.transitionReason ? `\n分镜判定：${shot.transitionReason}` : ''
+                }`
           }
         >
-          <input
-            type="checkbox"
-            className="shot-switch-input"
-            checked={!isFirst && shot.continueFromPrev === true}
+          <span className="shot-transition-label">衔接</span>
+          <select
+            className="select shot-transition-select"
+            value={transition}
             disabled={isFirst}
-            onChange={(e) => onChange({ continueFromPrev: e.target.checked })}
-          />
-          <span className="shot-switch-track" aria-hidden="true">
-            <span className="shot-switch-thumb" />
-          </span>
-          <span className="shot-switch-text">承接上一镜末帧</span>
-        </label>
+            aria-label="与上一镜的衔接方式"
+            onChange={(e) => {
+              const next = e.target.value as ShotTransition;
+              onChange({
+                transition: next,
+                // 旧字段一并写，避免两个来源打架（历史数据仍在读 continueFromPrev）
+                continueFromPrev: next === 'same-take',
+                // 承接动作改用首帧，参考图开关就没意义了，顺手关掉避免脏数据
+                ...(next === 'same-take' ? { referencePrevFrame: false } : {}),
+              });
+            }}
+          >
+            {TRANSITION_OPTIONS.map((value) => (
+              <option key={value} value={value}>
+                {TRANSITION_LABEL[value]}
+              </option>
+            ))}
+          </select>
+
+          {!isFirst && transition !== 'same-take' && (
+            <label
+              className={`shot-ref-frame${canReferencePrevFrame ? '' : ' is-disabled'}`}
+              title={
+                !prevFrameRefEnabled
+                  ? '已由 VIDEO_REFERENCE_PREV_FRAME=0 全局关闭'
+                  : !sameSceneAsPrev
+                    ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
+                    : '把上一镜末帧作为参考图：只借光线 / 色调 / 场景材质，构图与景别仍按本镜描述走'
+              }
+            >
+              <input
+                type="checkbox"
+                checked={referencePrevFrame}
+                disabled={!canReferencePrevFrame}
+                onChange={(e) => onChange({ referencePrevFrame: e.target.checked })}
+              />
+              <span>末帧参考</span>
+            </label>
+          )}
+        </div>
 
         {silentForCarry && (
           <span

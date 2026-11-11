@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import CastCards from './CastCards';
 import ShotCard from './ShotCard';
+import { isSameTakeShot } from '@/lib/shot-media';
 import type {
   Character,
   ComposeResult,
@@ -56,6 +57,8 @@ interface Props {
   onRecreateIdea?: () => void;
   /** 承接上一镜末帧的镜头是否不出声（服务端配置，用来提示用户） */
   carryMuted?: boolean;
+  /** 末帧参考图的总开关（服务端配置），关掉后镜头卡片上的选项不可用 */
+  prevFrameRefEnabled?: boolean;
   /** 手动在当前剧本末尾添加一镜 */
   onAddShot?: () => void;
   /** 放弃某一镜的生成 */
@@ -110,12 +113,15 @@ export default function ScriptView({
   onEditIdea,
   onRecreateIdea,
   carryMuted = true,
+  prevFrameRefEnabled = true,
   onAddShot,
   onAbandonShot,
   onStopGenerate,
   stopping = false,
 }: Props) {
   const totalDuration = script?.shots.reduce((sum, shot) => sum + shot.duration, 0) ?? 0;
+  /** 衔接结构：几处接帧、几处硬切。接帧的镜头拿不到卡片参考图，直接影响人物一致性 */
+  const sameTakeCount = script?.shots.filter((shot) => isSameTakeShot(shot)).length ?? 0;
   const doneCount = script?.shots.filter((shot) => jobs[shot.id]?.status === 'succeeded').length ?? 0;
   const busyCount = Object.values(jobs).filter(
     (job) => job.status === 'queued' || job.status === 'running',
@@ -297,6 +303,18 @@ export default function ScriptView({
                 <span className="tag tag--accent">{script.style}</span>
                 <span className="tag">{script.shots.length} 个镜头</span>
                 <span className="tag">总时长 {totalDuration}s</span>
+                {script.shots.length > 1 && (
+                  <span
+                    className="tag"
+                    title={
+                      '承接上一镜的镜头会抽取上一镜末帧当首帧，这类镜头不能再传角色卡参考图' +
+                      '（wan3.0 首帧与参考图互斥），人物一致性靠后续关键帧层保证；' +
+                      '硬切的镜头走角色卡 / 场景卡参考图。'
+                    }
+                  >
+                    {sameTakeCount} 处承接 · {script.shots.length - 1 - sameTakeCount} 处硬切
+                  </span>
+                )}
                 {saveState !== 'idle' && (
                   <span
                     className={`tag ${saveState === 'error' ? 'tag--error' : 'tag--accent'}`}
@@ -415,6 +433,8 @@ export default function ScriptView({
                   isFirst={index === 0}
                   startAt={script.shots.slice(0, index).reduce((sum, prev) => sum + prev.duration, 0)}
                   carryMuted={carryMuted}
+                  prevSceneName={script.shots[index - 1]?.sceneNames?.[0] ?? ''}
+                  prevFrameRefEnabled={prevFrameRefEnabled}
                   onAbandon={onAbandonShot ? () => onAbandonShot(shot) : undefined}
                 />
               ))}

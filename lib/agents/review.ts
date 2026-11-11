@@ -254,6 +254,8 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
   if (hasAnyState) {
     script.shots.forEach((shot, i) => {
       if (i === 0) return;
+      // 已经声明成剪辑点的镜头本来就不承接上一镜，不必再要求状态链衔接
+      if (shot.transition === 'hard-cut' || shot.transition === 'time-jump') return;
       const prev = script.shots[i - 1];
       const entry = shot.entryState?.trim() ?? '';
       const exit = prev.exitState?.trim() ?? '';

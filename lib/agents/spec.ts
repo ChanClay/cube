@@ -6,7 +6,7 @@
  * 同时提供确定性的规范化与检查函数，供三个 agent 共用。
  */
 
-import type { ShotBeat } from '@/lib/types';
+import type { ShotBeat, ShotTransition } from '@/lib/types';
 
 /** 从远到近；也是提示词里推荐的情绪推进顺序 */
 export const SHOT_SIZES = ['大远景', '远景', '全景', '中景', '近景', '特写'] as const;
@@ -221,6 +221,35 @@ const TRANSITION_HINT_EN =
 
 export function hasTransitionHint(text: string): boolean {
   return TRANSITION_HINT.test(text) || TRANSITION_HINT_EN.test(text);
+}
+
+/** 衔接方式的三态取值，与 lib/types 的 ShotTransition 一致 */
+export const SHOT_TRANSITIONS = ['same-take', 'hard-cut', 'time-jump'] as const;
+
+/** 模型可能写的英文外来词，先归一再判断 */
+const SAME_TAKE_HINT =
+  /(same[-_ ]?take|continuous|match ?cut|无缝|连续|同一镜|同一拍摄|紧接|接住|延续|承接)/i;
+const TIME_JUMP_HINT = /(time[-_ ]?jump|jump ?cut|时间|跳转|转场|次日|片刻后|闪回)/i;
+
+/**
+ * 把模型给的衔接方式归一成三态。
+ *
+ * 没写就判 hard-cut：宁可不接帧，也别把两个本来不是同一个动作的镜头硬接起来——
+ * 接错了是一眼可见的画面跳变，硬切反而正常。历史剧本的「连续动作链」写法
+ * 会在这里被整体降级成硬切，正是想要的结果。
+ */
+export function normalizeTransition(value: unknown): ShotTransition {
+  const raw = str(value);
+  if (!raw) return 'hard-cut';
+  if (SAME_TAKE_HINT.test(raw)) return 'same-take';
+  if (TIME_JUMP_HINT.test(raw)) return 'time-jump';
+  return 'hard-cut';
+}
+
+/** 模型根本没写衔接方式时返回 undefined，交给调用方按状态链推断 */
+export function parseTransition(value: unknown): ShotTransition | undefined {
+  const raw = str(value);
+  return raw ? normalizeTransition(raw) : undefined;
 }
 
 /** 英文功能词：提取「关键内容词」时剔除，避免 a / the / with 干扰比对 */

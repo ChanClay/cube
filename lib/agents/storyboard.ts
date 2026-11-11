@@ -20,12 +20,16 @@ import {
   clamp,
   CONTINUITY_RULES,
   dedupeByName,
+  hasTransitionHint,
   normalizeBeatSheet,
   normalizeCameraMove,
   normalizeShotSize,
+  parseTransition,
   PROMPT_MAX_WORDS,
   PROMPT_MIN_WORDS,
   SHOT_LANGUAGE_RULES,
+  SHOT_SIZES,
+  stateOverlap,
   str,
   stripForbiddenPromptPhrases,
   TIMELINE_RULES,
@@ -77,6 +81,13 @@ function buildSystemPrompt(): string {
 
 【二、跨镜连贯性（整份剧本最重要的部分）】
 6. ${CONTINUITY_RULES}
+   每一镜还必须写 transition（这一镜怎么交到下一镜），它决定下一镜能不能抽这一镜的末帧当首帧，只能取三个值：
+   - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续（景别、机位、人物姿势都不变），这一镜不超过 8 秒。全片连续使用不得超过 2 次。
+   - hard-cut：换景别 / 换角度 / 正反打。下一镜是新的机位，不接帧。绝大多数镜头应该是这个。
+   - time-jump：时间或地点跳转。
+   判断标准：摄影机有没有停机。还在同一次拍摄里才是 same-take，停机换机位就是 hard-cut。
+   transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take——两个不同机位的镜头接帧，画面会明显跳。
+   同时给出 referencePrevFrame（这一镜要不要带上一镜末帧作为风格参考）：只有「换机位但仍在同一场戏」的 hard-cut 才写 true，它只借上一镜的光线、色调与场景材质，构图与景别仍由本镜决定；same-take（已经用首帧接住）、time-jump、换场景一律写 false。拿不准时写 false，接缝宁可硬切，也不要让旧场景的光把新场景带歪。
 
 【三、镜头语言】
 7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
@@ -120,6 +131,9 @@ JSON 结构：
       "duration": 5,
       "shotSize": "中景",
       "cameraMove": "缓慢推近",
+      "transition": "same-take | hard-cut | time-jump",
+      "transitionReason": "一句话说明为什么这样衔接到下一镜",
+      "referencePrevFrame": "true / false：是否带上一镜末帧作为光线与场景材质的参考",
       "entryState": "本镜第一帧的画面事实，与上一镜 exitState 一致",
       "exitState": "本镜最后一帧的画面事实，供下一镜接住",
       "beatSheet": [
@@ -168,8 +182,8 @@ ${req.idea}
 
   const selfCheck = `输出前自检（不通过就改，不要把自检写进 JSON）：
 1) shots 是否正好 ${expectedShots} 个？
-2) 第 2 镜起，每镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么），只是换了措辞？
-3) 第 1 镜到最后一镜连起来读，是否是一条没有跳跃、没有凭空换场地、没有道具凭空出现的连续动作链？
+2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线是否仍然与上一镜一致？
+3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame=true 是否只出现在「同场景的 hard-cut」上？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作？
 5) 角色名 / 场景名是否逐字来自上方清单？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
@@ -284,6 +298,13 @@ function normalizeSpeaker(
   return loose ?? speaker;
 }
 
+/** 只认真正的布尔值，字符串 "false" / 缺失一律当「没写」，交给定稿层补默认 */
+function parseBool(value: unknown): boolean | undefined {
+  if (value === true) return true;
+  if (value === false) return false;
+  return undefined;
+}
+
 function normalizeShot(raw: Record<string, unknown>, index: number): Shot {
   const durationRaw = Number(raw.duration);
   /** wan3.0 支持 2~30 秒，模型给出区间外的值就夹回来 */
@@ -308,6 +329,14 @@ function normalizeShot(raw: Record<string, unknown>, index: number): Shot {
     duration,
     shotSize: normalizeShotSize(raw.shotSize),
     cameraMove: normalizeCameraMove(raw.cameraMove),
+    // 第一镜没有上一镜，衔接方式没有意义；没写时留空，交给 resolveTransitions 推断
+    transition: index === 1 ? undefined : parseTransition(raw.transition),
+    transitionReason:
+      index === 1
+        ? undefined
+        : str(raw.transitionReason ?? raw.transitionNote) || undefined,
+    referencePrevFrame:
+      index === 1 ? undefined : parseBool(raw.referencePrevFrame ?? raw.usePrevFrame),
     entryState: str(raw.entryState ?? raw.entry ?? raw.stateIn) || undefined,
     exitState: str(raw.exitState ?? raw.exit ?? raw.stateOut) || undefined,
     beatSheet: normalizeBeatSheet(raw.beatSheet ?? raw.beats ?? raw.timeline, duration),
@@ -419,10 +448,14 @@ function applyPlanFoundation(script: Script, plan: StoryPlan | null): void {
 /**
  * 状态链兜底：缺 entryState 的镜头直接沿用上一镜的 exitState。
  * 不花模型调用，但能保证每一镜都有可承接的入口，审片与修复也有据可依。
+ *
+ * 硬切 / 跳转镜头不补：它们本来就是新机位，补成上一镜的出口状态等于
+ * 把已经声明过的剪辑点重新抹平成连续镜头，审片也会被误导。
  */
 function stabilizeStateChain(script: Script): void {
   script.shots.forEach((shot, i) => {
     if (i === 0 || shot.entryState) return;
+    if (shot.transition === 'hard-cut' || shot.transition === 'time-jump') return;
     const prevExit = script.shots[i - 1]?.exitState;
     if (prevExit) shot.entryState = prevExit;
   });
@@ -633,6 +666,151 @@ function alignTotalDuration(script: Script, total: number): void {
   }
 }
 
+/**
+ * same-take 的成本上限：抽上一镜末帧当首帧的镜头不允许太长。
+ * 一次生成 10 秒的连续动作时，末帧离这一镜的起点已经很远，接帧省不了事，
+ * 反而白白丢掉角色卡参考图（wan3.0 首帧与参考图互斥）。
+ */
+const MAX_SAME_TAKE_SECONDS = 8;
+
+/** 连续接帧的最大次数：每接一次画面都会掉一点细节，接多了人物就漂了 */
+const MAX_SAME_TAKE_CHAIN = 2;
+
+/** 景别跨度允许的档数：特写接全景，接帧只会把上一镜的构图压在人物脸上 */
+const MAX_SHOT_SIZE_GAP = 1;
+
+const shotSizeRank = (size: string): number => {
+  const index = (SHOT_SIZES as readonly string[]).indexOf(size);
+  return index >= 0 ? index : 3;
+};
+
+/**
+ * 分镜没写衔接方式时，状态链要重合到这个程度才算「明显接得上」。
+ * 比 review 判「断开」的 0.15 高得多：只有模型确实在写同一件事时才敢接帧。
+ */
+const SAME_TAKE_STATE_CONFIDENCE = 0.4;
+
+/** 列出「这两个镜头接不住」的理由；空数组表示可以接帧 */
+function sameTakeBlockers(shot: Shot, prev: Shot, chain: number): string[] {
+  const reasons: string[] = [];
+
+  const prevScene = (prev.sceneNames ?? []).join('|');
+  const scene = (shot.sceneNames ?? []).join('|');
+  if (prevScene && scene && prevScene !== scene) reasons.push('换了场景');
+
+  const gap = Math.abs(shotSizeRank(shot.shotSize) - shotSizeRank(prev.shotSize));
+  if (gap > MAX_SHOT_SIZE_GAP) reasons.push(`景别从${prev.shotSize}跳到${shot.shotSize}`);
+
+  const exit = prev.exitState?.trim() ?? '';
+  const entry = shot.entryState?.trim() ?? '';
+  if (exit && entry && !hasTransitionHint(entry) && stateOverlap(exit, entry) < 0.15) {
+    reasons.push('首尾状态对不上');
+  }
+
+  /**
+   * 长镜头只在「画面里有人」时才拒绝接帧：接帧意味着这一镜不能用角色卡，
+   * 10 秒的生成过程本身就会让人脸漂，两者叠加就是肉眼可见的换脸。
+   * 空镜 / 环境镜没有这个代价，长一点照样可以接。
+   */
+  if (shot.duration > MAX_SAME_TAKE_SECONDS && (shot.characterNames ?? []).length > 0) {
+    reasons.push(`单镜 ${shot.duration} 秒且有人物，接帧会丢掉角色卡参考图`);
+  }
+
+  if ((prev.characterNames ?? []).length === 0 && (shot.characterNames ?? []).length > 0) {
+    reasons.push('上一镜没有人物');
+  }
+
+  if (chain >= MAX_SAME_TAKE_CHAIN) reasons.push(`连续接帧超过 ${MAX_SAME_TAKE_CHAIN} 次`);
+
+  return reasons;
+}
+
+/**
+ * 衔接方式的定稿层：先采用分镜的判断，再用可判定的规则否决。
+ *
+ * 模型会倾向把整条链都写成 same-take（它的自检本来就要求「连续动作链」，
+ * 接帧看着也最连贯），但真正接得住的只有「同场景 + 景别没跳 + 动作没跳」的
+ * 相邻两镜；其余情况接帧只会换来一次肉眼可见的画面跳变，还要付出丢掉
+ * 参考图（人物走形）的代价。
+ *
+ * 反过来，模型完全没写时不要一律当硬切：那样连续动作全被切断，回到
+ * 「接不上」的老问题。这时用状态链的重合度反推——只有明确接得上才接帧。
+ */
+function resolveTransitions(script: Script): void {
+  let chain = 0;
+
+  for (let i = 0; i < script.shots.length; i += 1) {
+    const shot = script.shots[i];
+    if (i === 0) {
+      shot.transition = undefined;
+      shot.transitionReason = undefined;
+      chain = 0;
+      continue;
+    }
+
+    const prev = script.shots[i - 1];
+    const blockers = sameTakeBlockers(shot, prev, chain);
+
+    if (shot.transition === undefined) {
+      const exit = prev.exitState?.trim() ?? '';
+      const entry = shot.entryState?.trim() ?? '';
+      const overlap = exit && entry ? stateOverlap(exit, entry) : 0;
+      const confident = blockers.length === 0 && overlap >= SAME_TAKE_STATE_CONFIDENCE;
+      shot.transition = confident ? 'same-take' : 'hard-cut';
+      shot.transitionReason = confident
+        ? '分镜没写衔接方式，按首尾状态推定承接'
+        : '分镜没写衔接方式，按剪辑点处理';
+      chain = confident ? chain + 1 : 0;
+      continue;
+    }
+
+    if (shot.transition !== 'same-take') {
+      chain = 0;
+      continue;
+    }
+
+    if (blockers.length === 0) {
+      chain += 1;
+      continue;
+    }
+
+    shot.transition = 'hard-cut';
+    shot.transitionReason = `已改为硬切：${blockers.join('、')}`;
+    chain = 0;
+  }
+}
+
+/**
+ * 末帧参考图开关的定稿层（在 transition 定稿之后跑）。
+ *
+ * 只有「换机位但仍在同一场戏」才值得带上上一镜末帧：借光线、色调、场景材质，
+ * 让接缝看起来还在同一个片场。其余情况一律关掉——
+ * 承接动作的镜头已经在用首帧（首帧与参考图互斥），时间跳转和换场景参考过去
+ * 只会把新场景拉回旧色调。分镜可以显式写 false 表示这一镜不需要，
+ * 但写 true 只有在同场硬切里才被采纳。
+ */
+function resolveReferenceFrames(script: Script): void {
+  script.shots.forEach((shot, i) => {
+    if (i === 0) {
+      shot.referencePrevFrame = undefined;
+      return;
+    }
+
+    const prev = script.shots[i - 1];
+    const prevScene = (prev.sceneNames ?? []).join('|');
+    const scene = (shot.sceneNames ?? []).join('|');
+    const sameScene = !!prevScene && !!scene && prevScene === scene;
+
+    if (shot.transition !== 'hard-cut' || !sameScene) {
+      shot.referencePrevFrame = false;
+      return;
+    }
+
+    // 同场硬切：分镜显式关掉就尊重，没写就默认带上
+    if (shot.referencePrevFrame === undefined) shot.referencePrevFrame = true;
+  });
+}
+
 /** 成稿后的统一收口：角色 / 场景卡、镜数、时长、引用全部对齐 */
 function finalizeScript(
   script: Script,
@@ -657,6 +835,10 @@ function finalizeScript(
   });
 
   reconcileReferences(script, plan);
+  // 引用校准之后才能定稿：判定要用到场景名、出镜角色与最终时长
+  resolveTransitions(script);
+  // 末帧参考图的开关依赖 transition 与场景，必须排在后
+  resolveReferenceFrames(script);
   stabilizeStateChain(script);
 }
 
@@ -717,6 +899,15 @@ function mergeRepairedShots(
       shot.media = prev.media ?? [];
       if (prev.continueFromPrev !== undefined) {
         shot.continueFromPrev = prev.continueFromPrev;
+      }
+      // 衔接方式已被否决层校准过，修复稿不要重新引入 same-take
+      if (prev.transition !== undefined) {
+        shot.transition = prev.transition;
+        shot.transitionReason = prev.transitionReason;
+      }
+      // 末帧参考图同理：校准结果与用户的手动开关都要保留
+      if (prev.referencePrevFrame !== undefined) {
+        shot.referencePrevFrame = prev.referencePrevFrame;
       }
       // 修复稿漏写状态链 / 时间轴时继承原稿，别让一次修复把整条链清空
       if (!shot.entryState && prev.entryState) shot.entryState = prev.entryState;
