@@ -184,6 +184,8 @@ export const VIDEO_PROMPT_RULES = `videoPrompt 是同一镜中文 description �
 - 必须是英文，一段话，${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个单词，按这个顺序写：景别 + 主体（固定英文外貌短语）+ 具体动作 + 环境细节 + 光线 / 时间 / 色调 + 运镜 + 画面质感 +（可选）一句声音；
 - 景别只用标准英文写法：${SHOT_SIZES.map((s) => `${SHOT_SIZE_EN[s]}（${s}）`).join(' / ')}，必须与 shotSize 一致；
 - 只写一个运镜，用标准英文运镜词，且必须与 cameraMove 的中文含义一致（${CAMERA_MOVES.map((m) => `${m}=${CAMERA_MOVE_EN[m][0]}`).join('，')}）；
+- 运动必须是一条连续、匀速、符合真实时间的动作链：只写「一个主体做一件事」，用 "smooth continuous motion, steady pacing, stable framing" 收尾；不要写「先……然后立刻……」这种一段里塞多个动作的句子，也不要让多个人物同时各做各的（文生视频会为了塞下两个动作而把画面拆成两段，接缝处就是抽帧般的抖动）；
+- 不要写 "slow motion"（除非 cameraMove=升格慢动作）、"time-lapse"、"speed ramp"、"jump cut"、"flicker"、"morphing" 这类会让速度忽快忽慢或画面跳变的词；
 - 禁止字幕、文字、水印、logo、分屏、转场词、镜头编号（如 "shot 1" / "scene 2"）；
 - 只写可拍摄的名词与动词，不要用 "beautiful" / "sad" 单独代替画面；
 - 同一角色在全片复用同一段英文外貌短语，不要逐镜改写年龄、发型、服装与道具。`;

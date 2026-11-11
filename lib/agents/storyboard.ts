@@ -53,7 +53,7 @@ export interface ScriptRequest {
   duration?: number;
   /**
    * 仅 duration 模式生效，默认 true：
-   * true=镜头数取最少、每镜尽量凑满 30 秒；false=镜数由 AI 按剧情决定（只约束区间）。
+   * true=镜头数取最少、每镜尽量凑满 10 秒（一次生成越长越不流畅）；false=镜数由 AI 按剧情决定（只约束区间）。
    */
   ensureCompleteness?: boolean;
 }
@@ -908,7 +908,7 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
     }
   }
 
-  /** 动态模式下降级时没有蓝图，用最少镜数兜底（每镜刚好 30 秒，总时长不会缩水） */
+  /** 动态模式下降级时没有蓝图，用最少镜数兜底（每镜尽量 10 秒，总时长不会缩水） */
   const fallbackShots = plannedShotCount ?? budget?.split.minShotCount ?? 6;
   /** 用户要求的镜数优先；动态模式 / 小说模式由蓝图的节拍数决定 */
   const expectedShots = isNovel

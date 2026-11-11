@@ -55,18 +55,27 @@ async function downloadVideo(url: string, dest: string): Promise<void> {
   );
 }
 
-/** 抽一帧，交给调用方判断是否产出非空文件 */
+/**
+ * 抽一帧，交给调用方判断是否产出非空文件。
+ *
+ * 用 PNG 而不是 JPEG：这张图会被视频模型当成首帧再编码一次，
+ * JPEG 的块状压缩痕迹会被模型放大成整段画面的噪点与涂抹感。
+ */
 async function grabFrame(
   bin: string,
   input: string,
   output: string,
   position: FramePosition,
 ): Promise<boolean> {
-  // 末帧：从结尾前 0.4s 取一帧（-sseof 超出时长会直接报错，由调用方兜底）
+  /**
+   * 末帧取结尾前 0.1s。原来是 -0.4s：成片里上一镜的最后 0.4 秒会被下一镜从
+   * 「0.4 秒之前」重新演一遍，接缝处看起来就是动作往回跳了一小段。
+   * 留 0.1s 只是为了避免落在编码器的最后一帧上。
+   */
   const args =
     position === 'last'
-      ? ['-y', '-sseof', '-0.4', '-i', input, '-frames:v', '1', '-an', '-q:v', '2', output]
-      : ['-y', '-ss', '0', '-i', input, '-frames:v', '1', '-an', '-q:v', '2', output];
+      ? ['-y', '-sseof', '-0.1', '-i', input, '-frames:v', '1', '-an', output]
+      : ['-y', '-ss', '0', '-i', input, '-frames:v', '1', '-an', output];
 
   try {
     await runFfmpeg(bin, args);
@@ -80,7 +89,7 @@ async function grabFrame(
 
 async function pruneFrames(): Promise<void> {
   try {
-    const files = (await fs.readdir(FRAME_DIR)).filter((file) => file.endsWith('.jpg'));
+    const files = (await fs.readdir(FRAME_DIR)).filter((file) => /\.(png|jpg)$/i.test(file));
     if (files.length <= MAX_FRAMES) return;
 
     const withTime = await Promise.all(
@@ -131,7 +140,7 @@ export async function extractFrame(
       await downloadVideo(trimmed, input);
     }
 
-    const fileName = `frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const fileName = `frame-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
     const output = path.join(FRAME_DIR, fileName);
 
     let ok = await grabFrame(ffmpeg, input, output, position);

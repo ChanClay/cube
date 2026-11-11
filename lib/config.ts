@@ -50,8 +50,12 @@ export const config = {
      * 合成后听起来「音频衔接不上」，所以默认关掉这类镜头的音频。
      */
     audioOnCarry: bool(process.env.VIDEO_AUDIO_ON_CARRY, false),
-    /** 提示词智能扩写 */
-    promptExtend: bool(process.env.VIDEO_PROMPT_EXTEND, true),
+    /**
+     * 提示词智能扩写。默认关：本项目的提示词是逐镜对齐过的（固定英文外貌 / 空间短语 +
+     * 标准景别运镜），交给服务端二次改写会被换成另一套景别与运镜，
+     * 人物长相和镜头语言都会漂移，运动也更难控。提示词很短时再打开它。
+     */
+    promptExtend: bool(process.env.VIDEO_PROMPT_EXTEND, false),
   },
   image: {
     /** 角色卡 / 场景卡配图用的文生图模型；默认复用视频的百炼 Key 与地址 */

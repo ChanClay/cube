@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { createWriteStream, promises as fs } from 'node:fs';
+import { createWriteStream, existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -21,6 +21,7 @@ export class ComposeError extends Error {
 }
 
 let ffmpegCache: string | null | undefined;
+let ffprobeCache: string | null | undefined;
 
 /** 解析 ffmpeg 可执行文件：FFMPEG_PATH 优先，其次 PATH */
 export function resolveFfmpeg(): string | null {
@@ -35,6 +36,36 @@ export function resolveFfmpeg(): string | null {
   const probe = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
   ffmpegCache = probe.status === 0 ? 'ffmpeg' : null;
   return ffmpegCache;
+}
+
+/**
+ * 解析 ffprobe：优先 FFPROBE_PATH，其次 FFMPEG_PATH 同目录（brew 装 ffmpeg 会一起带上），
+ * 最后试 PATH。拿不到时合成退化为只读 ffmpeg 文件头（时长精度差一帧）。
+ */
+function resolveFfprobe(): string | null {
+  if (ffprobeCache !== undefined) return ffprobeCache;
+
+  const explicit = process.env.FFPROBE_PATH?.trim();
+  if (explicit) {
+    ffprobeCache = explicit;
+    return ffprobeCache;
+  }
+
+  const ffmpeg = resolveFfmpeg();
+  if (ffmpeg && ffmpeg !== 'ffmpeg') {
+    const sibling = path.join(
+      path.dirname(ffmpeg),
+      process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe',
+    );
+    if (existsSync(sibling)) {
+      ffprobeCache = sibling;
+      return ffprobeCache;
+    }
+  }
+
+  const probe = spawnSync('ffprobe', ['-version'], { stdio: 'ignore' });
+  ffprobeCache = probe.status === 0 ? 'ffprobe' : null;
+  return ffprobeCache;
 }
 
 export function ffmpegMissingMessage(): string {
@@ -77,9 +108,67 @@ interface ClipProbe {
   /** 容器时长（秒），解析失败时为 0 */
   duration: number;
   hasAudio: boolean;
+  /** 视频流帧率，解析失败时为 0 */
+  fps: number;
 }
 
-/** 只读文件头，读出时长与是否自带音轨（无输出时 ffmpeg 必然非 0 退出，忽略退出码） */
+/**
+ * 优先用 ffprobe 读**视频流**自己的时长。
+ *
+ * 容器时长取的是音视频里较长的那条：模型经常输出 8.00 秒画面 + 8.03 秒音轨，
+ * 按容器时长 trim / apad，音频每镜就多出 30ms，拼到第 10 镜就是对不上的口型。
+ */
+function probeWithFfprobe(ffprobe: string, file: string): ClipProbe | null {
+  const res = spawnSync(
+    ffprobe,
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'stream=codec_type,duration,r_frame_rate',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'json',
+      file,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (res.status !== 0) return null;
+
+  try {
+    const data = JSON.parse(res.stdout ?? '{}') as {
+      streams?: { codec_type?: string; duration?: string; r_frame_rate?: string }[];
+      format?: { duration?: string };
+    };
+    const streams = data.streams ?? [];
+    const video = streams.find((stream) => stream.codec_type === 'video');
+    if (!video) return null;
+
+    const videoDuration = Number(video.duration);
+    const formatDuration = Number(data.format?.duration);
+    const duration =
+      Number.isFinite(videoDuration) && videoDuration > 0
+        ? videoDuration
+        : Number.isFinite(formatDuration)
+          ? formatDuration
+          : 0;
+
+    // r_frame_rate 形如 "30/1"，少数容器给 "N/A"
+    const [num, den] = (video.r_frame_rate ?? '').split('/').map(Number);
+    const fps = Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : 0;
+
+    return {
+      duration,
+      hasAudio: streams.some((stream) => stream.codec_type === 'audio'),
+      fps,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** ffprobe 不可用时的兜底：只读文件头（无输出时 ffmpeg 必然非 0 退出，忽略退出码） */
 function probeClip(bin: string, file: string): ClipProbe {
   const res = spawnSync(bin, ['-hide_banner', '-i', file], { encoding: 'utf8' });
   const text = `${res.stderr ?? ''}${res.stdout ?? ''}`;
@@ -87,7 +176,24 @@ function probeClip(bin: string, file: string): ClipProbe {
   const duration = match
     ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])
     : 0;
-  return { duration, hasAudio: /Stream #\d+:\d+.*: Audio:/.test(text) };
+  // 形如 "Video: h264 ..., 854x480, 30 fps, 30 tbr"，只在本行内匹配，别串到音频流
+  const fpsMatch = text.match(/Video:[^\n]*?(\d+(?:\.\d+)?)\s*fps/);
+  const fps = fpsMatch ? Number(fpsMatch[1]) : 0;
+  return { duration, hasAudio: /Stream #\d+:\d+.*: Audio:/.test(text), fps };
+}
+
+/**
+ * 成片帧率取素材里的最高值。
+ * 原来写死 fps=30：24fps 的素材会被整段补重复帧，运动看着就是「一顿一顿」的抖，
+ * 30fps 素材则完全不受影响。取最高值只会给低帧率素材补帧，不会给高帧率素材丢帧。
+ */
+function targetFps(probes: ClipProbe[]): number {
+  const values = probes
+    .map((probe) => probe.fps)
+    .filter((fps) => Number.isFinite(fps) && fps >= 1 && fps <= 120);
+  if (values.length === 0) return 30;
+  // 29.97 / 23.976 这类保留两位小数，整数帧率仍按整数走
+  return Math.round(Math.max(...values) * 100) / 100;
 }
 
 async function pruneExports(): Promise<void> {
@@ -149,9 +255,13 @@ export async function composeVideos(
     }
 
     // 2. 探测音轨：只要有一个镜头自带声音，成片就保留声音
-    const probes = files.map((file) => probeClip(ffmpeg, file));
+    const ffprobe = resolveFfprobe();
+    const probes = files.map(
+      (file) => (ffprobe ? probeWithFfprobe(ffprobe, file) : null) ?? probeClip(ffmpeg, file),
+    );
     const keepAudio =
       probes.every((probe) => probe.duration > 0) && probes.some((probe) => probe.hasAudio);
+    const fps = targetFps(probes);
 
     // 3. 统一尺寸与音频参数后 concat
     const chains: string[] = [];
@@ -159,8 +269,9 @@ export async function composeVideos(
     const silenceArgs: string[] = [];
     let silenceCount = 0;
 
-    const scale = `scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30`;
+    // lanczos 缩放保留更多高频细节，避免 480p → 1080p 时糊成一片
+    const scale = `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,` +
+      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps}`;
 
     for (let i = 0; i < files.length; i += 1) {
       const { duration, hasAudio } = probes[i];
@@ -211,10 +322,15 @@ export async function composeVideos(
       ...(keepAudio ? ['-map', '[outa]', '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
       '-c:v',
       'libx264',
+      // 素材本身已经是压缩过的，再叠一层 veryfast / crf20 会在运动画面里出块状拖影；
+      // 这里用 medium / crf18，60 秒 1080p 也只是多几秒
       '-preset',
-      'veryfast',
+      'medium',
       '-crf',
-      '20',
+      '18',
+      // 锁定恒定帧率，避免拼接处出现时间戳抖动
+      '-r',
+      String(fps),
       '-pix_fmt',
       'yuv420p',
       '-movflags',

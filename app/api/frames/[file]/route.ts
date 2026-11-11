@@ -6,7 +6,8 @@ import { FRAME_DIR } from '@/lib/frame';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const FILE_PATTERN = /^frame-\d+-[a-z0-9]+\.jpg$/;
+/** 旧抽帧是 jpg，新抽帧是无损 png（首帧会被模型再编码一次，不能再带 JPEG 压缩痕迹） */
+const FILE_PATTERN = /^frame-\d+-[a-z0-9]+\.(png|jpg)$/;
 
 /** 提供抽出的关键帧图片（云端视频模型需要能下载到这张图） */
 export async function GET(_request: Request, context: { params: Promise<{ file: string }> }) {
@@ -25,7 +26,7 @@ export async function GET(_request: Request, context: { params: Promise<{ file: 
   const stream = Readable.toWeb(createReadStream(filePath)) as unknown as ReadableStream;
   return new Response(stream, {
     headers: {
-      'Content-Type': 'image/jpeg',
+      'Content-Type': file.endsWith('.png') ? 'image/png' : 'image/jpeg',
       'Content-Length': String(stat.size),
       // 文件名唯一，可长缓存
       'Cache-Control': 'public, max-age=31536000, immutable',

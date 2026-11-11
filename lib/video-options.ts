@@ -48,9 +48,13 @@ export function normalizeResolution(
   return isResolution(value) ? value : fallback;
 }
 
-/** 各画质档在 16:9 下的基准尺寸，其他比例按高度换算 */
+/**
+ * 各画质档在 16:9 下的基准尺寸，其他比例按高度换算。
+ * 480p 必须是 854×480：写成 832×480 只有 1.73:1，把模型输出的 854×480 塞进去
+ * 会左右各留一条黑边、画面被缩掉 2.6%，看着就是「糊了一层」。
+ */
 const BASE_SIZE: Record<VideoResolution, { w: number; h: number }> = {
-  '480p': { w: 832, h: 480 },
+  '480p': { w: 854, h: 480 },
   '720p': { w: 1280, h: 720 },
   '1080p': { w: 1920, h: 1080 },
 };

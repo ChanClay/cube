@@ -8,6 +8,7 @@ import {
   MIN_NOVEL_CHARS,
   MIN_SHOT_SECONDS,
   MIN_TOTAL_SECONDS,
+  PREFERRED_SHOT_SECONDS,
   splitByDuration,
   type ScriptMode,
 } from '@/lib/shot-plan';
@@ -27,7 +28,7 @@ export interface ScriptParams {
   shotDuration: number;
   /** 按总时长模式下的视频总时长（秒） */
   totalDuration: number;
-  /** 按总时长模式：是否保证故事完整性（镜头更少、每镜凑满 30 秒） */
+  /** 按总时长模式：是否保证故事完整性（镜头更少、每镜凑满 PREFERRED_SHOT_SECONDS） */
   ensureCompleteness: boolean;
 }
 
@@ -374,7 +375,7 @@ export default function IdeaForm({
                     </div>
                     <label
                       className="shot-switch"
-                      title="开启后分镜数量减少，每个镜头尽量凑满 30 秒，故事被切碎的风险更低；关闭则由 AI 分析剧情自行判断切几刀，只保证单镜不超过 30 秒、总时长不变"
+                      title={`开启后分镜数量减少，每个镜头尽量凑满 ${PREFERRED_SHOT_SECONDS} 秒（一次生成越长，后半段动作越容易变慢走形），故事被切碎的风险更低；关闭则由 AI 分析剧情自行判断切几刀，只保证单镜不超过 ${MAX_SHOT_SECONDS} 秒、总时长不变`}
                     >
                       <input
                         type="checkbox"
@@ -386,11 +387,11 @@ export default function IdeaForm({
                       <span className="shot-switch-track" aria-hidden="true">
                         <span className="shot-switch-thumb" />
                       </span>
-                      <span>减少分镜、每镜凑满 30 秒</span>
+                      <span>减少分镜、每镜凑满 {PREFERRED_SHOT_SECONDS} 秒</span>
                     </label>
                     <div className="field-hint" style={{ marginTop: 7 }}>
                       {ensureCompleteness
-                        ? `固定 ${split.shotCount} 镜，每镜尽量凑满 30 秒`
+                        ? `固定 ${split.shotCount} 镜，每镜尽量凑满 ${PREFERRED_SHOT_SECONDS} 秒`
                         : `由 AI 判断切几刀（${split.minShotCount}~${split.maxShotCount} 镜）`}
                     </div>
                   </div>
