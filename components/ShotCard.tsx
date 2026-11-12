@@ -306,6 +306,80 @@ export default function ShotCard({
             />
             s
           </label>
+
+          <div
+            className={`shot-transition${isFirst ? ' is-disabled' : ''}`}
+            title={
+              isFirst
+                ? '第一镜没有上一镜，无法承接'
+                : `${TRANSITION_LABEL[transition]}：${TRANSITION_HINT[transition]}${
+                    shot.transitionReason ? `\n分镜判定：${shot.transitionReason}` : ''
+                  }`
+            }
+          >
+            <span className="shot-transition-label">衔接</span>
+            <select
+              className="select shot-transition-select"
+              value={transition}
+              disabled={isFirst}
+              aria-label="与上一镜的衔接方式"
+              onChange={(e) => {
+                const next = e.target.value as ShotTransition;
+                onChange({
+                  transition: next,
+                  // 旧字段一并写，避免两个来源打架（历史数据仍在读 continueFromPrev）
+                  continueFromPrev: next === 'same-take',
+                  // 衔接方式变了就回到「自动」：硬切默认也接帧，别被上一个值卡住
+                  referencePrevFrame: undefined,
+                });
+              }}
+            >
+              {TRANSITION_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {TRANSITION_LABEL[value]}
+                </option>
+              ))}
+            </select>
+
+            {!isFirst && transition !== 'same-take' && (
+              <label
+                className={`shot-ref-frame${canReferencePrevFrame ? '' : ' is-disabled'}`}
+                title={
+                  !prevFrameRefEnabled
+                    ? '已由 VIDEO_REFERENCE_PREV_FRAME=0 全局关闭'
+                    : !sameSceneAsPrev
+                      ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
+                      : exactCarry
+                        ? '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（首帧与参考图互斥）。关掉就是纯硬切'
+                        : gapToPrev > 1 && !shot.hiddenCut
+                          ? `景别从${prevShotSize}跳到${shot.shotSize}，上一镜末帧接不住：这一镜走角色卡 / 场景卡重新构图`
+                          : '景别变了，末帧不能当首帧（那会变成一次推拉），只作风格参考图借光线与色调，角色卡照常传'
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={referencePrevFrame}
+                  disabled={!canReferencePrevFrame}
+                  onChange={(e) => onChange({ referencePrevFrame: e.target.checked })}
+                />
+                <span>{exactCarry ? '末帧接住' : '末帧参考'}</span>
+              </label>
+            )}
+
+            {sameScopeCut && gapToPrev > 1 && (
+              <label
+                className="shot-ref-frame"
+                title="这次换机位靠人物走过前景 / 甩镜 / 暗部完成：观众看不出接缝，所以景别可以跨，但末帧只能当风格参考图"
+              >
+                <input
+                  type="checkbox"
+                  checked={!!shot.hiddenCut}
+                  onChange={(e) => onChange({ hiddenCut: e.target.checked || undefined })}
+                />
+                <span>遮挡转场</span>
+              </label>
+            )}
+          </div>
         </div>
       </div>
 
@@ -556,7 +630,23 @@ export default function ShotCard({
         <aside className="shot-preview">
           <div className="preview-head">
             <span className="shot-label">成果视频</span>
-            {statusBadge}
+            <div className="preview-head-actions">
+              {statusBadge}
+              {busy && onAbandon && (
+                <button
+                  className="btn btn--sm btn--danger"
+                  type="button"
+                  onClick={onAbandon}
+                  title="放弃这一镜：本地标记为已放弃、停止跟踪进度。云端任务仍会跑完（费用照常），结果不再回收"
+                >
+                  放弃本镜
+                </button>
+              )}
+              <button className="btn btn--sm btn--primary" onClick={onGenerate} disabled={disabled}>
+                {busy && <span className="spinner" />}
+                {buttonText}
+              </button>
+            </div>
           </div>
 
           {job?.status === 'succeeded' && job.videoUrl ? (
@@ -641,98 +731,6 @@ export default function ShotCard({
             </details>
           )}
         </aside>
-      </div>
-
-      <div className="shot-actions">
-        <div
-          className={`shot-transition${isFirst ? ' is-disabled' : ''}`}
-          title={
-            isFirst
-              ? '第一镜没有上一镜，无法承接'
-              : `${TRANSITION_LABEL[transition]}：${TRANSITION_HINT[transition]}${
-                  shot.transitionReason ? `\n分镜判定：${shot.transitionReason}` : ''
-                }`
-          }
-        >
-          <span className="shot-transition-label">衔接</span>
-          <select
-            className="select shot-transition-select"
-            value={transition}
-            disabled={isFirst}
-            aria-label="与上一镜的衔接方式"
-            onChange={(e) => {
-              const next = e.target.value as ShotTransition;
-              onChange({
-                transition: next,
-                // 旧字段一并写，避免两个来源打架（历史数据仍在读 continueFromPrev）
-                continueFromPrev: next === 'same-take',
-                // 衔接方式变了就回到「自动」：硬切默认也接帧，别被上一个值卡住
-                referencePrevFrame: undefined,
-              });
-            }}
-          >
-            {TRANSITION_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {TRANSITION_LABEL[value]}
-              </option>
-            ))}
-          </select>
-
-          {!isFirst && transition !== 'same-take' && (
-            <label
-              className={`shot-ref-frame${canReferencePrevFrame ? '' : ' is-disabled'}`}
-              title={
-                !prevFrameRefEnabled
-                  ? '已由 VIDEO_REFERENCE_PREV_FRAME=0 全局关闭'
-                  : !sameSceneAsPrev
-                    ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
-                    : exactCarry
-                      ? '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（首帧与参考图互斥）。关掉就是纯硬切'
-                      : gapToPrev > 1 && !shot.hiddenCut
-                        ? `景别从${prevShotSize}跳到${shot.shotSize}，上一镜末帧接不住：这一镜走角色卡 / 场景卡重新构图`
-                        : '景别变了，末帧不能当首帧（那会变成一次推拉），只作风格参考图借光线与色调，角色卡照常传'
-              }
-            >
-              <input
-                type="checkbox"
-                checked={referencePrevFrame}
-                disabled={!canReferencePrevFrame}
-                onChange={(e) => onChange({ referencePrevFrame: e.target.checked })}
-              />
-              <span>{exactCarry ? '末帧接住' : '末帧参考'}</span>
-            </label>
-          )}
-
-          {sameScopeCut && gapToPrev > 1 && (
-            <label
-              className="shot-ref-frame"
-              title="这次换机位靠人物走过前景 / 甩镜 / 暗部完成：观众看不出接缝，所以景别可以跨，但末帧只能当风格参考图"
-            >
-              <input
-                type="checkbox"
-                checked={!!shot.hiddenCut}
-                onChange={(e) => onChange({ hiddenCut: e.target.checked || undefined })}
-              />
-              <span>遮挡转场</span>
-            </label>
-          )}
-        </div>
-
-        {busy && onAbandon && (
-          <button
-            className="btn btn--sm btn--danger"
-            type="button"
-            onClick={onAbandon}
-            title="放弃这一镜：本地标记为已放弃、停止跟踪进度。云端任务仍会跑完（费用照常），结果不再回收"
-          >
-            放弃本镜
-          </button>
-        )}
-
-        <button className="btn btn--sm btn--primary" onClick={onGenerate} disabled={disabled}>
-          {busy && <span className="spinner" />}
-          {buttonText}
-        </button>
       </div>
 
       {previewing && (
