@@ -57,7 +57,7 @@
 
 - `id`、`media`、`lastFrameCast` 由系统写入，手写脚本可以省略。
 - 首镜没有 `transition` / `referencePrevFrame` / `transitionReason` / `hiddenCut`。
-- `referencePrevFrame` 只表达「要不要用上一镜末帧」，怎么用由景别跨度决定：同景别 → 当首帧；跨 1 档或 `hiddenCut` → 只当 `reference_image`；跨 2 档以上 → 不用。代码见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`。
+- `referencePrevFrame` 只表达「要不要用上一镜末帧」，怎么用由景别跨度决定：同景别 → 当首帧；跨 1 档或 `hiddenCut` → 只当 `reference_image`；跨 2 档以上 → 不用。代码见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`。同场景跨度 ≥2 的 `hard-cut` 写 `true` 无效且校验报错，必须先改序列（中间垫一档，或改成 `hiddenCut` 的隐蔽换机位）。
 - 镜头的主体 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`）；名字必须逐字来自顶层清单。载具卡同样要写进本镜 `characters`，否则那一镜不会带它的参考图。
 
 ## 二、数值约束

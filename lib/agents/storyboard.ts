@@ -31,6 +31,7 @@ import {
   normalizeCameraMove,
   normalizeShotSize,
   parseTransition,
+  PREV_FRAME_RULES,
   PROMPT_MAX_WORDS,
   PROMPT_MIN_WORDS,
   SHOT_LANGUAGE_RULES,
@@ -94,7 +95,7 @@ function buildSystemPrompt(): string {
    - time-jump：时间或地点跳转。
    判断标准：摄影机有没有停机。还在同一次拍摄里才是 same-take，停机换机位就是 hard-cut。
    transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take。
-   同时给出 referencePrevFrame（这一镜要不要用上一镜的最后一帧）：只有「同场景 + 同景别的 hard-cut」写 true——本镜第一帧与上一镜最后一帧完全相同，接缝不跳，代价是本镜传不了卡片。景别变了就别写 true：画面要重新构图，上一镜的构图接不住，交给角色卡 / 场景卡。time-jump、换场景一律写 false。拿不准时写 false。
+   ${PREV_FRAME_RULES}
    镜数跟着「叙事断点」走，不跟着时长或景别走：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、连续对话——必须放进一个镜头，用 beatSheet 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要一个停顿。不要为了换景别、换机位、凑时长而切镜。
    一镜到底优先用一个镜头承载，不要拆：镜头内的景别变化靠 cameraMove（缓慢推近 / 缓慢拉远 / 跟随）+ beatSheet 表达。只有时长超过 8 秒、必须分段生成时才拆成多镜，且拆点两侧的景别、机位、人物姿势必须完全一致。
    确实要在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位：人物走过柱子、门框、走廊，镜头甩进暗处，雨幕或前景物件盖住画面。这时写 hiddenCut: true，景别可以随便跨，系统会把上一镜末帧降级成风格参考图而不会把它当首帧。
@@ -150,9 +151,9 @@ JSON 结构：
       "cameraMove": "缓慢推近",
       "transition": "same-take | hard-cut | time-jump",
       "transitionReason": "一句话说明切点承接的是什么（同一瞬间的动作相位 / 同一个背景锚点），为什么这样衔接到下一镜",
-      "referencePrevFrame": "true / false：本镜是否用上一镜最后一帧（只有同场景 + 同景别的 hard-cut 写 true）",
+      "referencePrevFrame": "true / false：本镜是否用上一镜最后一帧（同场景跨度 0 写 true；跨度 1 或 hiddenCut 留空即自动；跨度 ≥2 不要写 true，先改序列）",
       "hiddenCut": "true / false：这次换机位是否靠遮挡 / 甩镜 / 暗部完成（长镜头里换景别时写 true，景别可随便跨）",
-      "entryState": "本镜第一帧的画面事实（谁 / 在哪 / 姿势 / 朝向 / 运动方向 / 背景锚点），与上一镜 exitState 一致",
+      "entryState": "本镜第一帧的画面事实，四段齐全：承接（上一镜末帧可见的主体位置 / 姿势 / 朝向 / 手持物）＋空间（容器几何＋两个以上固定件）＋机位（方位 / 高度 / 距离）＋环境（光源方向色温 / 背景锚点 / 运动感）",
       "exitState": "本镜最后一帧的画面事实（画面位置 / 运动方向 / 背景锚点），必须是可切帧，供下一镜接住",
       "beatSheet": [
         { "from": 0, "to": 2, "action": "抬眼看向塔顶", "actionEn": "his eyes lifting toward the top of the tower" },
@@ -202,7 +203,7 @@ ${req.idea}
   const selfCheck = `输出前自检（不通过就改，不要把自检写进 JSON）：
 1) shots 是否正好 ${expectedShots} 个？
 2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝哪边运动），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线、运动方向与背景锚点是否仍然与上一镜一致？
-3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame=true 是否只出现在「同场景 + 同景别」的 hard-cut 上？跨了景别的长镜头是不是都写了 hiddenCut=true？
+3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame 是否按档位写（跨度 ≥2 的硬切有没有先改成「垫一档」或 hiddenCut，而不是硬写 true）？跨了景别的长镜头是不是都写了 hiddenCut=true？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作，并且每段都给了 8~14 词的 actionEn？
 5) 主体名 / 场景名是否逐字来自上方清单？本镜出现的每一辆车（主角座驾、追车、警车…）是否都写进了 characters 并复用它的 promptEn？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
@@ -210,7 +211,8 @@ ${req.idea}
 8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
 9) 所有 duration 之和是否等于 ${totalDuration} 秒？
 10) 每镜的最后一个 beat 是不是落点（动作到达可辨认相位），exitState 是不是主体还在画面内、写清了画面位置 / 运动方向 / 背景锚点？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
-11) 相邻两镜的运动方向是否一致（左→右不能接右→左）？要越轴时，是不是先垫了一个中性机位（迎面 / 背面 / 空镜）？hard-cut 的 transitionReason 是否写清了切点承接的是哪个动作相位或背景锚点？`;
+11) 相邻两镜的运动方向是否一致（左→右不能接右→左）？要越轴时，是不是先垫了一个中性机位（迎面 / 背面 / 空镜）？hard-cut 的 transitionReason 是否写清了切点承接的是哪个动作相位或背景锚点？
+12) 每个特写 / 近景是否交代了容器与至少两个容器固定件（方向盘 / 仪表台 / 后视镜 / 门框 / 舷窗…）、主光方向与色温、窗外或背景锚点？机位是否在同一轴线侧、用中长焦观感？有没有出现穿挡风玻璃正面平视、90° 广角正侧切、大角度俯拍这类角度？室内内饰是否复用了场景卡 / 载具卡的固定英文短语，而不是每镜重写？`;
 
   if (!plan) {
     return `${head}
@@ -862,6 +864,15 @@ function resolveReferenceFrames(script: Script): void {
       shot.referencePrevFrame = false;
       // 遮挡转场只在同场景的硬切里有意义，其余情况一律清掉，避免 UI 与提示词自相矛盾
       shot.hiddenCut = undefined;
+    }
+
+    /**
+     * 同场景跨度 ≥2 的硬切：prevFrameUsage 本来就用不上末帧，
+     * 模型写了 true 也只会让数据与 UI 自相矛盾，统一回到「自动」。
+     * 正确解法是改序列（中间垫一档，或改成 hiddenCut 的隐蔽换机位），而不是留着这个字段。
+     */
+    if (shot.transition === 'hard-cut' && sameScene && !shot.hiddenCut && shotSizeGap(shot, prev) >= 2) {
+      shot.referencePrevFrame = undefined;
     }
   });
 }
