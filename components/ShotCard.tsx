@@ -158,6 +158,30 @@ export default function ShotCard({
    */
   const sameSceneAsPrev =
     !!prevSceneName && (shot.sceneNames ?? []).includes(prevSceneName);
+
+  /** 场景归属：优先按 id 记，旧数据回退名字；改名不会让这一镜失去场景卡 */
+  const sceneOptions = scenes.filter((scene) => !!scene.name);
+  const selectedSceneNames = shot.sceneNames ?? [];
+  const selectedSceneIds = (shot.sceneIds ?? []).filter(Boolean);
+  const isSceneActive = (scene: Scene) =>
+    scene.id ? selectedSceneIds.includes(scene.id) : selectedSceneNames.includes(scene.name);
+
+  /**
+   * 切换本镜的场景归属：名字与 id 同时写回。
+   *
+   * id 由名字反查重建，所以旧剧本（只有 sceneNames）点一下就会自动补齐 id；
+   * 反过来删掉一张卡时，名字没了 id 也跟着消失，不会留下指向空卡的死引用。
+   */
+  const toggleScene = (scene: Scene) => {
+    const active = isSceneActive(scene);
+    const nextNames = active
+      ? selectedSceneNames.filter((name) => name !== scene.name)
+      : [...selectedSceneNames, scene.name];
+    const nextIds = scenes
+      .filter((item) => item.id && nextNames.includes(item.name))
+      .map((item) => item.id as string);
+    onChange({ sceneIds: nextIds, sceneNames: nextNames });
+  };
   /** 景别跨度：0 = 同景别，1 = 相邻，≥2 = 跳变；不知道上一镜景别时按同景别算 */
   const gapToPrev = prevShotSize ? shotSizeGap(shot, { shotSize: prevShotSize }) : 0;
   const sameScopeCut =
@@ -204,7 +228,13 @@ export default function ShotCard({
         prevCast,
         prevExitState,
         characters: characters.map(({ name, desc }) => ({ name, desc })),
-        scenes: scenes.map(({ name, desc, promptEn }) => ({ name, desc, promptEn })),
+        scenes: scenes.map(({ name, desc, promptEn, inventory, state }) => ({
+          name,
+          desc,
+          promptEn,
+          inventory,
+          state,
+        })),
         sceneNames: shot.sceneNames ?? [],
         prevSceneName,
       });
@@ -220,6 +250,9 @@ export default function ShotCard({
       if (next.speaker) patch.speaker = next.speaker;
       // 时间轴按新描述重算过才覆盖，没拿到就保留原来的
       if (next.beatSheet?.length) patch.beatSheet = next.beatSheet;
+      // 走位同理：模型给空值时不清掉用户手写的那一份
+      if (next.blocking?.trim()) patch.blocking = next.blocking;
+      if (next.blockingEn?.trim()) patch.blockingEn = next.blockingEn;
       onChange(patch);
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : String(err));
@@ -392,6 +425,30 @@ export default function ShotCard({
 
       <div className="shot-body">
         <div className="shot-info">
+      {sceneOptions.length > 0 && (
+        <div className="shot-scenes" role="group" aria-label="本镜所在场景">
+          <span className="shot-label">所在场景</span>
+          <div className="shot-scene-chips">
+            {sceneOptions.map((scene) => {
+              const active = isSceneActive(scene);
+              return (
+                <button
+                  key={scene.id ?? scene.name}
+                  type="button"
+                  className={`shot-scene-chip${active ? ' is-active' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => toggleScene(scene)}
+                  title={scene.state ? `${scene.desc}｜状态：${scene.state}` : scene.desc}
+                >
+                  {scene.name}
+                  {scene.state ? ` · ${scene.state}` : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="shot-label-row">
         <label className="shot-label">画面描述</label>
         <button
@@ -426,6 +483,31 @@ export default function ShotCard({
               </li>
             ))}
           </ol>
+        </>
+      )}
+
+      {sceneOptions.length > 0 && (
+        <>
+          <label
+            className="shot-label"
+            title="走位不当作图片喂给视频模型：运行时把英文走位拼进提示词，换机位时人物左右关系才不会翻"
+          >
+            人物走位（占位布局）
+          </label>
+          <textarea
+            className="shot-textarea"
+            rows={2}
+            value={shot.blocking ?? ''}
+            placeholder="谁站在空间的哪一侧、面朝哪里、彼此距离（参考门窗 / 桌子哪一端，不写「画面左侧」）"
+            onChange={(e) => onChange({ blocking: e.target.value })}
+          />
+          <input
+            className="shot-blocking-en"
+            value={shot.blockingEn ?? ''}
+            placeholder="English blocking phrase, appended to the video prompt"
+            onChange={(e) => onChange({ blockingEn: e.target.value })}
+            aria-label="人物走位英文短语"
+          />
         </>
       )}
 

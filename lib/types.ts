@@ -63,6 +63,44 @@ export interface Character {
   imageUrl?: string;
 }
 
+/**
+ * 场景里的固定陈设。
+ *
+ * 分镜各写各的「桌上有杯酒」，靠场景卡的一句自由描述是拦不住的：
+ * 模型会把陈设当成新的即兴发挥，同一张桌子在每一镜里换位置。
+ * 所以把陈设拆成可枚举的条目：名字进中文校验，英文名在运行时直接拼进提示词，
+ * 位置用「相对门窗 / 固定家具」的绝对关系写死（不能写「画面左侧」——换机位就翻面了）。
+ */
+export interface SceneItem {
+  /** 中文名，分镜描述的用词来源，也是审片做覆盖检查的依据 */
+  name: string;
+  /** 英文名：运行时逐字拼进提示词，不再依赖模型逐镜翻译 */
+  en?: string;
+  /** 位置锚点（中文，给人看），例：靠窗那面墙的中间、正对门、房间正中偏右 */
+  where?: string;
+  /**
+   * 位置的英文版（给模型看）：运行时只注入这一份，中文 `where` 不进提示词。
+   *
+   * 中文位置拼进英文 prompt 有两个硬伤：汉字占比会触发 `prompt-not-english`（fatal），
+   * 而且英文视频模型本来就无法利用中文方位。缺这一份时宁可不给位置（只给英文名），
+   * 也不要给一份看不懂、或者没有参照系的坐标。
+   */
+  whereEn?: string;
+  /**
+   * 是否全片不可移动。
+   * true：桌椅、门窗、柜台这类固定件，每镜都在同一位置；
+   * false：酒杯、烛台、提灯这类会被人物拿起 / 推移的物件，位置以 entryState 为准。
+   */
+  fixed?: boolean;
+}
+
+/** 场景卡的一个机位参考图：同一空间只建一张卡，不同视角在图集里挑 */
+export interface SceneAngleRef {
+  /** 机位标签，例：front / reverse / wide / close / top；自由文本，运行时按相似度选 */
+  angle: string;
+  imageUrl: string;
+}
+
 /** 场景卡：全片复用的空间设定，与角色卡同级 */
 export interface Scene {
   /** 列表渲染用的稳定 id（旧剧本可能没有） */
@@ -71,8 +109,17 @@ export interface Scene {
   desc: string;
   /** 全片固定的英文空间短语（来自蓝图） */
   promptEn?: string;
-  /** 场景参考图；上一镜末帧不可用时作为首帧兜底（场景空镜更接近真实构图） */
+  /** 场景参考图（默认视角 = 主图）；上一镜末帧不可用时作为首帧兜底（场景空镜更接近真实构图） */
   imageUrl?: string;
+  /** 固定陈设清单：分镜里出现的物件必须在这里（或道具卡里）有出处 */
+  inventory?: SceneItem[];
+  /**
+   * 多机位参考图集。同一空间不拆卡：视角是镜头属性，
+   * 按视角拆卡会把「跨镜漂移」换成「跨变体漂移」，反而多一层选错的可能。
+   */
+  angleRefs?: SceneAngleRef[];
+  /** 同一空间的状态变体名（白天 / 断电 / 火灾后）；状态差异大到不能共用陈设时才拆卡 */
+  state?: string;
 }
 
 /**
@@ -136,6 +183,19 @@ export interface Shot {
   entryState?: string;
   /** 本镜最后一帧的画面事实，下一镜的 entryState 要接住它 */
   exitState?: string;
+  /**
+   * 本镜的人物走位（中文）：谁站在空间的哪一侧、面朝什么、彼此之间的距离关系。
+   *
+   * 这是「占位布局」的落地形式：布局不直接当图片喂给视频模型（俯视图会被当成画面内容照抄），
+   * 而是降维成一段可复用的空间事实，运行时拼进英文提示词。
+   * 写的时候必须用场景卡的参考系（相对门窗 / 固定家具），不要写「画面左侧」。
+   */
+  blocking?: string;
+  /**
+   * 走位短语的英文版（8~18 词），运行时逐字拼进提示词。
+   * 同场景的镜头复用同一份措辞，人物的左右关系才不会在每次换机位时翻转。
+   */
+  blockingEn?: string;
   /** 这一镜内部的秒级节奏：几秒到几秒在发生什么（旧剧本没有这个字段） */
   beatSheet?: ShotBeat[];
   /** 英文文生视频提示词（给模型看），是 description 的忠实英译 */
@@ -187,7 +247,14 @@ export interface Shot {
    * 新剧本由 transition 决定，这里只用于读取历史数据。
    */
   continueFromPrev?: boolean;
-  /** 这一镜所在的场景名（对应 Script.scenes），用于取场景卡配图当首帧 */
+  /**
+   * 这一镜所在的场景（对应 Script.scenes 的 id）。
+   *
+   * id 是首选引用：改名不会让这一镜失去场景卡，也不会因为两张卡同名而挂错图。
+   * 旧剧本没有这个字段时按 sceneNames 回退（见 lib/skills/scene-anchor 的 resolveShotScenes）。
+   */
+  sceneIds?: string[];
+  /** 这一镜所在的场景名（对应 Script.scenes），UI 显示与旧数据兼容用；与 sceneIds 同时写入 */
   sceneNames?: string[];
   /** 多模态参考素材（首帧/尾帧/参考图/参考视频/参考音频/文档/网页） */
   media?: MediaInput[];

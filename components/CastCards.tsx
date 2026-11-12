@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/client';
 import { STYLE_LABELS } from '@/lib/skills/style-presets';
-import type { Character, Scene } from '@/lib/types';
+import type { Character, Scene, SceneAngleRef, SceneItem } from '@/lib/types';
 
 /**
  * 角色卡 / 场景卡：
@@ -19,7 +19,7 @@ const LABEL: Record<Kind, string> = { character: '角色卡', scene: '场景卡'
 
 const HINT: Record<Kind, string> = {
   character: '人物 / 载具 / 关键道具的外形都写在这里，用于全片一致性；点名字展开编辑',
-  scene: '空间设定用于全片一致性；点名字展开编辑',
+  scene: '空间设定 + 固定陈设清单用于全片一致性；点名字展开编辑，可登记陈设与机位图',
 };
 
 const PLACEHOLDER: Record<Kind, { name: string; desc: string }> = {
@@ -162,6 +162,30 @@ export default function CastCards({
     setOpenKey((prev) => ({ ...prev, scene: next.id ?? null }));
   };
 
+  /**
+   * 复制成状态变体：同一空间的陈设与光线沿用，只改名字与 state。
+   *
+   * 这是「多态场景卡」的唯一正确切分方式——按状态（白天 / 断电 / 火灾后）拆，
+   * 而不是按机位拆。机位差用同一张卡的机位图集表达，否则 N 个视角会得到
+   * N 份互不一致的陈设，问题只是从「跨镜漂移」变成「跨变体漂移」。
+   */
+  const addStateVariant = (index: number) => {
+    const source = scenes[index];
+    if (!source) return;
+    const next: Scene = {
+      ...source,
+      id: crypto.randomUUID(),
+      name: `${source.name}（新状态）`,
+      state: source.state ? `${source.state} / 新状态` : '新状态',
+      // 图与视角不能复制：状态不同，画面必须重新生成或上传
+      imageUrl: undefined,
+      angleRefs: undefined,
+      inventory: (source.inventory ?? []).map((item) => ({ ...item })),
+    };
+    onScenesChange((prev) => [...prev, next]);
+    setOpenKey((prev) => ({ ...prev, scene: next.id ?? null }));
+  };
+
   const removeAt = (kind: Kind, index: number) => {
     const removed = listOf(kind)[index];
     const id = removed?.id;
@@ -189,6 +213,77 @@ export default function CastCards({
     try {
       const { media } = await api.uploadMedia(file);
       patchById(kind, id, index, { imageUrl: media.url });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      markBusy(key, false);
+    }
+  };
+
+  /**
+   * 场景卡的陈设清单 / 机位图集：整份数组写回，不做下标级 patch。
+   *
+   * 不用 patchAt 的原因：这两个字段都是数组，展开面板里可以同时增删多行，
+   * 用快照拼出来的新数组会把 await 期间别人的改动覆盖掉。
+   */
+  const updateSceneArray = <K extends 'inventory' | 'angleRefs'>(
+    index: number,
+    field: K,
+    updater: (prev: NonNullable<Scene[K]>) => NonNullable<Scene[K]>,
+  ) => {
+    const scene = scenes[index];
+    onScenesChange((prev) =>
+      prev.map((item, i) => {
+        const hit = scene?.id ? item.id === scene.id : i === index;
+        if (!hit) return item;
+        const current = (item[field] ?? []) as NonNullable<Scene[K]>;
+        return { ...item, [field]: updater(current) } as Scene;
+      }),
+    );
+  };
+
+  const addInventoryItem = (index: number) =>
+    updateSceneArray(index, 'inventory', (prev) => [...prev, { name: '', fixed: true }]);
+
+  const patchInventoryItem = (index: number, at: number, patch: Partial<SceneItem>) =>
+    updateSceneArray(index, 'inventory', (prev) =>
+      prev.map((item, i) => (i === at ? { ...item, ...patch } : item)),
+    );
+
+  const removeInventoryItem = (index: number, at: number) =>
+    updateSceneArray(index, 'inventory', (prev) => prev.filter((_, i) => i !== at));
+
+  const addAngleRef = (index: number) =>
+    updateSceneArray(index, 'angleRefs', (prev) => [...prev, { angle: '', imageUrl: '' }]);
+
+  const patchAngleRef = (index: number, at: number, patch: Partial<SceneAngleRef>) =>
+    updateSceneArray(index, 'angleRefs', (prev) =>
+      prev.map((item, i) => (i === at ? { ...item, ...patch } : item)),
+    );
+
+  const removeAngleRef = (index: number, at: number) =>
+    updateSceneArray(index, 'angleRefs', (prev) => prev.filter((_, i) => i !== at));
+
+  /** 机位图上传：await 回来时按 id 找回那张卡，不按下标 */
+  const uploadAngleRef = async (index: number, at: number, file: File | null) => {
+    if (!file) return;
+    const scene = scenes[index];
+    if (!scene) return;
+    const key = keyOf('scene', scene, index);
+    markBusy(key, true);
+    setError(null);
+    try {
+      const { media } = await api.uploadMedia(file);
+      onScenesChange((prev) =>
+        prev.map((item, i) => {
+          const hit = scene.id ? item.id === scene.id : i === index;
+          if (!hit) return item;
+          const refs = (item.angleRefs ?? []).map((ref, j) =>
+            j === at ? { ...ref, imageUrl: media.url } : ref,
+          );
+          return { ...item, angleRefs: refs };
+        }),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -303,6 +398,8 @@ export default function CastCards({
 
           const working = busy.has(key);
           const hasImage = !!item.imageUrl;
+          /** 场景卡独有字段（陈设清单 / 机位图集）；角色卡走 null 分支不渲染 */
+          const sceneItem = kind === 'scene' ? (item as Scene) : null;
           return (
             <div className="cast-panel" key={`panel-${key}`}>
               <div className="cast-card">
@@ -387,19 +484,173 @@ export default function CastCards({
                   </label>
 
                   {kind === 'scene' && (
-                    <button
-                      className="cast-remove"
-                      type="button"
-                      onClick={() => removeAt(kind, index)}
-                      title="从场景列表里删除这张卡"
-                      aria-label="删除场景"
-                      disabled={disabled}
-                    >
-                      删除
-                    </button>
+                    <>
+                      <button
+                        className="btn btn--sm btn--ghost"
+                        type="button"
+                        onClick={() => addStateVariant(index)}
+                        disabled={disabled}
+                        title="复制这张场景卡的陈设与光线，作为同一空间的不同状态（白天 / 断电 / 火灾后）"
+                      >
+                        复制为状态
+                      </button>
+                      <button
+                        className="cast-remove"
+                        type="button"
+                        onClick={() => removeAt(kind, index)}
+                        title="从场景列表里删除这张卡"
+                        aria-label="删除场景"
+                        disabled={disabled}
+                      >
+                        删除
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
+
+              {sceneItem && (
+                <div className="cast-extra">
+                  <div className="cast-extra-head">
+                    <span className="cast-extra-title">固定陈设</span>
+                    <span className="cast-extra-hint">
+                      分镜里出现的家具与桌上物件都要登记在这里，否则每一镜都会重新摆一次
+                    </span>
+                    <button
+                      className="btn btn--sm"
+                      type="button"
+                      onClick={() => addInventoryItem(index)}
+                      disabled={disabled}
+                    >
+                      ＋ 添加
+                    </button>
+                  </div>
+
+                  {(sceneItem.inventory ?? []).length === 0 && (
+                    <p className="cast-extra-empty">
+                      还没有陈设。点「＋ 添加」登记桌子、椅子、柜台、门窗、灯具、酒杯这类会被多个镜头看到的物件。
+                    </p>
+                  )}
+
+                  {(sceneItem.inventory ?? []).map((entry, j) => (
+                    <div className="cast-row" key={`inv-${key}-${j}`}>
+                      <input
+                        className="cast-row-name"
+                        value={entry.name}
+                        onChange={(e) => patchInventoryItem(index, j, { name: e.target.value })}
+                        placeholder="中文名，如 长餐桌"
+                        aria-label="陈设中文名"
+                      />
+                      <input
+                        className="cast-row-en"
+                        value={entry.en ?? ''}
+                        onChange={(e) => patchInventoryItem(index, j, { en: e.target.value })}
+                        placeholder="英文名 long oak table"
+                        aria-label="陈设英文名"
+                      />
+                      <input
+                        className="cast-row-where"
+                        value={entry.where ?? ''}
+                        onChange={(e) => patchInventoryItem(index, j, { where: e.target.value })}
+                        placeholder="位置（中文）：桌头正对门"
+                        aria-label="陈设位置（中文）"
+                      />
+                      <input
+                        className="cast-row-where-en"
+                        value={entry.whereEn ?? ''}
+                        onChange={(e) => patchInventoryItem(index, j, { whereEn: e.target.value })}
+                        placeholder="位置（英文，进提示词）：table head facing the door"
+                        aria-label="陈设位置（英文）"
+                        title="只有这一份会拼进视频提示词。缺省时只给英文名、不给位置——中文位置不会被提交"
+                      />
+                      <label
+                        className="cast-row-fixed"
+                        title="固定件：每个镜头都在同一位置；会被人拿起、推移的物件不要勾"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={entry.fixed !== false}
+                          onChange={(e) => patchInventoryItem(index, j, { fixed: e.target.checked })}
+                          disabled={disabled}
+                        />
+                        固定
+                      </label>
+                      <button
+                        className="cast-row-remove"
+                        type="button"
+                        onClick={() => removeInventoryItem(index, j)}
+                        disabled={disabled}
+                        aria-label="删除这条陈设"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+
+                  <div className="cast-extra-head">
+                    <span className="cast-extra-title">机位图集</span>
+                    <span className="cast-extra-hint">
+                      同一空间不拆卡，按本镜景别自动挑一张；标签写 top 的那张是「布局卡」（俯视平面图），只给人对照走位，不会提交给视频模型
+                    </span>
+                    <button
+                      className="btn btn--sm"
+                      type="button"
+                      onClick={() => addAngleRef(index)}
+                      disabled={disabled}
+                    >
+                      ＋ 添加机位
+                    </button>
+                  </div>
+
+                  {(sceneItem.angleRefs ?? []).map((ref, j) => (
+                    <div className="cast-row" key={`ang-${key}-${j}`}>
+                      <input
+                        className="cast-row-angle"
+                        value={ref.angle}
+                        onChange={(e) => patchAngleRef(index, j, { angle: e.target.value })}
+                        placeholder="机位 wide / close / reverse / top"
+                        aria-label="机位标签"
+                      />
+                      <span className="cast-row-thumb">
+                        {ref.imageUrl ? (
+                          <button
+                            className="cast-thumb-view"
+                            type="button"
+                            onClick={() => setViewer({ src: ref.imageUrl, alt: `${nameOf(item)} ${ref.angle}` })}
+                            title="点击查看大图"
+                          >
+                            <img src={ref.imageUrl} alt="" />
+                          </button>
+                        ) : (
+                          '无图'
+                        )}
+                      </span>
+                      <label className="btn btn--sm btn--ghost file-btn">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          hidden
+                          disabled={working || disabled}
+                          onChange={(e) => {
+                            void uploadAngleRef(index, j, e.target.files?.[0] ?? null);
+                            e.target.value = '';
+                          }}
+                        />
+                        上传
+                      </label>
+                      <button
+                        className="cast-row-remove"
+                        type="button"
+                        onClick={() => removeAngleRef(index, j)}
+                        disabled={disabled}
+                        aria-label="删除这个机位"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

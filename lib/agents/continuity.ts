@@ -6,7 +6,7 @@ import {
 } from '@/lib/skills/shot-plan';
 import { logAgentWarn } from '@/lib/services/logger';
 import { expandStyle } from '@/lib/skills/style-presets';
-import type { CharacterSubject, ShotTransition } from '@/lib/types';
+import type { CharacterSubject, SceneItem, ShotTransition } from '@/lib/types';
 import {
   APPEARANCE_ONLY_RULES,
   clamp,
@@ -54,6 +54,10 @@ export interface PlanScene {
   desc: string;
   /** 全片固定的英文空间短语 */
   promptEn?: string;
+  /** 固定陈设清单：分镜里的物件必须在这里（或道具卡里）有出处 */
+  inventory?: SceneItem[];
+  /** 状态变体名（同一空间的不同时间 / 损耗状态） */
+  state?: string;
 }
 
 /**
@@ -287,6 +291,14 @@ export function buildBlueprintSystemPrompt(
    科幻 / 未来科技题材的装备必须写到具体技术名词与材质（拉丝钛、哑光碳纤维、半透明聚合物、液态金属、陶瓷装甲、全息喷绘、能量导管等），并写清分件与光源位置。
    promptEn 写 20~35 个单词的固定英文外貌短语，与 desc 同序覆盖同样的可见项：人类写「主体 + 年龄感 + 头面部 + 服装 + 装备 + 配色 + 道具」；机械体写「主体 + 机型体量 + 头部传感器 + 装甲材质与涂装 + 关节结构 + 武器 + 配色」；载具写「主体 + 车型体量 + 车漆与涂装 + 玻璃 + 轮毂轮胎 + 灯具 + 改装件 + 标识」。不要给人以外的卡写年龄词与服装词。desc 里每个可见项都要在英文里有对应词。全片一字不改地复用。
 6. 场景 1~4 个：desc 写地点、空间尺度、时间、光源方向与色温、主要陈设与其材质；promptEn 写 15~25 个单词的固定英文空间短语，覆盖空间类型 + 关键陈设 + 光源与色调。同一个空间只写一次，不要按镜头重复。
+   inventory 是这张场景卡的固定陈设清单（5~12 条），它是全片陈设的唯一事实来源：凡是在两个以上镜头里会看到的家具与桌上物件（桌、椅、柜台、门窗、灯具、酒杯、烛台…）都必须列进来。
+   - name：中文名，分镜描述与审片都用它；
+   - en：英文名，运行时逐字拼进视频提示词，不靠模型逐镜翻译；
+   - where：位置（中文，给人看），只能写相对门窗 / 固定家具的绝对关系（「房间正中，桌头正对门」「靠窗那面墙」），禁止写「画面左侧 / 右侧」——换机位就翻面了，前后镜必然对不上；
+   - whereEn：where 的英文版（≤12 词），运行时逐字拼进提示词，中文 where 不会被提交。同样只能用固定件做参照（"in the middle of the room, table head facing the door" / "against the window wall"），禁止 on the left / on the right 这类裸方位——裸方位运行时会被拒绝注入，审片报 scene-item-direction；
+   - fixed：桌椅门窗柜台这类固定件写 true；酒杯、烛台、提灯这类会被人拿起或推移的写 false，它的位置以镜头 entryState 为准。
+   分镜里出现的陈设必须能在这张清单里找到出处：清单没登记的物件，画面只能由模型每镜即兴摆一次，同一张桌子会在每一镜里换位置，甚至有的镜头有、有的镜头没有。
+   同一空间只在「状态」差异大到不能共用陈设时才拆卡（白天 / 夜里断电 / 火灾后），用 state 标注；只是机位、景别不同不要拆卡——视角是镜头属性，不是场景属性。
 
 【对白层】
 7. 对白要在这一层设计好，不要留给分镜阶段现编。凡是这一镜里有人开口，就给该节拍写 dialogue 对象：
@@ -353,8 +365,25 @@ JSON 结构：
   "scenes": [
     {
       "name": "场景名",
+      "state": "状态变体（可选，如 白天 / 夜里断电 / 火灾后）；只是机位不同不要拆卡",
       "desc": "地点 / 空间尺度 / 时间 / 光源方向与色温 / 主要陈设与材质",
-      "promptEn": "15~25 words fixed English location phrase"
+      "promptEn": "15~25 words fixed English location phrase",
+      "inventory": [
+        {
+          "name": "长餐桌",
+          "en": "long oak table",
+          "where": "房间正中，桌头正对门",
+          "whereEn": "in the middle of the room, the table head facing the door",
+          "fixed": true
+        },
+        {
+          "name": "酒杯",
+          "en": "wine glass",
+          "where": "桌面靠近门口那一端",
+          "whereEn": "on the table end nearest the door",
+          "fixed": false
+        }
+      ]
     }
   ],
   "beats": [
@@ -488,6 +517,35 @@ function normalizeCharacter(raw: Record<string, unknown>): PlanCharacter | null 
   };
 }
 
+function normalizeSceneItem(raw: unknown): SceneItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  const name = str(record.name);
+  if (!name) return null;
+  const en = str(record.en ?? record.promptEn);
+  const where = str(record.where ?? record.position ?? record.at);
+  const whereEn = str(record.whereEn ?? record.positionEn);
+  return {
+    name,
+    en: en || undefined,
+    where: where || undefined,
+    // 运行时只注入这一份：中文 where 不进英文提示词
+    whereEn: whereEn || undefined,
+    // 缺省交给运行时按「有 where 就算固定件」处理，这里不硬编码 true
+    fixed: typeof record.fixed === 'boolean' ? record.fixed : undefined,
+  };
+}
+
+/** 陈设清单：去重后最多 12 件，再多就是一张写不完的设定板 */
+export function normalizeInventory(raw: unknown): SceneItem[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items = raw
+    .map(normalizeSceneItem)
+    .filter((item): item is SceneItem => item !== null);
+  const unique = dedupeByName(items).slice(0, 12);
+  return unique.length > 0 ? unique : undefined;
+}
+
 function normalizeScene(raw: Record<string, unknown>): PlanScene | null {
   const name = str(raw.name);
   if (!name) return null;
@@ -495,6 +553,8 @@ function normalizeScene(raw: Record<string, unknown>): PlanScene | null {
     name,
     desc: str(raw.desc),
     promptEn: str(raw.promptEn) || undefined,
+    inventory: normalizeInventory(raw.inventory ?? raw.items ?? raw.props),
+    state: str(raw.state ?? raw.variant) || undefined,
   };
 }
 

@@ -184,8 +184,15 @@ export interface RefineShotBody {
   prevExitState?: string;
   /** 全片角色卡，保证重算后角色外貌不漂移 */
   characters?: { name: string; desc: string }[];
-  /** 全片场景卡：重算后必须复用本镜所在场景的固定空间短语 */
-  scenes?: { name: string; desc: string; promptEn?: string }[];
+  /** 全片场景卡：重算后必须复用本镜所在场景的固定空间短语与陈设清单 */
+  scenes?: {
+    name: string;
+    desc: string;
+    promptEn?: string;
+    /** 固定陈设清单：重算时只能用清单里的物件，不许即兴摆家具 */
+    inventory?: { name: string; en?: string; where?: string; whereEn?: string; fixed?: boolean }[];
+    state?: string;
+  }[];
   /** 本镜当前的场景归属：重算以它为准，不许把地点改回别的场景 */
   sceneNames?: string[];
   /** 上一镜的场景名：本镜没标场景时按它承接 */
@@ -195,7 +202,15 @@ export interface RefineShotBody {
 /** 重算后可变的字段，description 由用户自己维护 */
 export type RefinedShot = Pick<
   Shot,
-  'title' | 'shotSize' | 'cameraMove' | 'videoPrompt' | 'narration' | 'speaker' | 'beatSheet'
+  | 'title'
+  | 'shotSize'
+  | 'cameraMove'
+  | 'videoPrompt'
+  | 'narration'
+  | 'speaker'
+  | 'beatSheet'
+  | 'blocking'
+  | 'blockingEn'
 >;
 
 /** 从已生成的视频里抽一帧，交给下一镜当首帧 */

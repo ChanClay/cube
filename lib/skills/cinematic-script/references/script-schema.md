@@ -20,7 +20,28 @@
     }
   ],
   "scenes": [
-    { "name": "场景名", "desc": "地点/时间/光源方向与色温/主要陈设", "promptEn": "fixed English location phrase" }
+    {
+      "name": "场景名",
+      "state": "状态变体（可选）：白天 / 夜里断电 / 火灾后；只是机位不同不要拆卡",
+      "desc": "地点/时间/光源方向与色温/主要陈设",
+      "promptEn": "fixed English location phrase",
+      "inventory": [
+        {
+          "name": "长餐桌",
+          "en": "long oak table",
+          "where": "房间正中，桌头正对门",
+          "whereEn": "in the middle of the room, the table head facing the door",
+          "fixed": true
+        },
+        {
+          "name": "酒杯",
+          "en": "wine glass",
+          "where": "桌面靠近门口那一端",
+          "whereEn": "on the table end nearest the door",
+          "fixed": false
+        }
+      ]
+    }
   ],
   "shots": [
     {
@@ -35,6 +56,8 @@
       "hiddenCut": false,
       "entryState": "本镜第一帧的画面事实",
       "exitState": "本镜最后一帧的画面事实",
+      "blocking": "本镜人物走位：谁在空间的哪一侧、面朝哪里（参考门窗 / 桌子哪一端）",
+      "blockingEn": "8~18 words English blocking phrase，运行时逐字追加到视频提示词",
       "beatSheet": [
         {
           "from": 0,
@@ -58,7 +81,13 @@
 - `id`、`media`、`lastFrameCast` 由系统写入，手写脚本可以省略。
 - 首镜没有 `transition` / `referencePrevFrame` / `transitionReason` / `hiddenCut`。
 - `referencePrevFrame` 只表达「要不要用上一镜末帧」，怎么用由景别跨度决定：同景别 → 当首帧；跨 1 档或 `hiddenCut` → 只当 `reference_image`；跨 2 档以上 → 不用。代码见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`。同场景跨度 ≥2 的 `hard-cut` 写 `true` 无效且校验报错，必须先改序列（中间垫一档，或改成 `hiddenCut` 的隐蔽换机位）。
-- 镜头的主体 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`）；名字必须逐字来自顶层清单。载具卡同样要写进本镜 `characters`，否则那一镜不会带它的参考图。
+- 镜头的主体 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`，并另存一份 `sceneIds` 供改名后仍能定位卡片）；名字必须逐字来自顶层清单。载具卡同样要写进本镜 `characters`，否则那一镜不会带它的参考图。
+- `inventory` 是场景卡的固定陈设清单，也是陈设覆盖检查的依据：分镜描述里出现的家具 / 桌上物件如果在这张清单和道具卡里都找不到，审片报 `prop-undeclared`。`where` 只能用相对门窗 / 固定家具的绝对关系（「房间正中，桌头正对门」），不能写「画面左侧」——换机位就翻面。
+- `where` 是中文给人看的，**运行时只注入 `whereEn`**：中文位置拼进英文提示词会触发 `prompt-not-english`，模型也读不懂。缺 `whereEn` 时只注入英文名、不给位置；`whereEn` 含裸方位（`on the left`）时不注入位置，审片报 `scene-item-direction`。
+- 位置注入时会附一句坐标系声明（`All positions are given from inside the space, relative to its fixed landmarks … never relative to the camera or the frame`）：只给「桌头正对门」而不说以谁为准，模型会读成「桌头正对镜头」。实现在 `lib/skills/spatial.ts` 的 `SPATIAL_FRAME_SENTENCE`。
+- `blockingEn` 同理：裸方位不会被注入（错的坐标比没有坐标更糟），审片报 `bare-blocking`。`bare-direction` 这条以前只有离线校验脚本实现，现在 `auditScript` 里也有了。
+- `angleRefs` 是同一场景的多机位图集，运行时按本镜景别自动挑一张（`wide` / `mid` / `close` / `reverse`）。标签为 `top` 的俯视图是「布局卡」：只给人对照走位，永远不会作为参考图提交给视频模型。
+- 场景按「状态」拆卡（`state`），不按机位拆卡：按视角拆卡会让每个变体各自漂移，问题只是从「跨镜漂移」变成「跨变体漂移」。机位差异用 `angleRefs` 表达。
 
 ## 二、数值约束
 
@@ -73,6 +102,8 @@
 | 运动基调 | 蓝图给 `motion` / `motionEn`；运行时逐镜追加 `motionEn`，所以它只能写「任何一镜都成立的运动介质」，写剧情动作会污染每一镜（`stripScopedMotion` 会剔掉战马 / 刀剑 / 斟酒这类分句） | `StoryPlan.motion` / `MOTION_SCOPE_RULES` / `buildVideoPrompt` |
 | 载具卡缺口 | 追逐 / 竞速且有驾驶主体时至少 2 张载具卡（被追的与追的各一张） | `requiredVehicleCards` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
+| 场景陈设 | `inventory` 5~12 件，每件带 `en` 与位置 `where`；陈设按「状态」拆卡，不按机位拆卡 | `normalizeInventory` / `set-dressing.ts` |
+| 走位 `blocking` | 两人以上同框或人物会位移时必填，另配 8~18 词 `blockingEn`，参考系用固定件不用「画面左侧」 | `lib/skills/scene-anchor.ts` |
 | `videoPrompt` | 英文，40~125 词（<30 或 >170 判不合格） | `PROMPT_*_WORDS` |
 | `videoPrompt` 中文占比 | 汉字 / (字母 + 汉字) ≤ 12% | `isEnglishPrompt` |
 | 台词长度 | `min(60, max(16, duration × 4))` 字 | `narrationLimit` |
@@ -134,6 +165,11 @@
 | `cut-undeclared` | warn | hard-cut 没写 `transitionReason` | 写清切点承接的是同一瞬间的动作相位，还是同一个背景锚点（同一条路 / 同一盏灯 / 同一个弯） |
 | `no-camera-anchor` | warn | 两辆以上载具同框，提示词却没写机位锚 | 第一句补「镜头装在哪 / 朝哪 / 多高」，如 `camera mounted low on the rear bumper of the black sedan, looking forward over both roofs` |
 | `bare-direction` | warn | 方位词没有参照系（`on the left` / `to the right`），模型分不清画面左 / 车身左 / 车道左 | 改成 `frame left`、`the black car's rear-left quarter panel`、`the left-hand lane`，见 `references/video-prompt.md` 第三节 |
+| `prop-undeclared` | warn | 分镜提到的家具 / 桌上物件在场景卡陈设清单与道具卡里都没有出处 | 补进场景卡 `inventory`（中文名 + 英文名 + 相对门窗的位置），或升级成道具卡；否则同一张桌子每镜都会被重新摆一次 |
+| `scene-missing` | warn | 镜头标注的场景在场景卡里找不到（卡被删 / 改名后旧数据没对齐） | 在分镜卡的「所在场景」里重新选一次；生成时才拿得到场景参考图 |
+| `blocking-missing` | warn | 两个以上角色同框却没有 `blockingEn` | 补 8~18 词英文走位，参考系用门窗 / 桌子哪一端；否则换机位后人物左右关系会翻 |
+| `bare-blocking` | warn | `blockingEn` 含裸方位（`on the left`）或写了「画面左侧」 | 改成固定件参照：`at the table end facing the door` / `against the west wall`。运行时不会注入这句话，改好前走位等于没写 |
+| `scene-item-direction` | warn | 陈设位置写成画面方位（`whereEn` 裸方位，或 `where` 写了「画面左侧」） | 位置要落在空间里，相对门窗 / 固定家具；画面方位随镜头翻转，换机位必然反 |
 
 ## 六、app 侧入口（想把脚本跑成片时）
 

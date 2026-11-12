@@ -31,6 +31,8 @@ function buildSystemPrompt(): string {
 6. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；运动方向要与相邻镜头一致（上一镜朝画右，本镜不要朝画左），并让本镜最后一拍停在可辨认的动作相位上（主体仍在画面内）。避免与相邻镜头重复同一构图。若给出了「上一镜末帧里实际在场的人物」，本镜开头的人物必须与这份名单完全一致，不许增删；需要新角色出场时，写成在这一镜的过程里走进画面，而不是一开始就站在那里。
 6.1 本镜出现的每一辆车（主角座驾、追车、警车…）都要按卡片写进提示词，并复用它的固定英文短语；漏一辆，这辆车在这一镜里就会变成另一辆。
 6.2 本镜的地点由「本镜所在场景」决定：英文提示词里的空间短语必须来自该场景卡，不许改写成别的场景的地点，也不许把画面带回片头场景。本镜没标场景时，按上一镜的场景承接；两者都没有时，只写画面描述里出现的地点。
+6.3 本镜用到的家具与桌上物件必须来自该场景卡的「固定陈设」清单，名字与位置照着清单写；清单里没有的物件不要凭空加，也不要自行改动物件的左右关系。
+6.4 两人以上同框、或人物在画面里会位移时，写 blocking（中文走位）与 blockingEn（8~18 词英文）：谁站在空间的哪一侧、面朝哪里、彼此距离。参考系只能用场景卡的固定件（相对门窗 / 桌子哪一端），不许写「画面左侧 / 右侧」——换机位就翻面。走位要与相邻镜头一致；单人镜头可以留空。
 7. narration 是这一镜唯一的说话人所说的一句台词，或一句画外旁白，可为空字符串（不要写"旁白："前缀）。一镜只能有一个说话人，严禁把两个人的对白写进同一镜——要换人开口就换镜。
 8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字且只有一个；旁白或没有台词时 speaker 留空。
 8.1 ${DIALOGUE_RULES}
@@ -47,6 +49,8 @@ JSON 结构：
   "videoPrompt": "English prompt for the text-to-video model",
   "narration": "旁白或台词",
   "speaker": "说话的角色名，旁白留空",
+  "blocking": "本镜人物走位：谁在空间的哪一侧、面朝哪里（参考门窗 / 固定件，不写「画面左侧」）；单人镜头可留空",
+  "blockingEn": "8-18 words English blocking phrase appended to the video prompt; may be empty for a single character",
   "beatSheet": [{ "from": 0, "to": 2, "action": "这一段里发生的可见动作", "actionEn": "8-14 words of the same action in English" }]
 }`;
 }
@@ -62,7 +66,13 @@ function buildUserPrompt(input: {
   prevCast: string[];
   prevExitState: string;
   characters: { name: string; desc: string }[];
-  scenes: { name: string; desc: string; promptEn?: string }[];
+  scenes: {
+    name: string;
+    desc: string;
+    promptEn?: string;
+    inventory?: { name: string; en?: string; where?: string; whereEn?: string; fixed?: boolean }[];
+    state?: string;
+  }[];
   sceneNames: string[];
   prevSceneName: string;
 }): string {
@@ -88,7 +98,22 @@ function buildUserPrompt(input: {
     lines.push('', '场景卡（空间设定必须与此一致，英文空间短语逐字复用）：');
     for (const scene of input.scenes) {
       const en = scene.promptEn ? `｜英文空间：${scene.promptEn}` : '';
-      lines.push(`- ${scene.name}：${scene.desc}${en}`);
+      const state = scene.state ? `｜状态：${scene.state}` : '';
+      lines.push(`- ${scene.name}：${scene.desc}${state}${en}`);
+      if (scene.inventory?.length) {
+        const items = scene.inventory
+          .map((item) => {
+            const parts = [item.name];
+            if (item.en) parts.push(item.en);
+            // 位置优先给英文版：重算出的提示词要能直接用，中文位置只当读者的注释
+            const where = item.whereEn ?? item.where;
+            if (where) parts.push(where);
+            if (item.fixed === false) parts.push('可移动');
+            return parts.join(' / ');
+          })
+          .join('；');
+        lines.push(`  固定陈设（只能用这些物件，位置不许改）：${items}`);
+      }
     }
   }
 
@@ -145,16 +170,49 @@ function parseCharacters(raw: unknown): { name: string; desc: string }[] {
   return result;
 }
 
-/** 场景表：名字 + 中文空间描述 + 固定英文短语（重算时逐字复用，不重新措辞） */
-function parseScenes(raw: unknown): { name: string; desc: string; promptEn?: string }[] {
-  if (!Array.isArray(raw)) return [];
-  const result: { name: string; desc: string; promptEn?: string }[] = [];
+/** 陈设清单：重算分镜时只能用清单里的物件，否则每一镜都会重新摆一次家具 */
+function parseInventory(raw: unknown): { name: string; en?: string; where?: string; whereEn?: string; fixed?: boolean }[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items: { name: string; en?: string; where?: string; whereEn?: string; fixed?: boolean }[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
     const name = str(record.name);
     if (!name) continue;
-    result.push({ name, desc: str(record.desc), promptEn: str(record.promptEn) || undefined });
+    items.push({
+      name,
+      en: str(record.en) || undefined,
+      where: str(record.where) || undefined,
+      whereEn: str(record.whereEn) || undefined,
+      fixed: typeof record.fixed === 'boolean' ? record.fixed : undefined,
+    });
+    if (items.length >= 12) break;
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+/** 场景表：名字 + 中文空间描述 + 固定英文短语 + 陈设清单（重算时逐字复用，不重新措辞） */
+function parseScenes(raw: unknown): {
+  name: string;
+  desc: string;
+  promptEn?: string;
+  inventory?: { name: string; en?: string; where?: string; whereEn?: string; fixed?: boolean }[];
+  state?: string;
+}[] {
+  if (!Array.isArray(raw)) return [];
+  const result: ReturnType<typeof parseScenes> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const name = str(record.name);
+    if (!name) continue;
+    result.push({
+      name,
+      desc: str(record.desc),
+      promptEn: str(record.promptEn) || undefined,
+      inventory: parseInventory(record.inventory),
+      state: str(record.state) || undefined,
+    });
     if (result.length >= 8) break;
   }
   return result;
@@ -222,6 +280,8 @@ export async function POST(request: Request) {
         videoPrompt,
         narration: trimNarration(obj.narration, input.duration),
         speaker: str(obj.speaker) || undefined,
+        blocking: str(obj.blocking ?? obj.staging) || undefined,
+        blockingEn: str(obj.blockingEn ?? obj.stagingEn) || undefined,
         beatSheet: normalizeBeatSheet(obj.beatSheet, input.duration),
       },
     });

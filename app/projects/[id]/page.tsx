@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { blankShot } from '@/lib/skills/blank-script';
 import { buildVideoPrompt } from '@/lib/skills/dialogue';
+import { primaryScene } from '@/lib/skills/scene-anchor';
 import ScriptView from '@/components/ScriptView';
 import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
@@ -469,12 +470,38 @@ function ProjectPageInner() {
       setScript((prev) => {
         if (!prev) return prev;
         const scenes = updater(prev.scenes ?? []);
-        const names = new Set(scenes.map((scene) => scene.name).filter(Boolean));
-        // 删卡后镜头仍指着旧名字，生成时就找不到对应的场景图，只能按自然语言自由发挥
+        const byId = new Map(scenes.filter((scene) => scene.id).map((scene) => [scene.id as string, scene]));
+
+        /**
+         * 场景归属的重新对齐。
+         *
+         * 有 sceneIds 时按 id 反查：改名只会换掉显示用的名字，删卡则整条归属消失
+         * （而不是留下一个指向空卡的死引用）。没有 id 的旧剧本只能按名字对齐，
+         * 改名确实会丢——审片的 scene-missing 会提示重新选一次。
+         */
         const shots = prev.shots.map((shot) => {
-          const current = shot.sceneNames ?? [];
-          const kept = current.filter((name) => names.has(name));
-          return kept.length === current.length ? shot : { ...shot, sceneNames: kept };
+          const prevIds = shot.sceneIds ?? [];
+          const prevNames = shot.sceneNames ?? [];
+
+          const next: Scene[] = [];
+          const seen = new Set<string>();
+          const collect = (scene: Scene | undefined) => {
+            if (!scene) return;
+            const key = scene.id ?? scene.name;
+            if (seen.has(key)) return;
+            seen.add(key);
+            next.push(scene);
+          };
+          for (const id of prevIds) collect(byId.get(id));
+          for (const name of prevNames) collect(scenes.find((scene) => scene.name === name));
+
+          const nextNames = next.map((scene) => scene.name);
+          const nextIds = next.map((scene) => scene.id).filter((id): id is string => !!id);
+          const sameNames =
+            nextNames.length === prevNames.length && nextNames.every((name, i) => name === prevNames[i]);
+          const sameIds = nextIds.length === prevIds.length && nextIds.every((id, i) => id === prevIds[i]);
+          if (sameNames && sameIds) return shot;
+          return { ...shot, sceneNames: nextNames, sceneIds: nextIds };
         });
         return { ...prev, scenes, shots };
       });
@@ -506,12 +533,14 @@ function ProjectPageInner() {
        * 带上一镜末帧当参考图时再追一句限定：点名图里的人物 + 只借光线 / 色调，不改构图。
        */
       // 全片运动基调逐镜兜底：某个特写镜头也不许把整场戏的速度丢掉
+      // 场景卡同时传入：场景短语与登记过的陈设在这里硬拼，不再只靠模型复用
       const prompt = buildVideoPrompt(
         basePrompt,
         live,
         media,
         refCast,
         scriptRef.current?.motionEn,
+        primaryScene(scriptRef.current, live),
       );
 
       const mediaError = validateMedia(media);

@@ -1,6 +1,7 @@
 import { MAX_MEDIA_TOTAL, isCarryFrameUrl } from './media';
+import { pickSceneImage, resolveShotScenes } from './scene-anchor';
 import { endsOffscreen, shotSizeGap } from './spec';
-import type { MediaInput, Script, Shot, ShotTransition } from '@/lib/types';
+import type { MediaInput, Scene, Script, Shot, ShotTransition } from '@/lib/types';
 
 /**
  * 镜头级的自动素材关联。
@@ -107,12 +108,21 @@ export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
 /** 单次最多 9 张参考图（HappyHorse r2v 上限，与 lib/skills/media.ts 的 reference_image 上限一致） */
 const MAX_REFERENCE_IMAGES = 9;
 
+/** 场景卡是否有任何可用配图（主图或机位图集里的任意一张） */
+function sceneHasImage(scene: Scene | null | undefined): boolean {
+  if (!scene) return false;
+  return !!scene.imageUrl || (scene.angleRefs ?? []).some((ref) => !!ref.imageUrl);
+}
+
 /** 全片角色卡 + 场景卡的配图地址，用来识别上一轮自动注入的素材 */
 export function autoCardUrls(script: Script | null): Set<string> {
   if (!script) return new Set();
   const urls = [
     ...script.characters.map((character) => character.imageUrl),
-    ...(script.scenes ?? []).map((scene) => scene.imageUrl),
+    ...(script.scenes ?? []).flatMap((scene) => [
+      scene.imageUrl,
+      ...(scene.angleRefs ?? []).map((ref) => ref.imageUrl),
+    ]),
   ];
   return new Set(urls.filter((url): url is string => !!url));
 }
@@ -155,26 +165,36 @@ export function collectCardMedia(shot: Shot, script: Script | null): MediaInput[
    * 画面被拉回开头的地点与色调。场景归属由分镜阶段负责，这一层不再做文本推断。
    */
   const scenes = script.scenes ?? [];
-  const sceneByName = new Map(scenes.filter((scene) => scene.imageUrl).map((scene) => [scene.name, scene]));
-  for (const name of sceneNames) {
-    const scene = sceneByName.get(name);
-    if (scene?.imageUrl) push(scene.imageUrl, scene.name);
+  /** 分镜有没有显式标注场景（sceneIds 或旧数据的 sceneNames） */
+  const declared = (shot.sceneIds ?? []).length > 0 || sceneNames.size > 0;
+  const resolved = resolveShotScenes(script, shot);
+
+  /**
+   * 一张场景卡可能挂多个机位图（angleRefs）：只按本镜景别挑一张。
+   * 整个图集塞进去会挤掉角色卡的参考位（上限 9 张），人物一致性优先；
+   * 而且广角空镜当特写镜的背景参考时，模型会把构图一起拉远。
+   */
+  for (const scene of resolved) {
+    const url = pickSceneImage(scene, shot);
+    if (url) push(url, scene.name);
   }
 
   // 本镜确实没标场景时才按文本推断，且只取名字最长（最具体）的一张，避免多张场景卡互相打架
-  if (sceneNames.size === 0) {
-    const hits = scenes.filter((scene) => scene.imageUrl && scene.name && text.includes(scene.name));
+  if (!declared) {
+    const hits = scenes.filter((scene) => sceneHasImage(scene) && scene.name && text.includes(scene.name));
     const best = hits.length
       ? hits.reduce((longest, scene) => (scene.name.length > longest.name.length ? scene : longest))
       : null;
-    if (best?.imageUrl) push(best.imageUrl, best.name);
+    const url = pickSceneImage(best, shot);
+    if (best && url) push(url, best.name);
   }
 
   // 全片只有一个场景、镜头又没标场景：默认就是它（判断按「有没有挂过场景卡」，不是 result 是否为空）
-  const hasSceneCard = result.some((item) => !!item.name && sceneByName.has(item.name));
-  if (!hasSceneCard && sceneNames.size === 0 && scenes.length === 1) {
+  const hasSceneCard = resolved.some(sceneHasImage);
+  if (!hasSceneCard && !declared && scenes.length === 1) {
     const only = scenes[0];
-    if (only.imageUrl) push(only.imageUrl, only.name);
+    const url = pickSceneImage(only, shot);
+    if (url) push(url, only.name);
   }
 
   return result;

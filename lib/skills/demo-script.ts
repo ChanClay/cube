@@ -21,8 +21,43 @@ export const demoScript: Script = {
     { id: 'demo-char-2', name: '渔船', subjectType: 'vehicle', desc: '一艘老旧的木制渔船，船身斑驳' },
   ],
   scenes: [
-    { id: 'demo-scene-1', name: '灯塔内部', desc: '石砌旋梯，墙壁斑驳，油灯昏黄，空间狭小潮湿' },
-    { id: 'demo-scene-2', name: '风暴中的海面', desc: '暴雨夜，巨浪翻涌，远处灯塔光束扫过，光线冷蓝' },
+    {
+      id: 'demo-scene-1',
+      name: '灯塔内部',
+      desc: '石砌旋梯，墙壁斑驳，油灯昏黄，空间狭小潮湿',
+      promptEn:
+        'narrow stone spiral staircase inside an old lighthouse, damp patched walls, warm oil lamp glow, cramped wet air',
+      inventory: [
+        {
+          name: '旋梯',
+          en: 'stone spiral staircase',
+          where: '沿塔壁盘旋而上，铁扶手在靠塔心那一侧',
+          whereEn: 'a stone spiral staircase winding up along the tower wall, its iron handrail on the inner side',
+          fixed: true,
+        },
+        {
+          name: '铁窗',
+          en: 'narrow iron window',
+          where: '北墙，正对旋梯转角',
+          whereEn: 'a narrow iron window on the north wall, facing the landing of the staircase',
+          fixed: true,
+        },
+        {
+          name: '油灯',
+          en: 'oil lamp',
+          where: '挂在旋梯转角的铁钩上',
+          whereEn: 'an oil lamp hung on an iron hook at the staircase landing',
+          fixed: false,
+        },
+      ],
+    },
+    {
+      id: 'demo-scene-2',
+      name: '风暴中的海面',
+      desc: '暴雨夜，巨浪翻涌，远处灯塔光束扫过，光线冷蓝',
+      promptEn:
+        'violent rainstorm over a black sea at night, towering waves, a lighthouse beam sweeping across the water, cold blue light',
+    },
   ],
   shots: [
     {
@@ -59,6 +94,7 @@ export const demoScript: Script = {
       narrationType: 'voiceover',
       characterNames: [],
       sceneNames: ['风暴中的海面'],
+      sceneIds: ['demo-scene-2'],
     },
     {
       id: 'demo-2',
@@ -94,6 +130,7 @@ export const demoScript: Script = {
       narrationType: 'voiceover',
       characterNames: ['老陈'],
       sceneNames: ['灯塔内部'],
+      sceneIds: ['demo-scene-1'],
     },
     {
       id: 'demo-3',
@@ -129,6 +166,7 @@ export const demoScript: Script = {
       narrationType: 'voiceover',
       characterNames: [],
       sceneNames: ['风暴中的海面'],
+      sceneIds: ['demo-scene-2'],
     },
   ],
 };

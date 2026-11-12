@@ -1810,6 +1810,144 @@ a.btn:visited {
   flex-wrap: nowrap;
 }
 
+/* 场景卡展开后的「固定陈设清单」与「机位图集」 */
+.cast-extra {
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--field-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cast-extra-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 陈设与机位图集之间用一条虚线分开，两块都是可增删的列表 */
+.cast-extra-head + .cast-extra-head {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.cast-extra-title {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.cast-extra-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cast-extra-empty {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* 一条陈设：中文名 / 英文名 / 中文位置 / 英文位置 / 固定件 / 删除 */
+.cast-row {
+  display: grid;
+  grid-template-columns:
+    minmax(70px, 1fr) minmax(100px, 1.2fr) minmax(110px, 1.3fr)
+    minmax(120px, 1.5fr) auto auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.cast-row > input {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: #fff;
+  color: inherit;
+}
+
+.cast-row-fixed {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cast-row-remove {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cast-row-remove:hover {
+  color: #d64545;
+  border-color: rgba(214, 69, 69, 0.45);
+}
+
+/* 机位图集里的缩略图 */
+.cast-row-thumb {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border-soft);
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.cast-row-thumb .cast-thumb-view {
+  width: 100%;
+  height: 100%;
+}
+
+.cast-row-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 窄屏：三行输入框折成两列，其余控件仍在同一行 */
+@media (max-width: 720px) {
+  .cast-row {
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .cast-row-en,
+  .cast-row-where,
+  .cast-row-where-en {
+    grid-column: 1 / -1;
+  }
+}
+
 .cast-remove {
   border: 1px solid var(--border-soft);
   background: #fff;
@@ -2492,6 +2630,59 @@ a.btn:visited {
 
 .shot-label-row .shot-label {
   margin: 0;
+}
+
+/* 本镜所在场景：多选 chips，名字与状态都来自场景卡 */
+.shot-scenes {
+  margin: 8px 0 0;
+}
+
+.shot-scenes .shot-label {
+  margin: 0 0 4px;
+}
+
+.shot-scene-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.shot-scene-chip {
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.shot-scene-chip:hover {
+  color: inherit;
+  border-color: var(--accent-border);
+}
+
+.shot-scene-chip.is-active {
+  color: inherit;
+  border-color: var(--accent-border);
+  background: var(--field-2);
+  font-weight: 600;
+}
+
+/* 走位英文短语：与上面的中文走位成对，运行时逐字拼进视频提示词 */
+.shot-blocking-en {
+  width: 100%;
+  margin-top: 4px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: inherit;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: #fff;
 }
 
 /* 秒级节奏：左侧时间码等宽，右侧是这一段的动作 */

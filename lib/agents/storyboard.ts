@@ -13,7 +13,13 @@ import { normalizeVideoModel, type VideoModelId } from '@/lib/video-models';
 import { expandStyle } from '@/lib/skills/style-presets';
 import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
 import { adaptStory } from './adaptation';
-import { planStory, normalizeSubjectType, type Beat, type StoryPlan } from './continuity';
+import {
+  planStory,
+  normalizeInventory,
+  normalizeSubjectType,
+  type Beat,
+  type StoryPlan,
+} from './continuity';
 import { callChatJson } from './llm';
 import { localizePrompts } from './localize';
 import { auditScript, canChangeShotCount, needsRepair, requestRepair, type ScriptIssue } from './review';
@@ -115,6 +121,8 @@ function buildSystemPrompt(): string {
    ${APPEARANCE_ONLY_RULES}
    本镜出现载具（主角座驾、追车、警车…）时，必须把它当成出镜主体写进本镜的 characters 数组并复用它的 promptEn；漏写就等于这一镜没有那辆车的参考图，车型与涂装每镜都会变。
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
+   这一镜用到的家具 / 陈设必须来自场景卡的陈设清单（inventory）；确实需要画面里出现清单没写的物件时，先在场景卡补上它（中文名 name + 英文名 en + 位置 where，其中英文位置 whereEn 才是运行时拼进提示词的那一份），再写这一镜。不要靠提示词逐镜即兴摆家具。清单里的位置一律用固定件做参照（桌头正对门、靠窗那面墙），不许写「画面左侧」——画面方位随镜头翻转。
+10.1 人物走位：两人以上同框、或人物在镜头里会位移时，必须写 blocking（中文走位）与 blockingEn（8~18 词英文）。参考系只能用场景卡的固定件（相对门窗 / 桌子哪一端 / 柜台哪一侧），绝对不许写「画面左侧 / 右侧」——换机位就翻面了，这正是同一场面在不同镜头里左右互换的原因。同场景的镜头复用同一份走位措辞，只写这一镜真正变化的部分；走位与 entryState 必须一致，不许一处说在窗边、另一处说在门口。
 11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。没有蓝图时自己给出 motionProfile（全片运动基调，中文一句话）+ motionEn（≤18 词英文），写进 JSON 顶层。它是全片属性：只写「任何一镜都成立的运动介质」，不许写成剧情动作清单。
     ${MOTION_SCOPE_RULES}
 
@@ -153,7 +161,19 @@ JSON 结构：
   "motionProfile": "全片运动基调（中文，一句话说清整片在动还是静止、动来自哪里）",
   "motionEn": "≤18 words English motion baseline submitted with every shot",
   "characters": [{ "name": "角色名 / 载具名 / 道具名", "subjectType": "human | vehicle | mech", "desc": "主体描述：只写全片恒定的外观（不写这一镜的姿势 / 场景 / 动作）。人类写年龄 / 头部 / 服装 / 道具，载具写车型体量 / 车身轮廓 / 车漆与涂装 / 玻璃 / 轮毂与轮胎 / 灯具 / 改装件 / 标识，机甲等非人主体写机型体量 / 装甲材质与涂装 / 传感器 / 关节 / 武器 / 编号", "promptEn": "fixed English phrase for this subject" }],
-  "scenes": [{ "name": "场景名", "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设", "promptEn": "fixed English location phrase" }],
+  "scenes": [{
+    "name": "场景名",
+    "state": "状态变体（可选）：白天 / 夜里断电 / 火灾后；只是机位不同不要拆卡",
+    "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设",
+    "promptEn": "fixed English location phrase",
+    "inventory": [{
+      "name": "长餐桌",
+      "en": "long oak table",
+      "where": "房间正中，桌头正对门",
+      "whereEn": "in the middle of the room, the table head facing the door",
+      "fixed": true
+    }]
+  }],
   "shots": [
     {
       "title": "镜头小标题",
@@ -166,6 +186,8 @@ JSON 结构：
       "hiddenCut": "true / false：这次换机位是否靠遮挡 / 甩镜 / 暗部完成（长镜头里换景别时写 true，景别可随便跨）",
       "entryState": "本镜第一帧的画面事实，四段齐全：承接（上一镜末帧可见的主体位置 / 姿势 / 朝向 / 手持物）＋空间（容器几何＋两个以上固定件）＋机位（在谁的哪一侧 / 朝哪个方向看 / 高度 / 距离，必须点名参照系）＋环境（光源方向色温 / 背景锚点 / 运动感）",
       "exitState": "本镜最后一帧的画面事实（画面位置 / 运动方向 / 背景锚点），必须是可切帧，供下一镜接住",
+      "blocking": "本镜人物走位（中文，两人以上同框或人物会位移时必填）：谁在空间的哪一侧、面朝哪里、彼此距离与遮挡关系；参考系只用场景卡的固定件（相对门窗 / 桌子哪一端 / 柜台哪一侧），不写「画面左侧」",
+      "blockingEn": "8~18 words English blocking phrase reused by the shots of the same scene; runtime appends it to the video prompt",
       "beatSheet": [
         { "from": 0, "to": 2, "action": "抬眼看向塔顶", "actionEn": "his eyes lifting toward the top of the tower" },
         { "from": 2, "to": 5, "action": "伸手拧开灯罩", "actionEn": "his hand rising to twist the lamp shade open" }
@@ -403,6 +425,8 @@ function normalizeShot(
       index === 1 ? undefined : parseBool(raw.hiddenCut ?? raw.hiddenTransition),
     entryState: str(raw.entryState ?? raw.entry ?? raw.stateIn) || undefined,
     exitState: str(raw.exitState ?? raw.exit ?? raw.stateOut) || undefined,
+    blocking: str(raw.blocking ?? raw.staging ?? raw.positions) || undefined,
+    blockingEn: str(raw.blockingEn ?? raw.stagingEn) || undefined,
     beatSheet: normalizeBeatSheet(raw.beatSheet ?? raw.beats ?? raw.timeline, duration),
     description: str(raw.description),
     videoPrompt: prompt,
@@ -467,9 +491,22 @@ function normalizeScript(
         name: str(s.name, '场景'),
         desc: str(s.desc),
         promptEn: str(s.promptEn) || undefined,
+        inventory: normalizeInventory(s.inventory ?? s.items ?? s.props),
+        state: str(s.state ?? s.variant) || undefined,
       }))
       .filter((s) => s.name.trim() || s.desc.trim()),
   );
+
+  const sceneIdByName = new Map(
+    scenes.filter((scene) => scene.id).map((scene) => [scene.name.trim(), scene.id as string]),
+  );
+  // 场景归属补 id：名字是给模型看的，id 是给系统用的（改名不丢卡、同名不挂错）
+  for (const shot of shots) {
+    const ids = (shot.sceneNames ?? [])
+      .map((name) => sceneIdByName.get(name.trim()))
+      .filter((id): id is string => !!id);
+    if (ids.length > 0) shot.sceneIds = ids;
+  }
 
   return {
     title: str(obj.title, '无题短片'),
@@ -488,6 +525,27 @@ function normalizeScript(
     shots,
     videoModel,
   };
+}
+
+/**
+ * 场景归属补齐 id。
+ *
+ * 名字是给模型与 UI 看的（改名时会变），id 是给系统用的：改名不丢卡、两张卡同名也不挂错图。
+ * 分镜稿、蓝图覆盖、场景推断三步都会改 sceneNames，所以统一在这里收口一次。
+ */
+function syncSceneIds(script: Script): void {
+  const idByName = new Map(
+    (script.scenes ?? [])
+      .filter((scene) => !!scene.id && !!scene.name.trim())
+      .map((scene) => [scene.name.trim(), scene.id as string]),
+  );
+  for (const shot of script.shots) {
+    const ids = (shot.sceneNames ?? [])
+      .map((name) => idByName.get(name.trim()))
+      .filter((id): id is string => !!id);
+    if (ids.length > 0) shot.sceneIds = ids;
+    else delete shot.sceneIds;
+  }
 }
 
 /**
@@ -513,7 +571,12 @@ function applyPlanFoundation(script: Script, plan: StoryPlan | null): void {
       name: s.name,
       desc: s.desc,
       promptEn: s.promptEn,
+      inventory: s.inventory,
+      state: s.state,
     }));
+
+    // 场景卡被蓝图整体替换了：按名字把镜头的场景归属重新映射到新 id
+    syncSceneIds(script);
   }
   if (!script.logline) script.logline = plan.logline;
   // 运动基调是全片级的：蓝图是唯一事实来源，分镜阶段自己写的那份不采信
@@ -1138,6 +1201,9 @@ async function reviewAndRepair(
       after: merged.shots.length,
     });
   }
+
+  // 场景推断 / 审片修复 / 合并都可能改写 sceneNames，最终按名字把 id 收口一次
+  syncSceneIds(merged);
 
   return { script: merged, expectedShots: merged.shots.length };
 }

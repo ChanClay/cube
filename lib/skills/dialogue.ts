@@ -1,9 +1,15 @@
 import { hasPrevFrameReference } from './media';
+import { blockingClause, sceneAnchorClause } from './scene-anchor';
 import { stripScopedMotion } from './spec';
-import type { MediaInput, Shot, ShotBeat } from '@/lib/types';
+import type { MediaInput, Scene, Shot, ShotBeat } from '@/lib/types';
 
 type PromptShot = Pick<Shot, 'narration' | 'narrationType' | 'speaker'> &
-  Partial<Pick<Shot, 'characterNames' | 'beatSheet'>>;
+  Partial<
+    Pick<
+      Shot,
+      'characterNames' | 'beatSheet' | 'description' | 'entryState' | 'exitState' | 'blockingEn'
+    >
+  >;
 
 /**
  * 把台词拼进视频提示词。
@@ -103,6 +109,14 @@ export function buildVideoPrompt(
    * 把「高速追车中的一帧」拍成「一个人坐在车里」。
    */
   motionEn?: string,
+  /**
+   * 本镜的主场景卡（见 lib/skills/scene-anchor 的 primaryScene）。
+   *
+   * 场景短语以前只写在给 LLM 的规则里，运行时从不读取，模型漏抄就没有兜底；
+   * 现在在这里硬拼：场景短语没被复用就补一句地点锚定，
+   * 分镜提到而英文提示词漏写的陈设补上英文名与位置。
+   */
+  scene?: Scene | null,
 ): string {
   const base = (prompt ?? '').trim();
   const line = (shot.narration ?? '').trim();
@@ -117,8 +131,11 @@ export function buildVideoPrompt(
   const motion = safeMotion
     ? ` Overall motion (motion quality only, never add a person, animal or object not described above): ${safeMotion}.`
     : '';
-  /** 画面描述 + 秒级时间轴 + 全片运动基调：旧剧本没有这些字段时不会多出任何内容 */
-  const extras = `${timeline}${motion}`;
+  // 场景锚定与走位放在最后：它们只补漏掉的空间事实，不参与动作链
+  const anchor = sceneAnchorClause(shot, scene, base);
+  const blocking = blockingClause(base, shot.blockingEn);
+  /** 画面描述 + 秒级时间轴 + 运动基调 + 场景锚定 + 走位：旧剧本没有这些字段时不会多出任何内容 */
+  const extras = `${timeline}${motion}${anchor}${blocking}`;
   const body = extras ? `${withEnd(base)}${extras}` : base;
   const reference = hasPrevFrameReference(media)
     ? ` ${frameReferenceClause(refCast, (shot.characterNames ?? []).length)}`

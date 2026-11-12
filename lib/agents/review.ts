@@ -1,4 +1,7 @@
 import { config } from '@/lib/config';
+import { resolveShotScenes } from '@/lib/skills/scene-anchor';
+import { undeclaredDressing } from '@/lib/skills/set-dressing';
+import { bareDirections, directionProblem } from '@/lib/skills/spatial';
 import { expandStyle } from '@/lib/skills/style-presets';
 import type { Script } from '@/lib/types';
 import type { StoryPlan } from './continuity';
@@ -91,6 +94,9 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
   /** 提示词去重用的归一化文本 */
   const seenPrompts = new Set<string>();
 
+  /** 场景卡级别的方位问题只报一次：同一张卡会在多个镜头里被引用 */
+  const flaggedSceneDirection = new Set<string>();
+
   for (const shot of script.shots) {
     const at = shot.index;
     const description = shot.description.trim();
@@ -145,6 +151,25 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
       }
       seenPrompts.add(key);
 
+      /**
+       * 裸方位词。
+       *
+       * 这条以前只写在离线校验脚本里，app 侧从来没实现过——而运行时注入了场景短语、
+       * 陈设位置与走位，注入内容不进审片视野，等于一批方位词长期没人把关。
+       * 判定保守：只查完全没有参照系的 left / right。
+       */
+      const bare = bareDirections(prompt);
+      if (bare.length > 0) {
+        issues.push({
+          level: 'warn',
+          code: 'bare-direction',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜方位词「${[...new Set(bare)].join(' / ')}」没有参照系：` +
+            '改成 frame left（画框）/ 实体名 + 部位（the black car\'s left flank）/ 固定件（the wall on the door side）',
+        });
+      }
+
       // 中英是否说的是同一镜：运镜 / 景别必须对得上，否则成片和剧本不是一回事
       if (!promptCameraMatches(prompt, shot.cameraMove)) {
         issues.push({
@@ -186,8 +211,24 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
           });
         }
       }
-      for (const name of shot.sceneNames ?? []) {
-        const phrase = scenePromptEn.get(name.trim());
+      /** 本镜引用的场景卡（按 id 优先解析，旧数据回退名字） */
+      const shotScenes = resolveShotScenes(script, shot);
+      const declaredScene = (shot.sceneIds ?? []).length > 0 || (shot.sceneNames ?? []).length > 0;
+
+      // 分镜指着已经删掉的场景：生成时拿不到任何场景图，只能按自然语言自由发挥
+      if (declaredScene && shotScenes.length === 0) {
+        issues.push({
+          level: 'warn',
+          code: 'scene-missing',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜标注的场景「${(shot.sceneNames ?? []).join('、') || (shot.sceneIds ?? []).join('、')}」在场景卡里找不到：` +
+            '生成时这一镜没有任何场景参考图，空间与光线会由模型自由发挥。重新选择本镜的场景归属',
+        });
+      }
+
+      for (const scene of shotScenes) {
+        const phrase = scenePromptEn.get(scene.name.trim());
         if (!phrase) continue;
         const { hit, total } = matchedWords(phrase, prompt);
         if (total >= 3 && hit / total < 0.5) {
@@ -195,9 +236,108 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
             level: 'warn',
             code: 'prompt-drift',
             shotIndex: at,
-            message: `第 ${at} 镜的英文提示词没有用上场景「${name}」的固定空间短语「${phrase}」（只命中 ${hit}/${total} 个关键描述词）`,
+            message: `第 ${at} 镜的英文提示词没有用上场景「${scene.name}」的固定空间短语「${phrase}」（只命中 ${hit}/${total} 个关键描述词）；提交时会把该短语补进提示词，但建议本镜自己写全，避免同一空间出现两套描述`,
           });
         }
+      }
+
+      /**
+       * 分镜提到的固定陈设，场景卡与道具卡里都没有出处。
+       *
+       * 这是「场景卡没有桌子酒杯、但分镜里有」的拦截点：这类物件不在任何清单里，
+       * 视频模型只能按当前这一镜的文字自由摆位，于是同一张桌子在每一镜里换地方，
+       * 甚至有的镜头有、有的镜头没有。清单里登记过的物件会在提交时补英文名与位置。
+       */
+      for (const scene of shotScenes) {
+        const missing = undeclaredDressing(shot, scene, script.characters);
+        if (missing.length === 0) continue;
+        const labels = missing.map((term) => term.label).join('、');
+        issues.push({
+          level: 'warn',
+          code: 'prop-undeclared',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜提到了「${labels}」，但场景「${scene.name}」里没有它的出处：` +
+            '要么把它补进这张场景卡的固定陈设（写英文名与相对门窗的位置），' +
+            '要么升级成道具卡；否则这一镜的陈设由模型自由发挥，前后镜必然对不上',
+        });
+      }
+
+      /**
+       * 两人以上同框却没有走位。
+       *
+       * 走位是「占位布局」的运行时形态：没有它，换机位后谁在左谁在右只能由模型每次重新猜，
+       * 同一场面在不同镜头里就会左右互换——即使场景卡和陈设都写对了也救不回来。
+       */
+      const castCount = (shot.characterNames ?? []).length;
+      if (castCount >= 2 && !shot.blockingEn?.trim()) {
+        issues.push({
+          level: 'warn',
+          code: 'blocking-missing',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜有 ${castCount} 个角色同框但没有 blockingEn：运行时无法把走位拼进提示词，` +
+            '换机位后人物的左右关系会翻。补一句 8~18 词的英文走位，参考系用门窗 / 桌子哪一端，别写「画面左侧」',
+        });
+      }
+
+      /**
+       * 走位 / 陈设位置的参照系。
+       *
+       * 这两个字段是运行时逐字拼进提示词的，所以「on the left」这种裸方位等于把
+       * 一个会被镜像翻转的坐标焊进成片。运行时侧已拒绝注入（scene-anchor），
+       * 这里负责把人叫回来改：不报出来的话，用户只会看到「走位没生效」。
+       */
+      const blockingProblem = shot.blockingEn?.trim() ? directionProblem(shot.blockingEn) : null;
+      if (blockingProblem) {
+        issues.push({
+          level: 'warn',
+          code: 'bare-blocking',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜的走位 blockingEn 不能用：${blockingProblem}。` +
+            '运行时不会注入这句话（错的坐标比没有坐标更糟），改好之前人物左右关系只能靠模型猜',
+        });
+      }
+
+      for (const scene of shotScenes) {
+        const sceneKey = scene.id ?? scene.name;
+
+        /**
+         * 场景短语本身写了裸方位。
+         *
+         * 这句短语会被运行时逐字注入每一镜（scene-anchor），所以它写错一次，
+         * 整场戏的每一镜都会带上一个说不清方向的坐标。只报一次，避免每镜刷屏。
+         */
+        if (scene.promptEn && !flaggedSceneDirection.has(sceneKey)) {
+          const bareInPhrase = bareDirections(scene.promptEn);
+          if (bareInPhrase.length > 0) {
+            flaggedSceneDirection.add(sceneKey);
+            issues.push({
+              level: 'warn',
+              code: 'scene-item-direction',
+              shotIndex: at,
+              message:
+                `场景卡「${scene.name}」的固定英文短语含裸方位「${[...new Set(bareInPhrase)].join(' / ')}」：` +
+                '这句会被注入每一镜。改成固定件参照（the window on the west wall / the wall opposite the door）',
+            });
+          }
+        }
+
+        const bad = (scene.inventory ?? []).find(
+          (item) => directionProblem(item.whereEn ?? '') || (item.where ? directionProblem(item.where) : null),
+        );
+        if (!bad) continue;
+        const problem =
+          directionProblem(bad.whereEn ?? '') ?? directionProblem(bad.where ?? '') ?? '';
+        issues.push({
+          level: 'warn',
+          code: 'scene-item-direction',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜所在场景「${scene.name}」的陈设「${bad.name}」位置不能用：${problem}。` +
+            '位置要写在空间里（相对门窗 / 固定家具），不能写成镜头看到的方向',
+        });
       }
     }
 
