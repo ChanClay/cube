@@ -14,6 +14,7 @@ import {
   hasTransitionHint,
   isEnglishPrompt,
   matchedWords,
+  mergeCards,
   narrationLimit,
   PROMPT_REPAIR_MAX_WORDS,
   PROMPT_REPAIR_WORDS,
@@ -480,18 +481,37 @@ function buildUserPrompt(input: RepairInput): string {
   const { script, plan, issues, expectedShots } = input;
   const totalDuration = script.shots.reduce((sum, shot) => sum + shot.duration, 0);
 
-  // 蓝图里有固定的英文外貌 / 空间短语时优先给模型，修复才不会把长相写漂
-  const cast = (plan && plan.characters.length > 0 ? plan.characters : script.characters)
-    .map((c) => {
-      const promptEn = 'promptEn' in c && c.promptEn ? `｜英文固定短语：${c.promptEn}` : '';
-      return `- ${c.name}：${c.desc}${promptEn}`;
-    })
+  /**
+   * 用户编辑优先：script 上的卡片就是 UI 里那份，蓝图只补它缺的名字。
+   * 反过来会让用户在 UI 改过的空间描述 / 英文短语，在修复时被蓝图旧值顶回去。
+   */
+  const cast = mergeCards(
+    (script.characters ?? []).map((c) => ({
+      name: c.name,
+      desc: c.desc,
+      promptEn: c.promptEn || undefined,
+    })),
+    (plan?.characters ?? []).map((c) => ({
+      name: c.name,
+      desc: c.desc,
+      promptEn: c.promptEn || undefined,
+    })),
+  )
+    .map((c) => `- ${c.name}：${c.desc}${c.promptEn ? `｜英文固定短语：${c.promptEn}` : ''}`)
     .join('\n');
-  const scenes = (plan && plan.scenes.length > 0 ? plan.scenes : (script.scenes ?? []))
-    .map((s) => {
-      const promptEn = 'promptEn' in s && s.promptEn ? `｜英文空间：${s.promptEn}` : '';
-      return `- ${s.name}：${s.desc}${promptEn}`;
-    })
+  const scenes = mergeCards(
+    (script.scenes ?? []).map((s) => ({
+      name: s.name,
+      desc: s.desc,
+      promptEn: s.promptEn || undefined,
+    })),
+    (plan?.scenes ?? []).map((s) => ({
+      name: s.name,
+      desc: s.desc,
+      promptEn: s.promptEn || undefined,
+    })),
+  )
+    .map((s) => `- ${s.name}：${s.desc}${s.promptEn ? `｜英文空间：${s.promptEn}` : ''}`)
     .join('\n');
 
   const blueprint = plan

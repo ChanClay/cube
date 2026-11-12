@@ -125,6 +125,21 @@ export function dedupeByName<T extends { name: string }>(items: T[]): T[] {
 }
 
 /**
+ * 卡片合并：当前剧本（用户在 UI 里看到、改过的那份）优先，蓝图只补它没有的名字，
+ * 绝不覆盖用户改过的 desc / promptEn / imageUrl。
+ *
+ * 生成流水线内部两份内容本来就一致（蓝图刚被写进 script），所以这条规则不影响出稿；
+ * 它只在「用户改过卡之后又触发本地化 / 审片修复」时起作用——
+ * 这些步骤以前一律拿 plan 里的旧卡片，用户刚改好的空间短语会被悄悄顶回旧值。
+ */
+export function mergeCards<T extends { name: string }>(current: T[], planned: T[]): T[] {
+  const kept = dedupeByName(current);
+  const seen = new Set(kept.map((item) => item.name.trim()));
+  const missing = dedupeByName(planned).filter((item) => !seen.has(item.name.trim()));
+  return [...kept, ...missing];
+}
+
+/**
  * 英文字符与中文汉字占比，用来判断提示词是不是「真英文」。
  * 允许少量汉字（角色名可能是「老陈」），但不接受中文长句。
  */
@@ -278,7 +293,29 @@ export const SPATIAL_ANCHOR_RULES = `空间坐标锚定（视频模型看不懂�
 - 「前后」在一镜里只能有一个含义：前进方向写 ahead / behind along the road，画面纵深写 foreground / background，两者不许混用；
 - 相对位置写成「实体 + 部位 + 相对 + 实体 + 部位」的三角关系，不要只给方向：用 "the red car's nose level with the black car's rear door" 代替 "the red car on the left"；
 - 方位词首次出现必须带限定（frame left / the black car's left flank / the left-hand lane），同一段第二次出现才可以省；
+- 同向追逐的两辆车只有一个合法相对位置：同一条车道中心线、一前一后（on the same lane centerline, directly behind / ahead along the road）。写 beside / alongside / next to / side by side 会让模型把后车摆到本车侧方——画面里两车的夹角从 180° 变成 90°，蛇形追逐立刻读成十字交叉；
 - 中文 description / entryState 与英文用同一套参照系：不许中文写「车尾左后方」、英文写成 front right——方位错位比词不达意更致命，成片会直接撞错位置。`;
+
+/**
+ * 镜面镜头（后视镜 / 侧镜 / 监视器屏幕）的写法。
+ *
+ * 这是文生视频模型最稳定复现的一个误读：写 "close-up of the rear-view mirror"
+ * 而不锁画框时，模型把镜子当成画面里的一个「物体」，为它补一扇侧窗和一个车内视角，
+ * 于是后车出现在侧窗外、横着掠过——两车的 180° 同轴关系被拍成 90°。
+ * 解法与空间锚定同源：先把「画框就是镜面」焊死，再写镜中的同轴关系与镜像方向。
+ */
+export const MIRROR_SHOT_RULES = `镜面镜头（后视镜 / 侧镜 / 监视器屏幕）：
+- 画面里出现镜中反射时，第一句必须是镜面锚，把画框与镜面焊在一起："the entire frame is the reflective glass of the rear-view mirror, the mirror housing edges running just inside the frame borders"。只写 "close-up of the rear-view mirror" 而不锁画框，模型会把镜子当成画面里的物体，顺手补一扇侧窗，后车就从侧窗外横着过；
+- 镜面镜是 POV：镜头位置就在镜面处，朝车尾方向看（camera positioned at the mirror, looking rearward）。不许写成从车内某个位置往后视镜方向拍——那一定连带 A 柱 / 车门 / 侧窗，一旦侧窗入画，模型的整幅画面基准就转向侧面；
+- 镜中后车必须与镜面同轴：on the same lane centerline, directly behind, its headlights centered in the glass, growing larger——用「两车共享同一条消失线」（both vehicles on one vanishing line down the center of the glass）一句锁住追逐关系，接触点写车头咬后保险杠（its front bumper closing on our rear bumper），不写「不远处有一辆车」；
+- 镜像左右是反的，必须显式声明，否则镜中的运动方向会被拍反或拍成横向："mirrored left-right, the car approaching from our rear-left grows from frame right toward frame center"；
+- 镜面镜里禁止出现 side window / door window / A-pillar / door panel / door frame / dashboard，也禁止 beside / alongside / next to / perpendicular / crossing 这类横向词：它们会把同轴追逐读成并排或交叉；
+- 确实要「人 + 镜中车灯」同框时，镜面只占画面上三分之一（the mirror glass occupies the upper third of frame），镜面以外的区域只允许顶棚与挡风玻璃上缘；做不到就拆成两镜：纯镜面特写 + 车内人物特写。`;
+
+/**
+ * 视频提示词的写法约束。storyboard 与单镜重算共用同一份，
+ * 避免两处对「多少词、写什么顺序」给出不同要求。
+ */
 
 /**
  * 视频提示词的写法约束。storyboard 与单镜重算共用同一份，
@@ -294,6 +331,7 @@ export const VIDEO_PROMPT_RULES = `videoPrompt 是同一镜中文 description �
 - 只写可拍摄的名词与动词，不要用 "beautiful" / "sad" 单独代替画面；
 - 同一角色在全片复用同一段英文外貌短语，不要逐镜改写年龄、发型、服装、装甲与涂装、道具。
 ${SPATIAL_ANCHOR_RULES}
+${MIRROR_SHOT_RULES}
 ${MOTION_BASELINE_RULES}`;
 
 /**

@@ -18,6 +18,7 @@ import type {
   MediaInput,
   MediaType,
   NarrationType,
+  Scene,
   Shot,
   ShotTransition,
   VideoJob,
@@ -30,6 +31,8 @@ interface Props {
   onGenerate: () => void;
   /** 全片角色卡，重算分镜信息时保证外貌一致 */
   characters?: Character[];
+  /** 全片场景卡，重算分镜信息时保证空间短语一致、不漂回别的场景 */
+  scenes?: Scene[];
   /** 整体视觉风格，重新生成分镜信息时使用 */
   style?: string;
   /** 全片运动基调：重算这一镜的提示词时也要体现（特写不许把整场戏的速度丢掉） */
@@ -97,6 +100,7 @@ export default function ShotCard({
   onChange,
   onGenerate,
   characters = [],
+  scenes = [],
   style = '',
   motionProfile = '',
   beforeDescription = '',
@@ -200,6 +204,9 @@ export default function ShotCard({
         prevCast,
         prevExitState,
         characters: characters.map(({ name, desc }) => ({ name, desc })),
+        scenes: scenes.map(({ name, desc, promptEn }) => ({ name, desc, promptEn })),
+        sceneNames: shot.sceneNames ?? [],
+        prevSceneName,
       });
 
       const patch: Partial<Shot> = {

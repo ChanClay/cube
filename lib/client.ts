@@ -184,6 +184,12 @@ export interface RefineShotBody {
   prevExitState?: string;
   /** 全片角色卡，保证重算后角色外貌不漂移 */
   characters?: { name: string; desc: string }[];
+  /** 全片场景卡：重算后必须复用本镜所在场景的固定空间短语 */
+  scenes?: { name: string; desc: string; promptEn?: string }[];
+  /** 本镜当前的场景归属：重算以它为准，不许把地点改回别的场景 */
+  sceneNames?: string[];
+  /** 上一镜的场景名：本镜没标场景时按它承接 */
+  prevSceneName?: string;
 }
 
 /** 重算后可变的字段，description 由用户自己维护 */

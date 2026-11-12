@@ -600,6 +600,7 @@ export default function ScriptView({
                 onChange={(patch) => onShotChange(activeShot.id, patch)}
                 onGenerate={() => onGenerate(activeShot)}
                 characters={script.characters}
+                scenes={script.scenes ?? []}
                 style={script.style}
                 motionProfile={script.motionProfile}
                 beforeDescription={shots[activeIndex - 1]?.description ?? ''}

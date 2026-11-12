@@ -27,6 +27,7 @@ import {
   endsOffscreen,
   screenDirection,
   hasTransitionHint,
+  mergeCards,
   normalizeBeatSheet,
   normalizeCameraMove,
   normalizeShotSize,
@@ -213,7 +214,7 @@ ${req.idea}
 9) 所有 duration 之和是否等于 ${totalDuration} 秒？
 10) 每镜的最后一个 beat 是不是落点（动作到达可辨认相位），exitState 是不是主体还在画面内、写清了画面位置 / 运动方向 / 背景锚点？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
 11) 相邻两镜的运动方向是否一致（左→右不能接右→左）？要越轴时，是不是先垫了一个中性机位（迎面 / 背面 / 空镜）？hard-cut 的 transitionReason 是否写清了切点承接的是哪个动作相位或背景锚点？
-12) 每个特写 / 近景是否交代了容器与至少两个容器固定件（方向盘 / 仪表台 / 后视镜 / 门框 / 舷窗…）、主光方向与色温、窗外或背景锚点？机位是否在同一轴线侧、用中长焦观感？有没有出现穿挡风玻璃正面平视、90° 广角正侧切、大角度俯拍这类角度？室内内饰是否复用了场景卡 / 载具卡的固定英文短语，而不是每镜重写？`;
+12) 每个特写 / 近景是否交代了容器与至少两个容器固定件（方向盘 / 仪表台 / 后视镜 / 门框 / 舷窗…）、主光方向与色温、窗外或背景锚点？机位是否在同一轴线侧、用中长焦观感？有没有出现穿挡风玻璃正面平视、90° 广角正侧切、大角度俯拍这类角度？室内内饰是否复用了场景卡 / 载具卡的固定英文短语，而不是每镜重写？镜面镜（后视镜 / 侧镜 / 屏幕）有没有把画框焊在镜面上、后车是不是写成同车道正后方、有没有把侧窗 / A 柱 / beside 写进画面（否则同轴追逐会被拍成十字交叉）？`;
 
   if (!plan) {
     return `${head}
@@ -513,17 +514,31 @@ function stabilizeStateChain(script: Script): void {
   });
 }
 
-/** 名字对齐：精确 → 忽略大小写 → 包含关系（模型常写「老陈」/「守塔人老陈」） */
-function matchName(raw: string, candidates: string[]): string | null {
+/** 多个候选都能包容时取最长（更具体）的一个；长度并列时优先 preferred */
+function pickMostSpecific(hits: string[], preferred: string | null = null): string | null {
+  if (hits.length === 0) return null;
+  if (preferred && hits.includes(preferred)) return preferred;
+  return hits.reduce((best, name) => (name.length > best.length ? name : best), hits[0]);
+}
+
+/**
+ * 名字对齐：精确 → 忽略大小写 → 包含关系（模型常写「老陈」/「守塔人老陈」）。
+ *
+ * 包含关系必须挑「最具体」的候选，并按固定顺序找第一个：场景表里同时有
+ * 「灯塔内部」「灯塔外部」时，写「灯塔」不能永远落到排在前面的那张卡上，
+ * 否则后段镜头会被系统性地拉回片头场景。
+ */
+function matchName(raw: string, candidates: string[], preferred: string | null = null): string | null {
   const value = raw.trim();
   if (!value) return null;
   const exact = candidates.find((name) => name === value);
   if (exact) return exact;
   const lower = value.toLowerCase();
-  return (
-    candidates.find((name) => name.toLowerCase() === lower) ??
-    candidates.find((name) => name.includes(value) || value.includes(name)) ??
-    null
+  const ci = candidates.find((name) => name.toLowerCase() === lower);
+  if (ci) return ci;
+  return pickMostSpecific(
+    candidates.filter((name) => name.includes(value) || value.includes(name)),
+    preferred,
   );
 }
 
@@ -541,6 +556,18 @@ function reconcileReferences(script: Script, plan: StoryPlan | null): void {
     .map((s) => s.name)
     .filter(Boolean);
 
+  /** 本镜文本里点名的场景，取最长（最具体）的一个——「灯塔内部」优先于「灯塔」 */
+  const namedScene = (shot: Shot): string | null => {
+    const text = [shot.title, shot.description, shot.entryState, shot.exitState, shot.videoPrompt]
+      .filter(Boolean)
+      .join('\n');
+    if (!text) return null;
+    return pickMostSpecific(sceneNames.filter((name) => name && text.includes(name)));
+  };
+
+  /** 上一镜的场景：名字有歧义时用它破平，也作为「本镜没标场景」时的空间承接 */
+  let prevScene: string | null = null;
+
   for (const shot of script.shots) {
     const characters = new Set<string>();
     for (const raw of shot.characterNames ?? []) {
@@ -557,11 +584,13 @@ function reconcileReferences(script: Script, plan: StoryPlan | null): void {
 
     const scenes = new Set<string>();
     for (const raw of shot.sceneNames ?? []) {
-      const hit = matchName(raw, sceneNames);
+      const hit = matchName(raw, sceneNames, prevScene);
       if (hit) scenes.add(hit);
     }
     if (scenes.size === 0 && sceneNames.length === 1) scenes.add(sceneNames[0]);
     shot.sceneNames = [...scenes];
+    // 只把「本镜自己的」场景记成上一镜，没标场景的镜头不参与，避免把空值往后传
+    if (shot.sceneNames.length > 0) prevScene = shot.sceneNames[0];
 
     /**
      * 角色台词必须有具体的说话人，而且这个人得在本镜出镜：
@@ -588,11 +617,22 @@ function reconcileReferences(script: Script, plan: StoryPlan | null): void {
     }
   }
 
-  // 蓝图给了场景卡时，把没有归类的片段挂回第一个场景，避免场景卡悬空
+  /**
+   * 没归类的镜头不再一律挂回第一个场景——那等于把后段镜头钉在片头地点，
+   * 而且本函数在审片前后各跑一次，第一次挂错的名字第二次会被当成「已归类」保留下来。
+   * 推断顺序：本镜文本里点名的场景 → 上一镜的场景（空间连续）→ 首镜才兜底用第一个场景。
+   */
   if (plan && plan.scenes.length > 0 && sceneNames.length > 0) {
-    for (const shot of script.shots) {
-      if ((shot.sceneNames ?? []).length === 0) shot.sceneNames = [sceneNames[0]];
-    }
+    let prev: string | null = null;
+    script.shots.forEach((shot, i) => {
+      const current = shot.sceneNames ?? [];
+      if (current.length === 0) {
+        const pick = namedScene(shot) ?? prev ?? (i === 0 ? sceneNames[0] : null);
+        if (pick) shot.sceneNames = [pick];
+      }
+      const settled = shot.sceneNames ?? [];
+      if (settled.length > 0) prev = settled[0];
+    });
   }
 }
 
@@ -920,13 +960,18 @@ function finalizeScript(
 async function localizeScriptPrompts(script: Script, plan: StoryPlan | null): Promise<Script> {
   if (!config.llm.localize || script.shots.length === 0) return script;
 
-  const characters = (plan && plan.characters.length > 0 ? plan.characters : script.characters).map(
-    (c) => ({ name: c.name, promptEn: c.promptEn || undefined }),
+  /**
+   * 用户编辑优先：script 上的卡片就是 UI 里那份，蓝图只补它缺的名字。
+   * 反过来（plan 优先）会让用户刚改好的英文空间短语在本地化时被旧值悄悄顶掉。
+   */
+  const characters = mergeCards(
+    script.characters.map((c) => ({ name: c.name, promptEn: c.promptEn || undefined })),
+    (plan?.characters ?? []).map((c) => ({ name: c.name, promptEn: c.promptEn || undefined })),
   );
-  const scenes = (plan && plan.scenes.length > 0 ? plan.scenes : (script.scenes ?? [])).map((s) => ({
-    name: s.name,
-    promptEn: s.promptEn || undefined,
-  }));
+  const scenes = mergeCards(
+    (script.scenes ?? []).map((s) => ({ name: s.name, promptEn: s.promptEn || undefined })),
+    (plan?.scenes ?? []).map((s) => ({ name: s.name, promptEn: s.promptEn || undefined })),
+  );
 
   const translated = await localizePrompts({
     shots: script.shots.map((shot) => ({

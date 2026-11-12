@@ -80,6 +80,8 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 - **多主体镜按三级写**：机位锚（镜头装在哪、朝哪、多高、多近，8~14 词，放第一句）→ 画面布局（谁在画面哪一侧、占画多少、谁挡住谁）→ 接触点 / 相对位移（「实体 + 部位 + 相对 + 实体 + 部位」，如 `the red car's nose level with the black car's rear door`）。例：`camera mounted low on the rear bumper of the black sedan, looking forward over both roofs, the red coupe's nose level with the black car's rear-left quarter panel, sliding out toward the adjacent lane`。
 - 「前后」在一镜里只许有一个含义：前进方向写 `ahead` / `behind along the road`，画面纵深写 `foreground` / `background`。混用就是「明明在超车、拍出来像在倒车」的直接原因。
 - 中文 `description` / `entryState` 与英文必须用同一套参照系：不许中文写「车尾左后方」、英文写成 `front right`。方位错位比词不达意更致命——成片会直接撞错位置。
+- **镜面镜（后视镜 / 侧镜 / 屏幕）先把画框焊在镜面上**（`MIRROR_SHOT_RULES`）：第一句写 `the entire frame is the reflective glass of the rear-view mirror, the housing edges just inside the frame borders`，机位写在镜面处朝车尾看，后车写 `on the same lane centerline directly behind`，再补一句 `mirrored left-right`。只写 `close-up of the rear-view mirror` 会让模型补出车内视角与侧窗，后车从侧面横过——两车 180° 同轴追逐会被拍成 90° 十字交叉。镜面镜里不许出现 side window / A-pillar / door panel，也不许 beside / alongside / perpendicular / crossing。
+- 同向追逐的两辆车只写「同一条车道中心线、一前一后」；写 beside / side by side 就是把追逐写成并排行驶。
 - 只写一个运镜；动作可以有多段，但必须是**一条**动作链，结尾用 `constant subtle motion, no frozen frame` 收口。
 - **`beatSheet` 的每一段都要在英文里有对应**，按时间顺序用并列的现在分词短语串起来，不写 `first` / `then` / `after that` / `finally`——这类时间副词会让模型把画面切成两段，接缝处就是抽帧般的抖动。例：`0~2s 抬眼看向塔顶 / 2~4s 伸手拧开灯罩 / 4~5s 火苗窜起` → `his eyes lifting to the tower top, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass`。
 - 每段节拍同时给 `actionEn`（8~14 词）：运行时会按 `from` / `to` 把它拼成 `0-2s: ...; 2-5s: ...` 的英文时间轴提交给视频模型，没有它这一段动作进不了成片。

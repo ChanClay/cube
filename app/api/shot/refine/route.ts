@@ -28,6 +28,7 @@ function buildSystemPrompt(): string {
 5. 若提供了主体卡（人物 / 载具 / 关键道具），本镜出镜主体的外貌必须与卡片一致；视频提示词里沿用卡片已有的英文固定短语，不要自行改写年龄、发型、服装、装甲与涂装、车型与车漆、道具。
 6. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；运动方向要与相邻镜头一致（上一镜朝画右，本镜不要朝画左），并让本镜最后一拍停在可辨认的动作相位上（主体仍在画面内）。避免与相邻镜头重复同一构图。若给出了「上一镜末帧里实际在场的人物」，本镜开头的人物必须与这份名单完全一致，不许增删；需要新角色出场时，写成在这一镜的过程里走进画面，而不是一开始就站在那里。
 6.1 本镜出现的每一辆车（主角座驾、追车、警车…）都要按卡片写进提示词，并复用它的固定英文短语；漏一辆，这辆车在这一镜里就会变成另一辆。
+6.2 本镜的地点由「本镜所在场景」决定：英文提示词里的空间短语必须来自该场景卡，不许改写成别的场景的地点，也不许把画面带回片头场景。本镜没标场景时，按上一镜的场景承接；两者都没有时，只写画面描述里出现的地点。
 7. narration 是这一镜的旁白或台词，可为空字符串（不要写"旁白："前缀）。
 8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字；旁白或没有台词时 speaker 留空。
 9. title 是这一镜的小标题，4~8 个字。
@@ -57,6 +58,9 @@ function buildUserPrompt(input: {
   prevCast: string[];
   prevExitState: string;
   characters: { name: string; desc: string }[];
+  scenes: { name: string; desc: string; promptEn?: string }[];
+  sceneNames: string[];
+  prevSceneName: string;
 }): string {
   const lines = [
     `整体视觉风格：${input.style || '电影感写实'}`,
@@ -75,6 +79,26 @@ function buildUserPrompt(input: {
       lines.push(`- ${character.name}：${character.desc}`);
     }
   }
+
+  if (input.scenes.length > 0) {
+    lines.push('', '场景卡（空间设定必须与此一致，英文空间短语逐字复用）：');
+    for (const scene of input.scenes) {
+      const en = scene.promptEn ? `｜英文空间：${scene.promptEn}` : '';
+      lines.push(`- ${scene.name}：${scene.desc}${en}`);
+    }
+  }
+
+  /**
+   * 本镜地点由「场景归属」决定，不是由模型自由发挥：
+   * 没标注时才拿上一镜的场景承接，绝不允许退回片头场景。
+   */
+  const sceneLine =
+    input.sceneNames.length > 0
+      ? input.sceneNames.join('、')
+      : input.prevSceneName
+        ? `${input.prevSceneName}（本镜未标注，按上一镜的场景承接）`
+        : '（未标注，也没有上一镜可承接：只写画面描述里出现的地点，不要回到片头场景）';
+  lines.push('', `本镜所在场景：${sceneLine}`);
 
   lines.push('', '修改后的画面描述（必须严格照此生成）：', input.description);
 
@@ -117,6 +141,21 @@ function parseCharacters(raw: unknown): { name: string; desc: string }[] {
   return result;
 }
 
+/** 场景表：名字 + 中文空间描述 + 固定英文短语（重算时逐字复用，不重新措辞） */
+function parseScenes(raw: unknown): { name: string; desc: string; promptEn?: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const result: { name: string; desc: string; promptEn?: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const name = str(record.name);
+    if (!name) continue;
+    result.push({ name, desc: str(record.desc), promptEn: str(record.promptEn) || undefined });
+    if (result.length >= 8) break;
+  }
+  return result;
+}
+
 /** 末帧在场人物：只取非空名字 */
 function parseCast(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -149,6 +188,9 @@ export async function POST(request: Request) {
     prevCast: parseCast(payload.prevCast),
     prevExitState: str(payload.prevExitState),
     characters: parseCharacters(payload.characters),
+    scenes: parseScenes(payload.scenes),
+    sceneNames: parseCast(payload.sceneNames),
+    prevSceneName: str(payload.prevSceneName),
   };
 
   try {

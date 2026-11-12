@@ -113,6 +113,38 @@ Close-up of an old lighthouse keeper ..., his eyes lifting toward the top of the
 
 先空间、后动作。空间没写清就写动作，模型会先出一张两个主体各自摆放的图，再让它们动——接触点永远撞不上。反之，先给机位与布局，模型会先把两个主体摆在正确位置，再执行动作链。
 
+### 镜面镜头：画框即镜面，两车同轴
+
+写「后视镜特写」几乎必然踩到一个稳定的误读：`close-up of the rear-view mirror` 只说了「拍镜子」，没说「画框就是镜面」。模型于是把后视镜当成画面里的一个物体，为了给它一个合理的所在，补出车内视角、A 柱和一扇侧窗——后车就从侧窗外横着掠过去。结果就是本该 180° 同轴的蛇形追逐，被拍成 90° 的十字交叉。
+
+镜面镜（后视镜 / 侧镜 / 监视器屏幕）按下面四句写，缺任何一句都会退回默认误读：
+
+1. **镜面锚（第一句）**：`the entire frame is the reflective glass of the rear-view mirror, the mirror housing edges running just inside the frame borders`。画框与镜面焊死后，模型没有余量再放一扇侧窗。
+2. **机位**：`camera positioned at the mirror, looking rearward`。镜面镜是 POV，不是「从车内往后视镜方向拍」。
+3. **同轴关系**：`the pursuing car on the same lane centerline directly behind us, its headlights centered in the glass and growing larger, both vehicles on one vanishing line down the center of the glass`；接触点写 `its front bumper closing on our rear bumper`。
+4. **镜像方向**：`mirrored left-right, the car approaching from our rear-left grows from frame right toward frame center`。不写这句，镜中左右会翻，动作方向会自相矛盾。
+
+镜面镜里**禁止**出现 `side window` / `door window` / `A-pillar` / `door panel` / `door frame` / `dashboard`，也**禁止** `beside` / `alongside` / `next to` / `perpendicular` / `crossing`——这些词会把同轴追逐读成并排或交叉行驶。
+
+正例：
+
+```
+Close-up, the entire frame is the reflective glass of the rear-view mirror, its black housing edges just inside the frame borders, camera positioned at the mirror looking rearward, the pursuing black coupe on the same lane centerline directly behind us, its headlights centered in the glass and growing larger, its front bumper closing on our rear bumper, both vehicles on one vanishing line down the center of the glass, mirrored left-right so the car approaching from our rear-left grows from frame right toward frame center, raindrops sliding across the glass, cold blue storm light, static shot, shallow depth of field, 35mm film grain, constant subtle motion, no frozen frame
+```
+
+反例与改法：
+
+| 反例 | 问题 | 改法 |
+| --- | --- | --- |
+| `close-up of the rear-view mirror, a car chasing behind` | 没锁画框，模型补车内视角 + 侧窗，后车从侧面横过 | 先写镜面锚，再写同轴后车与镜像方向 |
+| `through the side window, a car close behind` | 直接把机位写在侧窗上，空间基准变成侧面 | 侧窗镜不是后视镜镜：要么改成镜面镜，要么明确这是「侧窗外的并排车」，不要和追逐混用 |
+| `the mirror shows a car beside us` | `beside` 把追逐读成并排 / 交叉 | 改 `on the same lane centerline directly behind` |
+| 镜面占满画面，却又写「后视镜里映出他的眼睛」 | 人镜同框必须留出画面占比，否则模型会为了放脸而退出镜面 | 拆两镜，或写 `the mirror glass occupies the upper third of frame`，镜外只留顶棚与挡风玻璃上缘 |
+
+### 追逐戏的相对位置只有一个写法
+
+同向追逐的两辆车，相对位置只有一种合法描述：**同一条车道中心线、一前一后**（`on the same lane centerline, directly behind / ahead along the road`）。写 `beside` / `alongside` / `next to` / `side by side` 会让模型把后车摆到本车侧方，两车夹角从 180° 变成 90°——观众看到的就不再是追，而是两条路交叉。
+
 ## 四、正例
 
 中文 description：

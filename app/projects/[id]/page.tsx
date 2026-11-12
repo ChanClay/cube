@@ -463,10 +463,21 @@ function ProjectPageInner() {
     [],
   );
 
-  /** 场景卡：只影响剧本数据，不参与视频生成 */
+  /** 场景卡：改名 / 删除后同步清洗镜头的场景归属，避免悬挂引用把镜头留在旧场景 */
   const handleScenesChange = useCallback(
     (updater: (prev: Scene[]) => Scene[]) => {
-      setScript((prev) => (prev ? { ...prev, scenes: updater(prev.scenes ?? []) } : prev));
+      setScript((prev) => {
+        if (!prev) return prev;
+        const scenes = updater(prev.scenes ?? []);
+        const names = new Set(scenes.map((scene) => scene.name).filter(Boolean));
+        // 删卡后镜头仍指着旧名字，生成时就找不到对应的场景图，只能按自然语言自由发挥
+        const shots = prev.shots.map((shot) => {
+          const current = shot.sceneNames ?? [];
+          const kept = current.filter((name) => names.has(name));
+          return kept.length === current.length ? shot : { ...shot, sceneNames: kept };
+        });
+        return { ...prev, scenes, shots };
+      });
     },
     [],
   );

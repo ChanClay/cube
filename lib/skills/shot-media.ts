@@ -147,15 +147,32 @@ export function collectCardMedia(shot: Shot, script: Script | null): MediaInput[
     if (characterNames.has(character.name) || mentioned) push(character.imageUrl, character.name);
   }
 
-  for (const scene of script.scenes ?? []) {
-    if (!scene.imageUrl) continue;
-    const mentioned = scene.name && text.includes(scene.name);
-    if (sceneNames.has(scene.name) || mentioned) push(scene.imageUrl, scene.name);
+  /**
+   * 场景只挂本镜标注的那几个。
+   *
+   * 这里以前还有一条「描述里提到场景名就挂」的兜底：后段镜头的描述 / 旁白里只要出现
+   * 「回到灯塔」这类旧地标，片头场景卡就会被当成参考图一起送进视频模型，
+   * 画面被拉回开头的地点与色调。场景归属由分镜阶段负责，这一层不再做文本推断。
+   */
+  const scenes = script.scenes ?? [];
+  const sceneByName = new Map(scenes.filter((scene) => scene.imageUrl).map((scene) => [scene.name, scene]));
+  for (const name of sceneNames) {
+    const scene = sceneByName.get(name);
+    if (scene?.imageUrl) push(scene.imageUrl, scene.name);
   }
 
-  // 全片只有一个场景、镜头又没标场景：默认就是它
-  const scenes = script.scenes ?? [];
-  if (result.length === 0 && sceneNames.size === 0 && scenes.length === 1) {
+  // 本镜确实没标场景时才按文本推断，且只取名字最长（最具体）的一张，避免多张场景卡互相打架
+  if (sceneNames.size === 0) {
+    const hits = scenes.filter((scene) => scene.imageUrl && scene.name && text.includes(scene.name));
+    const best = hits.length
+      ? hits.reduce((longest, scene) => (scene.name.length > longest.name.length ? scene : longest))
+      : null;
+    if (best?.imageUrl) push(best.imageUrl, best.name);
+  }
+
+  // 全片只有一个场景、镜头又没标场景：默认就是它（判断按「有没有挂过场景卡」，不是 result 是否为空）
+  const hasSceneCard = result.some((item) => !!item.name && sceneByName.has(item.name));
+  if (!hasSceneCard && sceneNames.size === 0 && scenes.length === 1) {
     const only = scenes[0];
     if (only.imageUrl) push(only.imageUrl, only.name);
   }
