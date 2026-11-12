@@ -146,7 +146,7 @@ export class WanProvider implements VideoProvider {
         ratio,
         duration: toDuration(input.duration),
         prompt_extend: config.video.promptExtend,
-        // 单个任务可以覆盖全局开关：承接上一镜末帧的镜头不出声，避免音频断档
+        // 单个任务可以覆盖全局开关；调用方不再按「是否接首帧」强制静音
         audio: input.audio ?? config.video.audio,
       },
     };

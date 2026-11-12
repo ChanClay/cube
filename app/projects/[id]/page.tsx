@@ -1173,7 +1173,6 @@ function ProjectPageInner() {
             onStyleChange={handleStyleChange}
             onEditIdea={handleEditIdea}
             onRecreateIdea={handleRecreateIdea}
-            carryMuted={health ? health.video.audio && !health.video.audioOnCarry : true}
             prevFrameRefEnabled={health ? health.video.referencePrevFrame : true}
             onAddShot={handleAddShot}
             onAbandonShot={handleAbandonShot}

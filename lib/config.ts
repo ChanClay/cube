@@ -45,12 +45,6 @@ export const config = {
     /** 是否输出有声视频（wan3.0 原生支持台词 / BGM / 音效） */
     audio: bool(process.env.VIDEO_AUDIO, true),
     /**
-     * 承接上一镜末帧（首帧来自 /api/frames/）的镜头是否也生成音频。
-     * 画面接着上一镜，音频却由这一镜独立生成，音色 / 语气 / 环境声都会突然断档，
-     * 合成后听起来「音频衔接不上」，所以默认关掉这类镜头的音频。
-     */
-    audioOnCarry: bool(process.env.VIDEO_AUDIO_ON_CARRY, false),
-    /**
      * 硬切镜头是否用上一镜末帧（默认开）。
      *
      * 同景别时当首帧接住（接缝完全连续，但这一镜就传不了卡片）；景别变了则降级成

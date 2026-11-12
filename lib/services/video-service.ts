@@ -1,6 +1,5 @@
 import { config } from '@/lib/config';
 import { logVideoError } from '@/lib/services/logger';
-import { hasCarryFrame } from '@/lib/skills/media';
 import { getProvider } from '@/lib/providers/video';
 import { getJob, listJobs, saveJob, updateJob } from '@/lib/services/store';
 import { isLocalVideoUrl, persistRemoteVideo } from '@/lib/services/videos';
@@ -40,12 +39,11 @@ export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob
   const media = input.media ?? [];
 
   /**
-   * 首帧来自上一镜末帧时，画面是接着上一镜的，但音轨由这一镜从头生成：
-   * 音色、语气、环境声都会突然断掉，合成后听着就是「音频衔接不上」。
-   * 首帧模式又没法用 reference_audio 锁定音色，所以这类镜头默认不生成音频；
-   * 需要声音可以设 VIDEO_AUDIO_ON_CARRY=1 恢复。
+   * 一律按全局开关出有声视频：接首帧的镜头也照常生成音轨。
+   * 以前这类镜头会被强制静音（怕音色 / 环境声接不上），但成片断音比轻微的音色
+   * 偏移更难接受，所以现在统一出声音，衔接好坏交给合成阶段处理。
    */
-  const audio = config.video.audio && (!hasCarryFrame(media) || config.video.audioOnCarry);
+  const audio = config.video.audio;
 
   const job: VideoJob = {
     id: crypto.randomUUID(),

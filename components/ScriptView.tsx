@@ -55,8 +55,6 @@ interface Props {
   onEditIdea?: () => void;
   /** 已生成过视频时，带着当前创意重新新建一份剧本 */
   onRecreateIdea?: () => void;
-  /** 承接上一镜末帧的镜头是否不出声（服务端配置，用来提示用户） */
-  carryMuted?: boolean;
   /** 末帧参考图的总开关（服务端配置），关掉后镜头卡片上的选项不可用 */
   prevFrameRefEnabled?: boolean;
   /** 手动在当前剧本末尾添加一镜 */
@@ -121,7 +119,6 @@ export default function ScriptView({
   idea = '',
   onEditIdea,
   onRecreateIdea,
-  carryMuted = true,
   prevFrameRefEnabled = true,
   onAddShot,
   onAbandonShot,
@@ -588,7 +585,6 @@ export default function ScriptView({
                 startAt={shots
                   .slice(0, activeIndex)
                   .reduce((sum, prev) => sum + prev.duration, 0)}
-                carryMuted={carryMuted}
                 prevSceneName={shots[activeIndex - 1]?.sceneNames?.[0] ?? ''}
                 prevShotSize={shots[activeIndex - 1]?.shotSize ?? ''}
                 prevCast={prevFrameCast(shots[activeIndex - 1] ?? null)}

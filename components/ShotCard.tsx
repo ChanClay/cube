@@ -5,17 +5,11 @@ import {
   MEDIA_HINT,
   MEDIA_LABEL,
   MEDIA_TYPES,
-  hasCarryFrame,
-  isCarryFrameUrl,
   mediaSummary,
   validateMedia,
 } from '@/lib/skills/media';
 import { api } from '@/lib/client';
-import {
-  TRANSITION_HINT,
-  TRANSITION_LABEL,
-  isSameTakeShot,
-} from '@/lib/skills/shot-media';
+import { TRANSITION_HINT, TRANSITION_LABEL } from '@/lib/skills/shot-media';
 import { shotSizeGap } from '@/lib/skills/spec';
 import type {
   Character,
@@ -43,8 +37,6 @@ interface Props {
   isFirst?: boolean;
   /** 这一镜在成片里的起始秒数（前面所有镜头时长之和），用于显示绝对时间码 */
   startAt?: number;
-  /** 承接上一镜末帧的镜头不生成音频（服务端默认行为，用于提示） */
-  carryMuted?: boolean;
   /** 上一镜的场景名：判断能不能把上一镜末帧当同场景的风格参考 */
   prevSceneName?: string;
   /** 上一镜的景别：同景别才谈得上「首帧接住」，景别变了只能当参考图 */
@@ -104,7 +96,6 @@ export default function ShotCard({
   afterDescription = '',
   isFirst = false,
   startAt,
-  carryMuted = true,
   prevSceneName = '',
   prevShotSize = '',
   prevCast = [],
@@ -143,13 +134,6 @@ export default function ShotCard({
     ...new Set([...(shot.characterNames ?? []), ...characters.map((c) => c.name)]),
   ].filter(Boolean);
 
-  /**
-   * 这一镜会不会静音：首帧来自上一镜末帧时，服务端不生成音轨
-   * （画面接着上一镜，声音重新生成必然断档）。首帧还没抽出来时也提前提示。
-   */
-  const hasManualFirstFrame = media.some(
-    (item) => item.type === 'first_frame' && !isCarryFrameUrl(item.url),
-  );
   /** 衔接方式：新剧本读 transition，旧剧本回落到「承接上一镜」开关 */
   const transition: ShotTransition =
     shot.transition ?? (shot.continueFromPrev ? 'same-take' : 'hard-cut');
@@ -169,11 +153,6 @@ export default function ShotCard({
   const canReferencePrevFrame = sameScopeCut && (gapToPrev <= 1 || !!shot.hiddenCut);
   const referencePrevFrame =
     canReferencePrevFrame && (shot.referencePrevFrame ?? true);
-  const silentForCarry =
-    carryMuted &&
-    (hasCarryFrame(media) ||
-      (!isFirst && isSameTakeShot(shot) && gapToPrev === 0 && !hasManualFirstFrame));
-
   useEffect(() => {
     setDurationText(String(shot.duration));
   }, [shot.duration]);
@@ -723,15 +702,6 @@ export default function ShotCard({
             </label>
           )}
         </div>
-
-        {silentForCarry && (
-          <span
-            className="shot-silent"
-            title="画面接着上一镜末帧，音轨若重新生成会和上一镜的声音断档，所以这类镜头不生成音频；需要保留可设 VIDEO_AUDIO_ON_CARRY=1"
-          >
-            无音轨
-          </span>
-        )}
 
         {busy && onAbandon && (
           <button

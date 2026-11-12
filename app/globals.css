@@ -2847,20 +2847,6 @@ a.btn:visited {
   border-top: 1px dashed var(--border-soft);
 }
 
-/* 承接首帧的镜头不出声，这里给个明确标记 */
-.shot-silent {
-  display: inline-flex;
-  align-items: center;
-  height: 21px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel-3);
-  color: var(--muted);
-  font-size: 11px;
-  cursor: help;
-}
-
 .status-badge {
   display: inline-flex;
   align-items: center;
