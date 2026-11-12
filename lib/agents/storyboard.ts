@@ -153,7 +153,7 @@ JSON 结构：
       "transitionReason": "一句话说明切点承接的是什么（同一瞬间的动作相位 / 同一个背景锚点），为什么这样衔接到下一镜",
       "referencePrevFrame": "true / false：本镜是否用上一镜最后一帧（同场景跨度 0 写 true；跨度 1 或 hiddenCut 留空即自动；跨度 ≥2 不要写 true，先改序列）",
       "hiddenCut": "true / false：这次换机位是否靠遮挡 / 甩镜 / 暗部完成（长镜头里换景别时写 true，景别可随便跨）",
-      "entryState": "本镜第一帧的画面事实，四段齐全：承接（上一镜末帧可见的主体位置 / 姿势 / 朝向 / 手持物）＋空间（容器几何＋两个以上固定件）＋机位（方位 / 高度 / 距离）＋环境（光源方向色温 / 背景锚点 / 运动感）",
+      "entryState": "本镜第一帧的画面事实，四段齐全：承接（上一镜末帧可见的主体位置 / 姿势 / 朝向 / 手持物）＋空间（容器几何＋两个以上固定件）＋机位（在谁的哪一侧 / 朝哪个方向看 / 高度 / 距离，必须点名参照系）＋环境（光源方向色温 / 背景锚点 / 运动感）",
       "exitState": "本镜最后一帧的画面事实（画面位置 / 运动方向 / 背景锚点），必须是可切帧，供下一镜接住",
       "beatSheet": [
         { "from": 0, "to": 2, "action": "抬眼看向塔顶", "actionEn": "his eyes lifting toward the top of the tower" },
@@ -206,7 +206,8 @@ ${req.idea}
 3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame 是否按档位写（跨度 ≥2 的硬切有没有先改成「垫一档」或 hiddenCut，而不是硬写 true）？跨了景别的长镜头是不是都写了 hiddenCut=true？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作，并且每段都给了 8~14 词的 actionEn？
 5) 主体名 / 场景名是否逐字来自上方清单？本镜出现的每一辆车（主角座驾、追车、警车…）是否都写进了 characters 并复用它的 promptEn？
-6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
+6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？两个以上主体（尤其载具）同框时，第一句有没有写机位锚（镜头装在哪 / 朝哪 / 多高），谁在画面哪一侧、谁挡住谁、接触点在哪个部位是否都写得出来？每个 left / right / front / behind 是否都带了参照系（frame left / 实体名 + 部位 / the left-hand lane）？裸写的一律不合格——中文写「车尾左后方」、英文写 front right 这种方位错位必须逐条核对掉。
+6.1) 空间描述是否「先机位、再布局、后动作」？把提示词当读者读一遍：如果需要猜「谁在谁的左边」，模型就会猜，而且经常猜反。
 7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？这一镜是否有至少一个贯穿全镜的持续运动源（特写 / 近景最容易漏，只写表情就是一张静止的肖像）？
 8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
 9) 所有 duration 之和是否等于 ${totalDuration} 秒？

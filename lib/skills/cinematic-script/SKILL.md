@@ -68,14 +68,18 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 
 `videoPrompt` 是 `description` 的**忠实英译**，不是重新创作：中文写到的每个主体、动作、道具、环境、光线都要在英文里有对应，中文没写的一律不许加。
 
-固定词序（40~110 词，一段话，不分点）：
+固定词序（40~125 词，一段话，不分点）：
 
 ```
-景别 + 主体（复用主体 promptEn：人物 / 载具 / 道具）+ 具体动作 + 环境细节 + 光线/时间/色调 + 一个运镜 + 画面质感 +（可选）一句声音
+景别 + 主体（复用主体 promptEn：人物 / 载具 / 道具）+ 机位锚（多主体/载具镜必写）+ 空间布局 + 具体动作 + 环境细节 + 光线/时间/色调 + 一个运镜 + 画面质感 +（可选）一句声音
 ```
 
 - 景别、运镜只用 `lib/skills/spec.ts` 的标准表内写法，且必须与本镜的 `shotSize` / `cameraMove` 一致。
 - 主体短语逐字复用蓝图 `promptEn`：人物、载具、机甲、道具都一样。本镜出现的每一辆车都要在英文里出现，并与本镜 `characters` 里的载具卡对得上——漏掉一辆，这辆车在这一镜里就换了一辆。
+- **先锚定坐标系，再写动作**（`SPATIAL_ANCHOR_RULES`）：视频模型看不懂「前后左右」，是因为这些词在它那里至少有三种解法（画面左 / 车身左 / 车道左）。裸写 `left` / `right` / `front` / `behind` 一律不合格，首次出现必须带参照系——画面用 `frame left`，镜头纵深用 `toward / away from the camera`，物体用部位名词 `rear-right quarter panel` / `B-pillar`。
+- **多主体镜按三级写**：机位锚（镜头装在哪、朝哪、多高、多近，8~14 词，放第一句）→ 画面布局（谁在画面哪一侧、占画多少、谁挡住谁）→ 接触点 / 相对位移（「实体 + 部位 + 相对 + 实体 + 部位」，如 `the red car's nose level with the black car's rear door`）。例：`camera mounted low on the rear bumper of the black sedan, looking forward over both roofs, the red coupe's nose level with the black car's rear-left quarter panel, sliding out toward the adjacent lane`。
+- 「前后」在一镜里只许有一个含义：前进方向写 `ahead` / `behind along the road`，画面纵深写 `foreground` / `background`。混用就是「明明在超车、拍出来像在倒车」的直接原因。
+- 中文 `description` / `entryState` 与英文必须用同一套参照系：不许中文写「车尾左后方」、英文写成 `front right`。方位错位比词不达意更致命——成片会直接撞错位置。
 - 只写一个运镜；动作可以有多段，但必须是**一条**动作链，结尾用 `constant subtle motion, no frozen frame` 收口。
 - **`beatSheet` 的每一段都要在英文里有对应**，按时间顺序用并列的现在分词短语串起来，不写 `first` / `then` / `after that` / `finally`——这类时间副词会让模型把画面切成两段，接缝处就是抽帧般的抖动。例：`0~2s 抬眼看向塔顶 / 2~4s 伸手拧开灯罩 / 4~5s 火苗窜起` → `his eyes lifting to the tower top, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass`。
 - 每段节拍同时给 `actionEn`（8~14 词）：运行时会按 `from` / `to` 把它拼成 `0-2s: ...; 2-5s: ...` 的英文时间轴提交给视频模型，没有它这一段动作进不了成片。
@@ -116,6 +120,7 @@ node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 9. **主体卡是否齐**：本片需要被认出的每个视觉主体（人物、每一辆车、机甲、关键道具）是否都有卡与固定 `promptEn`？追逐双方的载具是不是各占一张？镜头 `characters` 里有没有写进本镜出现的载具卡（不写就没有参考图）？
 10. **每个出口是否可切**：最后一拍是不是落点？主体是否还在画面内？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
 11. **相邻两镜运动方向是否一致**？要越轴时是否先垫了中性机位？硬切的 `transitionReason` 是否写清承接了哪个相位或锚点？
+12. **空间是否无歧义**：多主体 / 载具镜有没有机位锚？每个方位词是否都带参照系？把提示词当读者读一遍——如果你需要猜「谁在谁的左边」，模型也一定会猜错，而且会猜成另一个方向。
 
 ## 资源索引
 

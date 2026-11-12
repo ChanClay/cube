@@ -73,7 +73,7 @@
 | 运动基调 | 蓝图给 `motion` / `motionEn`；分镜每镜都要体现，运行时再逐镜追加一次 `motionEn` | `StoryPlan.motion` / `buildVideoPrompt` |
 | 载具卡缺口 | 追逐 / 竞速且有驾驶主体时至少 2 张载具卡（被追的与追的各一张） | `requiredVehicleCards` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
-| `videoPrompt` | 英文，40~110 词（<30 或 >150 判不合格） | `PROMPT_*_WORDS` |
+| `videoPrompt` | 英文，40~125 词（<30 或 >170 判不合格） | `PROMPT_*_WORDS` |
 | `videoPrompt` 中文占比 | 汉字 / (字母 + 汉字) ≤ 12% | `isEnglishPrompt` |
 | 台词长度 | `min(60, max(16, duration × 4))` 字 | `narrationLimit` |
 | `beatSheet` | 首段 from=0、末段 to=duration、不断档不重叠、最多 8 段 | `normalizeBeatSheet` |
@@ -108,7 +108,7 @@
 | `prompt-not-english` | fatal | 提示词不是英文 | 重写为英文，角色名可保留汉字 |
 | `prompt-forbidden` | fatal | 含字幕/水印/分屏等 | 删除该段 |
 | `prompt-weak` | warn | <30 词，信息量不足 | 补环境、光线、质感 |
-| `prompt-long` | warn | >150 词，啰嗦 | 删重复与形容词堆砌 |
+| `prompt-long` | warn | >170 词，啰嗦 | 删重复与形容词堆砌 |
 | `duplicate-prompt` | warn | 与前面某镜完全相同 | 改动作与环境，不要复制 |
 | `prompt-camera-mismatch` | warn | 英文无对应运镜 | 补标准运镜词 |
 | `prompt-shot-size-mismatch` | warn | 英文无对应景别 | 补标准景别词 |
@@ -127,6 +127,8 @@
 | `exit-offscreen` | warn | 上一镜以「冲出画外 / 消失在雨幕 / 完全虚化」收尾 | 出口改到主体仍在画面内、动作可辨认的相位；或本镜写 `hiddenCut` 遮挡交接 |
 | `direction-flip` | warn | 相邻两镜运动方向相反（左→右 接 右→左） | 方向保持一致；要越轴先垫中性机位（迎面 / 背面 / 空镜），或让主体在画面内转向 |
 | `cut-undeclared` | warn | hard-cut 没写 `transitionReason` | 写清切点承接的是同一瞬间的动作相位，还是同一个背景锚点（同一条路 / 同一盏灯 / 同一个弯） |
+| `no-camera-anchor` | warn | 两辆以上载具同框，提示词却没写机位锚 | 第一句补「镜头装在哪 / 朝哪 / 多高」，如 `camera mounted low on the rear bumper of the black sedan, looking forward over both roofs` |
+| `bare-direction` | warn | 方位词没有参照系（`on the left` / `to the right`），模型分不清画面左 / 车身左 / 车道左 | 改成 `frame left`、`the black car's rear-left quarter panel`、`the left-hand lane`，见 `references/video-prompt.md` 第三节 |
 
 ## 六、app 侧入口（想把脚本跑成片时）
 
