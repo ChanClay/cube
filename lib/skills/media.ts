@@ -1,4 +1,5 @@
 import type { MediaInput, MediaType } from '@/lib/types';
+import { videoModelSpec } from '@/lib/video-models';
 
 export const MEDIA_LABEL: Record<MediaType, string> = {
   first_frame: '首帧图',
@@ -13,14 +14,14 @@ export const MEDIA_LABEL: Record<MediaType, string> = {
 export const MEDIA_HINT: Record<MediaType, string> = {
   first_frame: '严格作为视频第一帧，最多 1 张',
   last_frame: '严格作为视频最后一帧，最多 1 张',
-  reference_image: '角色 / 物品 / 风格参考，最多 10 张',
+  reference_image: '角色 / 物品 / 风格参考，最多 9 张',
   reference_video: '运镜 / 动作 / 编辑参考，最多 5 段，总时长 ≤ 15s',
   reference_audio: '音色 / 节拍参考，最多 5 段，总时长 ≤ 15s',
   file: 'docx / xlsx / pptx / pdf / txt / md，最多 1 个',
   link: '无需登录的公开网页，最多 1 个',
 };
 
-/** 顺序即 UI 下拉顺序 */
+/** 全部素材类型，顺序即 wan3.0 的 UI 下拉顺序 */
 export const MEDIA_TYPES: MediaType[] = [
   'first_frame',
   'last_frame',
@@ -31,10 +32,28 @@ export const MEDIA_TYPES: MediaType[] = [
   'link',
 ];
 
+/** HappyHorse 1.1 只接受图片素材 */
+export const IMAGE_MEDIA_TYPES: MediaType[] = [
+  'first_frame',
+  'last_frame',
+  'reference_image',
+];
+
+/**
+ * 这份剧本的视频模型能挂哪些素材。
+ *
+ * wan3.0 全模态（首尾帧 + 参考图 / 视频 / 音频 / 文档 / 网页）；
+ * HappyHorse 1.1 只吃图片，其余类型提交前会被 provider 摘掉，所以下拉里不给。
+ */
+export function mediaTypesFor(videoModel?: string | null): MediaType[] {
+  return videoModelSpec(videoModel).provider === 'wan' ? MEDIA_TYPES : IMAGE_MEDIA_TYPES;
+}
+
+/** 各类型的数量上限（取两个模型里更严的一档：参考图 9 张、首尾帧各 1 张） */
 const LIMITS: Record<MediaType, number> = {
   first_frame: 1,
   last_frame: 1,
-  reference_image: 10,
+  reference_image: 9,
   reference_video: 5,
   reference_audio: 5,
   file: 1,
@@ -82,7 +101,8 @@ export function validateMedia(media: MediaInput[]): string | null {
     return `参考素材最多 ${MAX_MEDIA_TOTAL} 个`;
   }
 
-  for (const type of MEDIA_TYPES) {
+  // 用 LIMITS 而不是 MEDIA_TYPES：旧剧本里可能有已经不可选的素材类型
+  for (const type of Object.keys(LIMITS) as MediaType[]) {
     const count = countMedia(media, type);
     if (count > LIMITS[type]) {
       return `${MEDIA_LABEL[type]}最多 ${LIMITS[type]} 个`;
@@ -132,7 +152,7 @@ export function isPublicOrigin(origin: string): boolean {
 
 /**
  * 从上一镜视频末帧抽出来的首帧（落在 /api/frames/），也就是「承接上一镜」的标志。
- * 服务端据此关掉这一镜的原生音频，避免画面接着上一镜、声音却从头开始。
+ * 这类镜头走 i2v，本镜不能再带参考图（会掉进 r2v，接缝就断了）。
  */
 export const isCarryFrameUrl = (url: string): boolean => url.includes('/api/frames/');
 

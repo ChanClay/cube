@@ -2,8 +2,8 @@
  * 画幅与画质：由每个项目在创建时选定（存在 projects 表），
  * 生成视频时按项目设置提交，不再写死在 .env 里。
  *
- * wan3.0 的 resolution 只认 480P / 720P / 1080P，ratio 是画幅比例。
- * 带首帧 / 尾帧的镜头由素材决定画面比例，服务端会强制用 adaptive。
+ * HappyHorse 1.1 的 resolution 只认 480P / 720P / 1080P，ratio 是画幅比例。
+ * 首帧模式（i2v）不接受 ratio：画幅由首帧决定，其余模式按这里选的比例提交。
  */
 
 export const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] as const;

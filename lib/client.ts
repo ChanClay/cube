@@ -1,3 +1,4 @@
+import type { VideoModelSpec } from './video-models';
 import type {
   ComposeResult,
   MediaInput,
@@ -22,15 +23,13 @@ export interface HealthInfo {
   compose: { ffmpeg: boolean; hint: string | null };
   llm: { configured: boolean; model: string; baseUrl: string };
   video: {
-    provider: string;
     configured: boolean;
-    model: string;
+    /** 创建剧本时可选的视频模型（含单镜时长区间），见 lib/video-models */
+    models: VideoModelSpec[];
     resolution: string;
     ratio: string;
-    audio: boolean;
     /** 硬切镜头是否用上一镜末帧（同景别当首帧，跨景别当风格参考图） */
     referencePrevFrame: boolean;
-    promptExtend: boolean;
   };
   pollIntervalMs: number;
 }
@@ -115,6 +114,8 @@ export interface ScriptBody {
   shotCount: number;
   /** shots 模式下为总时长，duration 模式下为用户设定的视频总时长 */
   duration: number;
+  /** 这次要用的视频模型（见 lib/video-models），决定单镜时长区间 */
+  videoModel?: string;
 }
 
 export interface VideoBody {
@@ -125,6 +126,8 @@ export interface VideoBody {
   ratio?: string;
   resolution?: string;
   media?: MediaInput[];
+  /** 剧本选定的视频模型：服务端据此选 provider 并夹时长 */
+  videoModel?: string;
 }
 
 export interface SaveScriptBody {

@@ -23,9 +23,9 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 | --- | --- |
 | 输入 | 短创意（默认）或小说/章节原文（≥200 字，≤30000 字） |
 | 分镜方式 | 按镜头数 `shots`（默认）/ 按总时长 `duration` |
-| 镜头数 | 1~12；`duration` 模式只给区间 `ceil(总时长/30)` ~ `min(12, 总时长/2)`，由 AI 按剧情决定 |
-| 单镜时长 | 2~30 秒，优先 ≤10 秒（一次生成越长越糊） |
-| 总时长 | 2~360 秒 |
+| 镜头数 | 1~12；`duration` 模式只给区间 `ceil(总时长/单镜上限)` ~ `min(12, 总时长/单镜下限)`，由 AI 按剧情决定 |
+| 单镜时长 | 随剧本选定的视频模型：HappyHorse 1.1 为 3~15 秒，wan3.0 为 2~30 秒；优先 ≤10 秒（一次生成越长越糊） |
+| 总时长 | 单镜下限 ~ 单镜上限 × 12（HappyHorse 3~180，wan3.0 2~360） |
 | 视觉风格 | 预设短标签（见 `lib/skills/style-presets.ts`）或用户自定义描述 |
 
 风格只给「电影感」四个字等于没给：必须展开成媒介 + 质感 + 光线 + 色调 + 颗粒，否则成片质感每次都在漂。预设标签到明细的映射在 `lib/skills/style-presets.ts` 的 `STYLE_PRESETS`，直接引用，不要另编一套。

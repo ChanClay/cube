@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { generateScript } from '@/lib/agents/storyboard';
 import { MAX_NOVEL_CHARS, MIN_NOVEL_CHARS } from '@/lib/skills/shot-plan';
+import { normalizeVideoModel } from '@/lib/video-models';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,8 @@ export async function POST(request: Request) {
   const duration = Number(payload.duration);
   /** 缺省仍是「按镜头数」，保持老调用方的行为 */
   const mode = payload.mode === 'duration' ? 'duration' : 'shots';
+  /** 创建剧本时选定的视频模型；老客户端没传时按旧剧本的 wan3.0 处理 */
+  const videoModel = normalizeVideoModel(payload.videoModel);
 
   try {
     const result = await generateScript({
@@ -51,6 +54,7 @@ export async function POST(request: Request) {
       mode,
       shotCount: Number.isFinite(shotCount) ? shotCount : undefined,
       duration: Number.isFinite(duration) ? duration : undefined,
+      videoModel,
     });
     return NextResponse.json({
       script: result.script,

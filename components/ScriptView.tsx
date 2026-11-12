@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import CastCards from './CastCards';
 import ShotCard from './ShotCard';
 import { isSameTakeShot, prevFrameCast } from '@/lib/skills/shot-media';
+import { videoModelSpec } from '@/lib/video-models';
 import type {
   Character,
   ComposeResult,
@@ -129,6 +130,8 @@ export default function ScriptView({
   /** 衔接结构：几处接帧、几处硬切。接帧的镜头拿不到卡片参考图，直接影响人物一致性 */
   const sameTakeCount = script?.shots.filter((shot) => isSameTakeShot(shot)).length ?? 0;
   const doneCount = script?.shots.filter((shot) => jobs[shot.id]?.status === 'succeeded').length ?? 0;
+  /** 剧本选定的视频模型：单镜区间 + 音轨能力，用于头部标签的悬浮说明 */
+  const modelSpec = videoModelSpec(script?.videoModel);
   const busyCount = Object.values(jobs).filter(
     (job) => job.status === 'queued' || job.status === 'running',
   ).length;
@@ -412,6 +415,15 @@ export default function ScriptView({
                   <span className="script-info-title">剧本信息</span>
                   <span className="script-info-hint">
                     <b>{script.style || '未设置画风'}</b>
+                    <span
+                      title={`视频模型：单镜 ${modelSpec.minShotSeconds}~${modelSpec.maxShotSeconds} 秒 · ${
+                        modelSpec.audio === 'always'
+                          ? '原生音轨（始终生成，不可关闭）'
+                          : '音轨可开关（VIDEO_AUDIO）'
+                      }`}
+                    >
+                      · {modelSpec.label}
+                    </span>
                     <span>· {(script.characters ?? []).length} 角色</span>
                     <span>· {(script.scenes ?? []).length} 场景</span>
                     <span>· {idea ? '有故事创意' : '无故事创意'}</span>
@@ -592,6 +604,7 @@ export default function ScriptView({
                 prevFrameRefEnabled={prevFrameRefEnabled}
                 onAbandon={onAbandonShot ? () => onAbandonShot(activeShot) : undefined}
                 hideIndex
+                videoModel={script.videoModel}
               />
             )}
           </>

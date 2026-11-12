@@ -1,9 +1,8 @@
 import {
   MAX_SHOT_COUNT,
-  MAX_SHOT_SECONDS,
   MIN_SHOT_COUNT,
-  MIN_SHOT_SECONDS,
-  PREFERRED_SHOT_SECONDS,
+  shotLimits,
+  type ShotLimits,
 } from '@/lib/skills/shot-plan';
 import { logAgentWarn } from '@/lib/services/logger';
 import { expandStyle } from '@/lib/skills/style-presets';
@@ -102,9 +101,11 @@ export interface PlanRequest {
   shotRange?: { min: number; max: number };
   /**
    * 总时长。小说改编不给这个值时，镜头数、每镜时长与总时长全部由模型决定
-   * （2~12 镜、每镜 2~30 秒、总时长 30~360 秒）。
+   * （镜数 1~12，单镜与总时长的区间由 videoModel 决定）。
    */
   totalDuration?: number;
+  /** 剧本选定的视频模型 id（见 lib/video-models），决定单镜时长区间 */
+  videoModel?: string;
 }
 
 /** 蓝图问题：非阻塞问题（镜数偏差）交给分镜阶段合并 / 拆分，阻塞问题触发重试 */
@@ -153,6 +154,7 @@ function humanizedMachine(idea: string, character: PlanCharacter): boolean {
 export function buildBlueprintSystemPrompt(
   role = '故事架构师 + 分镜串联导演',
   extraRules = '',
+  limits: ShotLimits = shotLimits(),
 ): string {
   return `你是「${role}」。上游只给一个故事创意，你要产出一份可拍摄蓝图：先确立故事内核与人物，再把故事拆成一条首尾相接的镜头状态链。
 你不写画面文案，也不写台词，只做结构与状态设计。
@@ -200,7 +202,7 @@ export function buildBlueprintSystemPrompt(
 11. 镜头语言成组：相邻镜头避免同样的景别 + 运镜，景别按「建立 → 逼近 → 细节 → 释放」的节奏推进。
 12. 情绪曲线：给每一镜 emotion（1~5）。不要一开场就 5，也不要全程 3；最高点落在全片后 1/3 的高潮镜。
 13. 镜头数量：给了明确的「镜头数量」就必须精确等于这个数量；给的是一段区间时，按「叙事断点」自己决定用几个镜头，必须落在区间内。串联性强的段落——同一空间、同一主体连续推进的追逐、穿行、对峙、连续对话——合成一个镜头，不要拆；只有换空间、跳时间、要藏起一个信息、情绪需要停顿时才切。不要为了凑数硬切，也不要把几个本该分开的节拍硬塞进一个镜头。
-14. duration 是这一镜的时长（秒，${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 的整数）。${PREFERRED_SHOT_SECONDS} 秒以内质量最稳，普通镜头尽量排在这个范围内；只有串联性强的连续段落才用 ${PREFERRED_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒的长镜，并且要确认这一段确实是一条不断开的动作链。用户给了总时长时，所有镜头 duration 之和必须等于它；没给总时长时，由你按剧情节奏决定总时长（30~360 秒），不要套用固定值。
+14. duration 是这一镜的时长（秒，${limits.minShot}~${limits.maxShot} 的整数，当前视频模型只吃这个区间）。${limits.preferredShot} 秒以内质量最稳，普通镜头尽量排在这个范围内；只有串联性强的连续段落才用 ${limits.preferredShot}~${limits.maxShot} 秒的长镜，并且要确认这一段确实是一条不断开的动作链。用户给了总时长时，所有镜头 duration 之和必须等于它；没给总时长时，由你按剧情节奏决定总时长（${limits.minTotal}~${limits.maxTotal} 秒），不要套用固定值。
 ${extraRules ? `\n${extraRules}\n` : ''}
 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
@@ -251,6 +253,7 @@ JSON 结构：
 }
 
 function buildUserPrompt(req: PlanRequest, correction?: string): string {
+  const limits = shotLimits(req.videoModel);
   const countLine = req.shotRange
     ? `镜头数量：由你根据故事节奏自行决定，${req.shotRange.min}~${req.shotRange.max} 个之间`
     : req.shotCount
@@ -259,11 +262,11 @@ function buildUserPrompt(req: PlanRequest, correction?: string): string {
 
   const totalLine = req.totalDuration
     ? `总时长：${req.totalDuration} 秒`
-    : '总时长：由你根据剧情节奏决定（30~360 秒），不要套用固定时长';
+    : `总时长：由你根据剧情节奏决定（${limits.minTotal}~${limits.maxTotal} 秒），不要套用固定时长`;
 
   const durationRule = req.totalDuration
-    ? `每一镜给出 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒的 duration，总和必须等于 ${req.totalDuration} 秒`
-    : `每一镜给出 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒的 duration；镜头数量、每镜时长与总时长都由你按剧情决定（${MIN_SHOT_COUNT}~${MAX_SHOT_COUNT} 镜）`;
+    ? `每一镜给出 ${limits.minShot}~${limits.maxShot} 秒的 duration，总和必须等于 ${req.totalDuration} 秒`
+    : `每一镜给出 ${limits.minShot}~${limits.maxShot} 秒的 duration；镜头数量、每镜时长与总时长都由你按剧情决定（${MIN_SHOT_COUNT}~${MAX_SHOT_COUNT} 镜）`;
 
   const tail = req.shotRange
     ? `请先定人物与场景，再设计一条连贯的状态链（镜头数量由你决定），${durationRule}，输出 JSON。`
@@ -309,11 +312,15 @@ function normalizeScene(raw: Record<string, unknown>): PlanScene | null {
   };
 }
 
-function normalizeBeat(raw: Record<string, unknown>, index: number): Beat {
+function normalizeBeat(
+  raw: Record<string, unknown>,
+  index: number,
+  limits: ShotLimits,
+): Beat {
   const durationRaw = Number(raw.duration);
   const duration =
     Number.isFinite(durationRaw) && durationRaw > 0
-      ? Math.round(clamp(durationRaw, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS))
+      ? Math.round(clamp(durationRaw, limits.minShot, limits.maxShot))
       : undefined;
   const emotionRaw = Number(raw.emotion);
   const emotion = Number.isFinite(emotionRaw)
@@ -344,11 +351,12 @@ export interface NormalizedPlan {
 export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPlan | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
+  const limits = shotLimits(req.videoModel);
 
   const beatsRaw = Array.isArray(obj.beats) ? obj.beats : [];
   const beats = beatsRaw
     .filter((b): b is Record<string, unknown> => !!b && typeof b === 'object')
-    .map((b, i) => normalizeBeat(b, i + 1));
+    .map((b, i) => normalizeBeat(b, i + 1, limits));
 
   if (beats.length === 0) return null;
 
@@ -476,7 +484,7 @@ async function requestPlan(
 ): Promise<NormalizedPlan | null> {
   try {
     const raw = await callChatJson({
-      system: buildBlueprintSystemPrompt(),
+      system: buildBlueprintSystemPrompt(undefined, '', shotLimits(req.videoModel)),
       user: buildUserPrompt(req, correction),
       temperature: 0.7,
       maxTokens: 4000,

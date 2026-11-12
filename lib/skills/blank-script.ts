@@ -1,4 +1,5 @@
 import type { Script, Shot } from '@/lib/types';
+import { DEFAULT_VIDEO_MODEL_ID } from '@/lib/video-models';
 
 /** 新建项目 / 新建剧本时的占位名，生成剧本时不会被模型标题覆盖 */
 export const NEW_SCRIPT_TITLE = '未命名剧本';
@@ -37,5 +38,6 @@ export function blankScript(title: string = NEW_SCRIPT_TITLE): Script {
     characters: [],
     scenes: [],
     shots: [],
+    videoModel: DEFAULT_VIDEO_MODEL_ID,
   };
 }

@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, type AuthUser, type HealthInfo } from '@/lib/client';
 
-const PROVIDER_LABEL: Record<string, string> = {
-  wan: '通义万相 Wan3.0',
+/** 顶栏展示当前可选的视频模型（每个剧本创建时自己选一个） */
+const videoModelText = (health: HealthInfo | null): string => {
+  if (!health) return '检测中';
+  return health.video.models.map((model) => model.label).join(' / ');
 };
 
 export const Logo = () => (
@@ -85,14 +87,14 @@ export default function TopBar({ health, children, homeLink = false }: Props) {
           <span className="dot" />
           剧本 <b>{health ? (health.llm.configured ? health.llm.model : '未配置 Key') : '检测中'}</b>
         </span>
-        <span className={`pill ${videoPillClass}`}>
+        <span
+          className={`pill ${videoPillClass}`}
+          title={health?.video.models
+            .map((model) => `${model.label}：${model.summary}`)
+            .join('\n')}
+        >
           <span className="dot" />
-          视频{' '}
-          <b>
-            {health
-              ? (PROVIDER_LABEL[health.video.provider] ?? health.video.provider)
-              : '检测中'}
-          </b>
+          视频 <b>{videoModelText(health)}</b>
         </span>
 
         {user && (

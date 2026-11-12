@@ -4,13 +4,15 @@ import { useEffect, useState } from 'react';
 import {
   MEDIA_HINT,
   MEDIA_LABEL,
-  MEDIA_TYPES,
   mediaSummary,
+  mediaTypesFor,
   validateMedia,
 } from '@/lib/skills/media';
 import { api } from '@/lib/client';
 import { TRANSITION_HINT, TRANSITION_LABEL } from '@/lib/skills/shot-media';
+import { shotLimits } from '@/lib/skills/shot-plan';
 import { shotSizeGap } from '@/lib/skills/spec';
+import { videoModelLabel } from '@/lib/video-models';
 import type {
   Character,
   MediaInput,
@@ -51,6 +53,8 @@ interface Props {
   onAbandon?: () => void;
   /** 序号已在镜头 tab 上显示过，卡片里不必重复 */
   hideIndex?: boolean;
+  /** 这份剧本选定的视频模型：决定时长输入框的取值范围（见 lib/video-models） */
+  videoModel?: string;
 }
 
 /** 与上一镜的衔接方式，顺序即下拉顺序 */
@@ -103,7 +107,11 @@ export default function ShotCard({
   prevFrameRefEnabled = true,
   onAbandon,
   hideIndex = false,
+  videoModel,
 }: Props) {
+  const limits = shotLimits(videoModel);
+  /** 这个模型能挂的素材类型：wan3.0 全模态，HappyHorse 只有图片 */
+  const mediaTypes = mediaTypesFor(videoModel);
   const [newType, setNewType] = useState<MediaType>('first_frame');
   const [newUrl, setNewUrl] = useState('');
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -157,11 +165,11 @@ export default function ShotCard({
     setDurationText(String(shot.duration));
   }, [shot.duration]);
 
-  /** wan3.0 支持 2~30 秒 */
+  /** 按剧本选定的模型夹时长：wan3.0 是 2~30 秒，HappyHorse 1.1 是 3~15 秒 */
   const commitDuration = () => {
     const value = Math.round(Number(durationText));
     const next = Number.isFinite(value) && value > 0
-      ? Math.min(30, Math.max(2, value))
+      ? Math.min(limits.maxShot, Math.max(limits.minShot, value))
       : shot.duration;
     setDurationText(String(next));
     if (next !== shot.duration) onChange({ duration: next });
@@ -274,12 +282,15 @@ export default function ShotCard({
           )}
           <span className="chip">{shot.shotSize}</span>
           <span className="chip">{shot.cameraMove}</span>
-          <label className="chip chip--time" title="镜头时长，2~30 秒，可单独调整">
+          <label
+            className="chip chip--time"
+            title={`镜头时长，${limits.minShot}~${limits.maxShot} 秒（${videoModelLabel(videoModel)}），可单独调整`}
+          >
             <input
               className="chip-input"
               type="number"
-              min={2}
-              max={30}
+              min={limits.minShot}
+              max={limits.maxShot}
               step={1}
               value={durationText}
               onChange={(e) => setDurationText(e.target.value)}
@@ -512,7 +523,7 @@ export default function ShotCard({
             onChange={(e) => setNewType(e.target.value as MediaType)}
             aria-label="素材类型"
           >
-            {MEDIA_TYPES.map((type) => (
+            {mediaTypes.map((type) => (
               <option key={type} value={type}>
                 {MEDIA_LABEL[type]}
               </option>
@@ -549,7 +560,7 @@ export default function ShotCard({
               <video src={job.videoUrl} controls playsInline preload="metadata" />
               <div className="video-bar">
                 <span>
-                  {job.provider} · {job.resolution} · {job.duration}s
+                  {videoModelLabel(videoModel)} · {job.resolution} · {job.duration}s
                   {job.media?.length ? ` · ${job.media.length} 个素材` : ''}
                 </span>
                 <a href={job.videoUrl} target="_blank" rel="noreferrer">
@@ -672,7 +683,7 @@ export default function ShotCard({
                   : !sameSceneAsPrev
                     ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
                     : exactCarry
-                      ? '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（wan3.0 首尾帧与参考图互斥）。关掉就是纯硬切'
+                      ? '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（首帧与参考图互斥）。关掉就是纯硬切'
                       : gapToPrev > 1 && !shot.hiddenCut
                         ? `景别从${prevShotSize}跳到${shot.shotSize}，上一镜末帧接不住：这一镜走角色卡 / 场景卡重新构图`
                         : '景别变了，末帧不能当首帧（那会变成一次推拉），只作风格参考图借光线与色调，角色卡照常传'

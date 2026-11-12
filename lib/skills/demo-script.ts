@@ -1,7 +1,9 @@
 import type { Script } from '@/lib/types';
+import { DEFAULT_VIDEO_MODEL_ID } from '@/lib/video-models';
 
 /** 未配置 LLM 时用于预览界面与联调视频链路（不调用任何模型接口） */
 export const demoScript: Script = {
+  videoModel: DEFAULT_VIDEO_MODEL_ID,
   title: '最后的灯塔',
   logline: '风暴之夜，守塔人点亮最后一束光，为失踪的渔船指引归途。',
   style: '电影感写实',

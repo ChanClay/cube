@@ -26,6 +26,7 @@ import {
   type VideoRatio,
   type VideoResolution,
 } from '@/lib/video-options';
+import { providerForVideoModel } from '@/lib/video-models';
 import type {
   Character,
   ComposeResult,
@@ -271,7 +272,7 @@ function ProjectPageInner() {
     /**
      * 自驱轮询：每次拿到结果都排下一轮，不靠「状态有没有变化」续命。
      *
-     * 早先是一发 setTimeout，指望 setJobs 换新对象触发 effect 重跑；但 wan 的 progress
+     * 早先是一发 setTimeout，指望 setJobs 换新对象触发 effect 重跑；但视频模型的 progress
      * 恒为 null，任务 running 期间前后字段完全一致，setJobs 会返回原引用 → effect 不重跑
      * → 单镜生成只轮询一次就断了（整片队列有自己的 waitForJob 循环，所以那边没事）。
      */
@@ -490,7 +491,7 @@ function ProjectPageInner() {
       const media = mediaOverride ?? live.media ?? [];
 
       /**
-       * 台词拼在画面描述后面：wan3.0 原生生成人声，但台词必须写进 prompt 才会说出来。
+       * 台词拼在画面描述后面：两个模型都要靠 prompt 里的台词才会真的开口说话。
        * 带上一镜末帧当参考图时再追一句限定：点名图里的人物 + 只借光线 / 色调，不改构图。
        */
       const prompt = buildVideoPrompt(basePrompt, live, media, refCast);
@@ -502,10 +503,12 @@ function ProjectPageInner() {
       }
 
       const now = Date.now();
+      /** 剧本创建时选定的模型，决定这次走哪个 provider */
+      const videoModel = scriptRef.current?.videoModel;
       const optimistic: VideoJob = {
         id: `local-${shot.id}-${now}`,
         shotId: shot.id,
-        provider: health?.video.provider ?? 'unknown',
+        provider: providerForVideoModel(videoModel),
         providerJobId: null,
         status: 'queued',
         progress: null,
@@ -529,6 +532,7 @@ function ProjectPageInner() {
           ratio: project?.ratio,
           resolution: project?.resolution,
           media,
+          videoModel,
         });
         setJobs((prev) => ({ ...prev, [shot.id]: job }));
         if (job.status === 'failed') {

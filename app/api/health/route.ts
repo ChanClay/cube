@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { ffmpegMissingMessage, resolveFfmpeg } from '@/lib/services/compose';
 import { config, llmConfigured, videoConfigured } from '@/lib/config';
 import { databaseInfo, getDb } from '@/lib/services/db';
-import { getProvider } from '@/lib/providers/video';
+import { VIDEO_MODELS } from '@/lib/video-models';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,15 +38,13 @@ export async function GET() {
       baseUrl: config.llm.baseUrl,
     },
     video: {
-      provider: getProvider().name,
       configured: videoConfigured(),
-      model: getProvider().model,
+      /** 创建剧本时可选的视频模型（含单镜时长区间） */
+      models: VIDEO_MODELS,
       resolution: config.video.resolution,
       ratio: config.video.ratio,
-      audio: config.video.audio,
       /** 硬切镜头是否会带上一镜末帧作为风格参考图 */
       referencePrevFrame: config.video.referencePrevFrame,
-      promptExtend: config.video.promptExtend,
     },
     pollIntervalMs: config.pollIntervalMs,
   });

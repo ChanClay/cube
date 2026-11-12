@@ -145,6 +145,8 @@ function IdeaPageInner() {
             formParams.mode === 'duration'
               ? formParams.totalDuration
               : formParams.shotCount * formParams.shotDuration,
+          // 创建时选定的视频模型：决定这次的时长规划区间，并写进剧本供生成视频用
+          videoModel: formParams.videoModel,
         });
 
         // 编辑时保留用户自己起的剧本名，不被模型标题冲掉
@@ -190,6 +192,8 @@ function IdeaPageInner() {
       if (mode === 'edit') {
         const customTitle = source?.title?.trim() ?? '';
         if (customTitle && customTitle !== NEW_SCRIPT_TITLE) next.title = customTitle;
+        // 示例本身与模型无关，编辑既有剧本时保留它原来选的模型
+        if (source?.script.videoModel) next.videoModel = source.script.videoModel;
       }
 
       const { script: saved } = await api.saveScript({
@@ -287,6 +291,7 @@ function IdeaPageInner() {
               initialStyle={source?.script.style ?? ''}
               initialShotCount={shots.length || undefined}
               initialShotDuration={shots[0]?.duration || undefined}
+              initialVideoModel={source?.script.videoModel}
               projectName={projectName}
               onProjectNameChange={setProjectName}
               onProjectNameCommit={() => void saveProjectName()}

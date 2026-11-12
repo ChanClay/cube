@@ -2,8 +2,8 @@ import {
   MAX_NOVEL_CHARS,
   MAX_SHOT_COUNT,
   MIN_SHOT_COUNT,
-  MAX_SHOT_SECONDS,
-  MIN_SHOT_SECONDS,
+  shotLimits,
+  type ShotLimits,
 } from '@/lib/skills/shot-plan';
 import { logAgentWarn, logEvent } from '@/lib/services/logger';
 import {
@@ -61,6 +61,7 @@ function buildAdaptUserPrompt(
   sourceBlock: string,
   correction?: string,
 ): string {
+  const limits = shotLimits(req.videoModel);
   const countLine = req.shotRange
     ? `镜头数量：由你根据故事节奏自行决定，${req.shotRange.min}~${req.shotRange.max} 个之间`
     : req.shotCount
@@ -69,11 +70,11 @@ function buildAdaptUserPrompt(
 
   const totalLine = req.totalDuration
     ? `总时长：${req.totalDuration} 秒`
-    : '总时长：由你根据剧情节奏决定（30~360 秒），不要套用固定时长';
+    : `总时长：由你根据剧情节奏决定（${limits.minTotal}~${limits.maxTotal} 秒），不要套用固定时长`;
 
   const durationRule = req.totalDuration
-    ? `每一镜给出 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒的 duration，总和必须等于 ${req.totalDuration} 秒；镜头数量按上面的要求执行。`
-    : `每一镜给出 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒的 duration；镜头数量、每镜时长与总时长都由你按剧情决定（${MIN_SHOT_COUNT}~${MAX_SHOT_COUNT} 镜，总时长 30~360 秒）。`;
+    ? `每一镜给出 ${limits.minShot}~${limits.maxShot} 秒的 duration，总和必须等于 ${req.totalDuration} 秒；镜头数量按上面的要求执行。`
+    : `每一镜给出 ${limits.minShot}~${limits.maxShot} 秒的 duration；镜头数量、每镜时长与总时长都由你按剧情决定（${MIN_SHOT_COUNT}~${MAX_SHOT_COUNT} 镜，总时长 ${limits.minTotal}~${limits.maxTotal} 秒）。`;
 
   const correctionBlock = correction
     ? `
@@ -142,31 +143,32 @@ const describeProblems = (problems: PlanProblem[]): string =>
 
 /**
  * 自动时长模式下不让模型跑偏：
- * 每镜收在 2~30 秒，总时长收在 30~360 秒；超出时按比例缩放，尽量保留原有节奏。
+ * 每镜收在该模型的单镜区间里，总时长收在模型的总时长区间里；
+ * 超出时按比例缩放，尽量保留原有节奏。
  */
-function normalizeAutoDurations(plan: StoryPlan): void {
+function normalizeAutoDurations(plan: StoryPlan, limits: ShotLimits): void {
   const beats = plan.beats;
   if (beats.length === 0) return;
 
   beats.forEach((beat) => {
-    beat.duration = Math.round(clamp(beat.duration ?? 5, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS));
+    beat.duration = Math.round(clamp(beat.duration ?? 5, limits.minShot, limits.maxShot));
   });
 
   const sum = beats.reduce((total, beat) => total + (beat.duration ?? 5), 0);
-  if (sum >= 30 && sum <= 360) return;
+  if (sum >= limits.minTotal && sum <= limits.maxTotal) return;
 
-  const target = Math.min(360, Math.max(30, sum));
+  const target = Math.min(limits.maxTotal, Math.max(limits.minTotal, sum));
   const scale = target / sum;
   let allocated = 0;
 
   beats.forEach((beat, index) => {
     if (index === beats.length - 1) {
       beat.duration = Math.round(
-        clamp(target - allocated, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS),
+        clamp(target - allocated, limits.minShot, limits.maxShot),
       );
     } else {
       beat.duration = Math.round(
-        clamp((beat.duration ?? 5) * scale, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS),
+        clamp((beat.duration ?? 5) * scale, limits.minShot, limits.maxShot),
       );
     }
     allocated += beat.duration;
@@ -215,7 +217,12 @@ export async function adaptStory(req: AdaptRequest): Promise<AdaptedStory | null
     );
   }
 
-  const system = buildBlueprintSystemPrompt('小说改编编剧 + 分镜串联导演', ADAPT_RULES);
+  const limits = shotLimits(req.videoModel);
+  const system = buildBlueprintSystemPrompt(
+    '小说改编编剧 + 分镜串联导演',
+    ADAPT_RULES,
+    limits,
+  );
   // idea 在改编链路里只用于题材判断（机甲 / 巨兽等主体词可能出现在原文任意位置），不截断
   const baseReq: PlanRequest = {
     idea: text,
@@ -223,6 +230,7 @@ export async function adaptStory(req: AdaptRequest): Promise<AdaptedStory | null
     shotCount: req.shotCount,
     shotRange: req.shotRange,
     totalDuration: req.totalDuration,
+    videoModel: req.videoModel,
   };
 
   const request = async (correction?: string) => {
@@ -265,7 +273,7 @@ export async function adaptStory(req: AdaptRequest): Promise<AdaptedStory | null
   }
 
   // 没给总时长时，镜头数、每镜时长、总时长都由模型决定，这里只做上下限收口
-  if (!req.totalDuration) normalizeAutoDurations(chosen.normalized.plan);
+  if (!req.totalDuration) normalizeAutoDurations(chosen.normalized.plan, limits);
 
   const treatment = extractTreatment(chosen.raw, chosen.normalized.plan);
   if (!treatment) return null;

@@ -89,6 +89,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: mediaError }, { status: 400 });
   }
 
+  // 剧本选定的视频模型：决定走哪个 provider，以及时长落在哪个区间
+  const videoModel = typeof payload.videoModel === 'string' ? payload.videoModel.trim() : '';
+
   const job = await startVideoJob({
     shotId,
     prompt,
@@ -96,6 +99,7 @@ export async function POST(request: Request) {
     resolution,
     ratio,
     media: dedupeMedia(media),
+    videoModel: videoModel || undefined,
   });
 
   return NextResponse.json({ job }, { status: job.status === 'failed' ? 200 : 201 });

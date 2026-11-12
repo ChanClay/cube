@@ -7,6 +7,17 @@ const bool = (v: string | undefined, fallback: boolean) => {
   return value === '1' || value === 'true' || value === 'yes' || value === 'on';
 };
 
+/**
+ * HappyHorse 1.1 把生成模式拆成了三个模型 ID：`…-t2v` / `…-i2v` / `…-r2v`。
+ * 这里用基础名派生，想换版本（比如 1.0）只改 VIDEO_MODEL_HAPPYHORSE 即可
+ * （旧的 VIDEO_MODEL 仍兼容，只作为 HappyHorse 的基础名）。
+ */
+const HAPPYHORSE_BASE =
+  trim(process.env.VIDEO_MODEL_HAPPYHORSE) || trim(process.env.VIDEO_MODEL) || 'happyhorse-1.1';
+
+const happyhorseModel = (mode: 't2v' | 'i2v' | 'r2v', envKey: string) =>
+  trim(process.env[envKey]) || `${HAPPYHORSE_BASE}-${mode}`;
+
 export const config = {
   port: Number(trim(process.env.PORT) || 4500),
   llm: {
@@ -33,17 +44,35 @@ export const config = {
     localize: bool(process.env.SCRIPT_LOCALIZE, true),
   },
   video: {
-    /** 通义万相 wan3.0（唯一支持的视频模型） */
+    /** 阿里云百炼（两个模型共用同一套 Key 与异步接口地址） */
     apiKey: trim(process.env.VIDEO_API_KEY),
     baseUrl: stripSlash(trim(process.env.VIDEO_BASE_URL)),
-    model: trim(process.env.VIDEO_MODEL),
+    /** HappyHorse 1.1：三种生成模式各自一个模型 ID */
+    happyhorse: {
+      /** 基础名（健康检查 / 日志展示用） */
+      base: HAPPYHORSE_BASE,
+      t2v: happyhorseModel('t2v', 'VIDEO_MODEL_T2V'),
+      i2v: happyhorseModel('i2v', 'VIDEO_MODEL_I2V'),
+      r2v: happyhorseModel('r2v', 'VIDEO_MODEL_R2V'),
+    },
+    /** 万相 wan3.0：单模型，文生 / 首尾帧 / 参考素材都走它 */
+    wan: {
+      model: trim(process.env.VIDEO_MODEL_WAN) || 'wan3.0-video',
+    },
     /** 兜底画质：实际按项目设置（创建项目时选择，默认 480p） */
     resolution: trim(process.env.VIDEO_RESOLUTION) || '480p',
-    /** 兜底画幅：实际按项目设置（默认 16:9），带首帧 / 尾帧的镜头自动用 adaptive */
+    /** 兜底画幅：实际按项目设置（默认 16:9）；HappyHorse 首帧模式的画幅跟随首帧 */
     ratio: trim(process.env.VIDEO_RATIO) || '16:9',
     defaultDuration: Number(trim(process.env.VIDEO_DURATION) || 5),
-    /** 是否输出有声视频（wan3.0 原生支持台词 / BGM / 音效） */
+    /** 是否给成片打「Happy Horse」右下角水印，默认关（wan3.0 没有这个开关） */
+    watermark: bool(process.env.VIDEO_WATERMARK, false),
+    /**
+     * 是否让 wan3.0 生成音轨（对应它的 audio 参数）。
+     * HappyHorse 1.1 是原生音视频联合生成，始终带音轨且没有开关，这里对它是无效的。
+     */
     audio: bool(process.env.VIDEO_AUDIO, true),
+    /** wan3.0 提示词智能扩写；HappyHorse 没有这个参数 */
+    promptExtend: bool(process.env.VIDEO_PROMPT_EXTEND, false),
     /**
      * 硬切镜头是否用上一镜末帧（默认开）。
      *
@@ -53,12 +82,6 @@ export const config = {
      * 拿去 A/B 的那次关掉即可（改 .env.local 后重启）。
      */
     referencePrevFrame: bool(process.env.VIDEO_REFERENCE_PREV_FRAME, true),
-    /**
-     * 提示词智能扩写。默认关：本项目的提示词是逐镜对齐过的（固定英文外貌 / 空间短语 +
-     * 标准景别运镜），交给服务端二次改写会被换成另一套景别与运镜，
-     * 人物长相和镜头语言都会漂移，运动也更难控。提示词很短时再打开它。
-     */
-    promptExtend: bool(process.env.VIDEO_PROMPT_EXTEND, false),
   },
   image: {
     /** 角色卡 / 场景卡配图用的文生图模型；默认复用视频的百炼 Key 与地址 */

@@ -1,3 +1,4 @@
+import type { VideoModelId } from './video-models';
 import type { VideoRatio, VideoResolution } from './video-options';
 
 /**
@@ -7,10 +8,12 @@ import type { VideoRatio, VideoResolution } from './video-options';
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
 /**
- * 万相 wan3.0 支持的多模态素材类型
- * - first_frame / last_frame：首帧、尾帧（与 reference_* 互斥）
- * - reference_image / reference_video / reference_audio：参考素材
- * - file / link：文档与网页链接（二者互斥）
+ * 素材类型表。
+ *
+ * 当前视频模型 HappyHorse 1.1 只接受图片：
+ * - first_frame / last_frame：帧图，i2v 只取其中一张当首帧（last_frame 仅作兜底）
+ * - reference_image：参考图，1~9 张走 r2v
+ * - reference_video / reference_audio / file / link：模型不支持，保留仅为兼容旧数据，提交前会被摘掉
  */
 export type MediaType =
   | 'first_frame'
@@ -34,7 +37,7 @@ export interface MediaInput {
    * 提交给 provider 前会被剥掉。
    *
    * 注意：不要用它做「末帧里有的人就删掉他的卡」这类身份去重——
-   * 整帧末帧在 wan3.0 眼里是环境 / 光线参考，不是某个具体人物，
+   * 整帧末帧在模型眼里是环境 / 光线参考，不是某个具体人物，
    * 删卡会让这一镜彻底失去身份参考。
    */
   name?: string;
@@ -87,7 +90,7 @@ export interface ShotBeat {
 /**
  * 这一镜与上一镜的衔接方式。由分镜阶段产出，素材决策据此分流。
  *
- * wan3.0 的首帧 / 尾帧与 reference_* 互斥，所以「要不要接帧」必须是一个
+ * 首帧与参考图互斥（i2v / r2v 是两个模型），所以「要不要接帧」必须是一个
  * 明确的叙事判断，不能靠「上一镜恰好有成品」临时决定：
  * - same-take：同一个动作被切成两镜（景别 / 机位都不许变）→ 抽上一镜末帧当首帧
  * - hard-cut：停机换了机位（换景别 / 换角度 / 正反打）→ 同景别才抽末帧当首帧；
@@ -183,6 +186,12 @@ export interface Script {
   /** 场景卡（旧剧本没有这个字段） */
   scenes?: Scene[];
   shots: Shot[];
+  /**
+   * 这份剧本用哪个视频模型生成（创建剧本时选定，见 lib/video-models）。
+   * 决定单镜时长区间与生成视频时走哪个 provider。
+   * 旧剧本没有这个字段，按 wan3.0 处理。
+   */
+  videoModel?: VideoModelId;
 }
 
 export interface VideoJob {

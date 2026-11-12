@@ -1,8 +1,9 @@
 import { config } from '@/lib/config';
 import { logVideoError } from '@/lib/services/logger';
-import { getProvider } from '@/lib/providers/video';
+import { getProvider, isVideoProviderName } from '@/lib/providers/video';
 import { getJob, listJobs, saveJob, updateJob } from '@/lib/services/store';
 import { isLocalVideoUrl, persistRemoteVideo } from '@/lib/services/videos';
+import { videoModelSpec } from '@/lib/video-models';
 import type { MediaInput, VideoJob } from '@/lib/types';
 
 export interface StartVideoJobInput {
@@ -13,6 +14,8 @@ export interface StartVideoJobInput {
   /** 画幅比例，来自项目设置；缺省回落到全局 VIDEO_RATIO */
   ratio?: string;
   media?: MediaInput[];
+  /** 这份剧本选定的视频模型（见 lib/video-models）；缺省按旧剧本的 wan3.0 */
+  videoModel?: string;
 }
 
 /** canceled 也算终态：放弃之后不再回查 provider，避免状态被覆盖回运行中 */
@@ -30,18 +33,25 @@ const needsPersist = (job: VideoJob) =>
   Date.now() - job.updatedAt < PERSIST_WINDOW_MS;
 
 export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob> {
-  const provider = getProvider();
+  /**
+   * 模型决定两件事：走哪个 provider，以及时长必须落在哪个区间。
+   * 剧本上的模型是创建时选定的，这里不再允许调用方临时换模型。
+   */
+  const spec = videoModelSpec(input.videoModel);
+  const provider = getProvider(spec.provider);
   const now = Date.now();
-  const duration =
+  const requested =
     Number(input.duration) > 0 ? Number(input.duration) : config.video.defaultDuration;
+  const duration = Math.min(
+    spec.maxShotSeconds,
+    Math.max(spec.minShotSeconds, Math.round(requested)),
+  );
   const resolution = input.resolution || config.video.resolution;
   const ratio = input.ratio || config.video.ratio;
   const media = input.media ?? [];
-
   /**
-   * 一律按全局开关出有声视频：接首帧的镜头也照常生成音轨。
-   * 以前这类镜头会被强制静音（怕音色 / 环境声接不上），但成片断音比轻微的音色
-   * 偏移更难接受，所以现在统一出声音，衔接好坏交给合成阶段处理。
+   * 只有 wan3.0 认这个开关；HappyHorse 1.1 原生联合生成音轨、没有 audio 参数，
+   * provider 会忽略它（音轨照样有，关不掉）。
    */
   const audio = config.video.audio;
 
@@ -132,7 +142,8 @@ export async function syncVideoJob(job: VideoJob): Promise<VideoJob> {
 
   if (!job.providerJobId) return job;
 
-  const provider = getProvider();
+  /** 必须按任务创建时用的 provider 回查，否则换模型后旧任务会被问错接口 */
+  const provider = getProvider(isVideoProviderName(job.provider) ? job.provider : 'wan');
   try {
     const state = await provider.getTask(job.providerJobId);
 

@@ -8,7 +8,7 @@ import type { MediaInput, Script, Shot, ShotTransition } from '@/lib/types';
  * 五条硬规则：
  * 1. 角色卡 / 场景卡是「设计参考」，一律作为 reference_image，
  *    不再当首帧——单人设定图当首帧会把整段视频压成同样的背景。
- * 2. 万相 wan3.0 不允许首尾帧与 reference_* 混用，
+ * 2. HappyHorse 1.1 把「首帧」和「参考图」拆成两个模型（i2v / r2v），
  *    所以每一镜只能在「接帧」和「参考图」之间二选一。
  * 3. 首帧的物理含义是本镜第 0 帧 = 上一镜最后一帧，只有摄影机没停机才成立，
  *    因此「当首帧」严格限定在同景别：same-take，或同场景同景别的 hard-cut。
@@ -28,7 +28,7 @@ export const TRANSITION_LABEL: Record<ShotTransition, string> = {
 
 export const TRANSITION_HINT: Record<ShotTransition, string> = {
   'same-take':
-    '同一动作被切成两镜：抽上一镜末帧当首帧，本镜不能再传参考图（wan3.0 首帧与参考图互斥）',
+    '同一动作被切成两镜：抽上一镜末帧当首帧，本镜不能再传参考图（首帧走 i2v、参考图走 r2v，二选一）',
   'hard-cut':
     '换角度 / 换景别：同景别才抽上一镜末帧当首帧；景别变了只当风格参考图，角色卡照常传',
   'time-jump': '时间或地点跳转：不接帧，走角色卡 / 场景卡参考图',
@@ -98,8 +98,8 @@ export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   return null;
 }
 
-/** 单次最多 10 张参考图（与 lib/skills/media.ts 的 reference_image 上限一致） */
-const MAX_REFERENCE_IMAGES = 10;
+/** 单次最多 9 张参考图（HappyHorse r2v 上限，与 lib/skills/media.ts 的 reference_image 上限一致） */
+const MAX_REFERENCE_IMAGES = 9;
 
 /** 全片角色卡 + 场景卡的配图地址，用来识别上一轮自动注入的素材 */
 export function autoCardUrls(script: Script | null): Set<string> {
@@ -248,14 +248,14 @@ export function resolveShotMedia(
     return true;
   });
 
-  // 用户手选首帧：完全不动。尾帧可以和承接帧共存（wan3.0 允许多帧），后面单独判断
+  // 用户手选首帧：完全不动。尾帧可能同时存在，但 i2v 只接受一张 first_frame，提交时尾帧会被丢弃
   if (rest.some((item) => item.type === 'first_frame')) {
     return finish(rest, null, [], cards.length);
   }
 
   const hasReferences = rest.some((item) => !isFrame(item.type));
 
-  // 首帧优先：承接上一镜时不能再塞参考图，否则 wan3.0 直接拒单
+  // 首帧优先：承接上一镜时不能再塞参考图，否则会被路由到 r2v，接缝就断了
   if (carryFrame && !hasReferences) {
     const injected: MediaInput = { ...carryFrame, auto: true };
     return finish([injected, ...rest], 'carry', [injected], cards.length);
@@ -290,7 +290,7 @@ export function resolveShotMedia(
    * 卡片和末帧都要，不去重。
    *
    * 曾经试过「末帧里已经出现的人就不再传他的角色卡」，结果整段视频彻底失去参考：
-   * 末帧是一张整帧场景图，wan3.0 对它更接近「环境 / 光线 / 风格参考」，
+   * 末帧是一张整帧场景图，模型对它更接近「环境 / 光线 / 风格参考」，
    * 不会把它当成某个具体人物；一旦删掉角色卡，身份参考就没了。
    * 重复人物改由提示词约束（只锁脸和服装、禁止 duplicate、单人镜头给人数上限）。
    */

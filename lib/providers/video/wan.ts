@@ -1,5 +1,6 @@
 import { config } from '@/lib/config';
 import type { JobStatus } from '@/lib/types';
+import { videoModelSpec } from '@/lib/video-models';
 import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
 
 /**
@@ -26,12 +27,19 @@ import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
  * }
  *
  * 素材规则：首帧/尾帧与 reference_* 互斥；file 与 link 互斥；单次最多 20 个素材。
+ *
+ * 与 HappyHorse 1.1 的差异（见 lib/video-models）：单镜 2~30 秒、支持尾帧与参考视频 /
+ * 音频 / 文档 / 网页、原生音轨与提示词扩写；带首帧 / 尾帧时画幅固定用 adaptive。
  */
 
 const DEFAULT_BASE_URL = 'https://cn-beijing.maas.qianwenaiapi.com/api/v1';
-const DEFAULT_MODEL = 'wan3.0-video';
+/** 时长区间与剧本规划共用同一份能力表，避免两处漂移 */
+const SPEC = videoModelSpec('wan3.0-video');
+const DEFAULT_MODEL = SPEC.id;
 const DEFAULT_RATIO = 'adaptive';
 const VALID_RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive']);
+const MIN_DURATION = SPEC.minShotSeconds;
+const MAX_DURATION = SPEC.maxShotSeconds;
 
 /** 统一成 480P / 720P / 1080P */
 function toResolution(resolution: string): string {
@@ -60,7 +68,7 @@ function toRatio(ratio: string): string {
 function toDuration(duration: number): number {
   const value = Math.round(Number(duration));
   if (!Number.isFinite(value) || value <= 0) return 5;
-  return Math.min(30, Math.max(2, value));
+  return Math.min(MAX_DURATION, Math.max(MIN_DURATION, value));
 }
 
 function mapStatus(raw: string | undefined): JobStatus {
@@ -71,6 +79,8 @@ function mapStatus(raw: string | undefined): JobStatus {
       return 'running';
     case 'SUCCEEDED':
       return 'succeeded';
+    case 'CANCELED':
+      return 'canceled';
     default:
       return 'failed';
   }
@@ -95,7 +105,7 @@ export class WanProvider implements VideoProvider {
   readonly name = 'wan';
 
   get model(): string {
-    return config.video.model || DEFAULT_MODEL;
+    return config.video.wan.model || DEFAULT_MODEL;
   }
 
   private get baseUrl(): string {
@@ -146,7 +156,7 @@ export class WanProvider implements VideoProvider {
         ratio,
         duration: toDuration(input.duration),
         prompt_extend: config.video.promptExtend,
-        // 单个任务可以覆盖全局开关；调用方不再按「是否接首帧」强制静音
+        // 单个任务可以覆盖全局开关
         audio: input.audio ?? config.video.audio,
       },
     };
@@ -214,7 +224,7 @@ export class WanProvider implements VideoProvider {
       progress: null,
       error:
         status === 'failed'
-          ? explainProviderError(data.output?.message ?? '', data.output?.code)
+          ? explainProviderError(data.output?.message ?? '', data.output?.code ?? '')
           : null,
     };
   }

@@ -3,15 +3,21 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   MAX_NOVEL_CHARS,
-  MAX_SHOT_SECONDS,
-  MAX_TOTAL_SECONDS,
+  MAX_SHOT_COUNT,
   MIN_NOVEL_CHARS,
-  MIN_SHOT_SECONDS,
-  MIN_TOTAL_SECONDS,
+  MIN_SHOT_COUNT,
+  shotLimits,
   splitByDuration,
   type ScriptMode,
 } from '@/lib/skills/shot-plan';
 import { STYLE_LABELS } from '@/lib/skills/style-presets';
+import {
+  DEFAULT_VIDEO_MODEL_ID,
+  VIDEO_MODELS,
+  normalizeVideoModel,
+  videoModelSpec,
+  type VideoModelId,
+} from '@/lib/video-models';
 
 /** 预设风格标签（明细描述见 lib/skills/style-presets，生成时自动展开） */
 const STYLES = STYLE_LABELS;
@@ -27,6 +33,8 @@ export interface ScriptParams {
   shotDuration: number;
   /** 按总时长模式下的视频总时长（秒） */
   totalDuration: number;
+  /** 这份剧本选定的视频模型，决定单镜时长区间与生成时的 provider */
+  videoModel: VideoModelId;
 }
 
 interface Props {
@@ -40,6 +48,8 @@ interface Props {
   initialShotCount?: number;
   /** 编辑既有剧本时回填的单镜头时长 */
   initialShotDuration?: number;
+  /** 编辑既有剧本时回填的视频模型 */
+  initialVideoModel?: string;
   /** 项目名（新建项目时就是在这里改）：传了才渲染这一行 */
   projectName?: string;
   onProjectNameChange?: (value: string) => void;
@@ -58,6 +68,7 @@ export default function IdeaForm({
   initialStyle = '',
   initialShotCount,
   initialShotDuration,
+  initialVideoModel,
   projectName,
   onProjectNameChange,
   onProjectNameCommit,
@@ -72,6 +83,9 @@ export default function IdeaForm({
   const [shotCount, setShotCount] = useState(initialShotCount ?? 6);
   const [shotDuration, setShotDuration] = useState(initialShotDuration ?? 5);
   const [totalDuration, setTotalDuration] = useState(60);
+  const [videoModel, setVideoModel] = useState<VideoModelId>(
+    normalizeVideoModel(initialVideoModel, DEFAULT_VIDEO_MODEL_ID),
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** 导入 txt / md：直接切到小说模式，超长由下方提示拦下 */
@@ -102,6 +116,21 @@ export default function IdeaForm({
     if (initialShotDuration) setShotDuration(initialShotDuration);
   }, [initialShotDuration]);
 
+  useEffect(() => {
+    if (initialVideoModel) setVideoModel(normalizeVideoModel(initialVideoModel));
+  }, [initialVideoModel]);
+
+  /** 模型决定单镜 / 总时长区间，切模型时把已经越界的值收回来 */
+  const limits = shotLimits(videoModel);
+  useEffect(() => {
+    setShotDuration((value) =>
+      Math.min(limits.maxShot, Math.max(limits.minShot, value)),
+    );
+    setTotalDuration((value) =>
+      Math.min(limits.maxTotal, Math.max(limits.minTotal, value)),
+    );
+  }, [limits.minShot, limits.maxShot, limits.minTotal, limits.maxTotal]);
+
   const ideaLength = idea.trim().length;
   const minChars = source === 'novel' ? MIN_NOVEL_CHARS : 4;
   const tooLong = source === 'novel' && ideaLength > MAX_NOVEL_CHARS;
@@ -118,18 +147,22 @@ export default function IdeaForm({
       shotCount,
       shotDuration,
       totalDuration,
+      videoModel,
     });
   };
 
-  const fillPercent = ((shotCount - 1) / 11) * 100;
-  const durationFillPercent = ((shotDuration - 2) / 28) * 100;
+  const fillPercent =
+    ((shotCount - MIN_SHOT_COUNT) / Math.max(1, MAX_SHOT_COUNT - MIN_SHOT_COUNT)) * 100;
+  const durationFillPercent =
+    ((shotDuration - limits.minShot) / Math.max(1, limits.maxShot - limits.minShot)) * 100;
 
   /** 总时长模式下的分镜预览：只给 AI 可选的镜数区间，由它按剧情决定切几刀 */
-  const split = splitByDuration(totalDuration);
-  // 总时长按 1 秒粒度调整：2 秒（单镜下限）~ 360 秒（12 镜 × 30 秒）
+  const split = splitByDuration(totalDuration, limits);
+  // 总时长按 1 秒粒度调整：下限 = 单镜下限，上限 = 单镜上限 × 最多镜数（随模型变化）
   const totalFillPercent =
-    ((totalDuration - MIN_TOTAL_SECONDS) / (MAX_TOTAL_SECONDS - MIN_TOTAL_SECONDS)) * 100;
+    ((totalDuration - limits.minTotal) / Math.max(1, limits.maxTotal - limits.minTotal)) * 100;
   const overallSeconds = mode === 'duration' ? split.total : shotCount * shotDuration;
+  const currentModel = videoModelSpec(videoModel);
 
   return (
     <div className="panel-body idea-form">
@@ -230,6 +263,31 @@ export default function IdeaForm({
 
         <aside className="idea-col-side">
           <div className="field">
+            <label className="field-label" htmlFor="video-model">
+              视频模型
+              <span className="field-hint">
+                单镜 {currentModel.minShotSeconds}~{currentModel.maxShotSeconds} 秒
+              </span>
+            </label>
+            <select
+              id="video-model"
+              className="select"
+              value={videoModel}
+              onChange={(e) => setVideoModel(normalizeVideoModel(e.target.value))}
+              disabled={loading}
+            >
+              {VIDEO_MODELS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label} · {model.summary}
+                </option>
+              ))}
+            </select>
+            <div className="field-hint" style={{ marginTop: 7 }}>
+              生成分镜时按这个模型的时长区间规划；剧本创建后固定，生成视频时按它选接口
+            </div>
+          </div>
+
+          <div className="field">
             <label className="field-label" htmlFor="style">
               视觉风格
             </label>
@@ -251,8 +309,9 @@ export default function IdeaForm({
             <div className="field">
               <div className="field-label">分镜与时长</div>
               <div className="field-hint">
-                由剧本 LLM 根据剧情决定镜头数量、每镜时长和总时长（1~12 镜、每镜 2~30 秒、
-                总时长 30~360 秒），用户不再手动指定。
+                由剧本 LLM 根据剧情决定镜头数量、每镜时长和总时长（
+                {MIN_SHOT_COUNT}~{MAX_SHOT_COUNT} 镜、每镜 {limits.minShot}~{limits.maxShot} 秒、
+                总时长 {limits.minTotal}~{limits.maxTotal} 秒），用户不再手动指定。
               </div>
             </div>
           ) : (
@@ -297,8 +356,8 @@ export default function IdeaForm({
                       <input
                         className="range"
                         type="range"
-                        min={1}
-                        max={12}
+                        min={MIN_SHOT_COUNT}
+                        max={MAX_SHOT_COUNT}
                         step={1}
                         value={shotCount}
                         style={{ '--fill': `${fillPercent}%` } as CSSProperties}
@@ -312,14 +371,16 @@ export default function IdeaForm({
                   <div className="field">
                     <div className="field-label">
                       单镜头时长
-                      <span className="field-hint">2~30 秒</span>
+                      <span className="field-hint">
+                        {limits.minShot}~{limits.maxShot} 秒
+                      </span>
                     </div>
                     <div className="range-row">
                       <input
                         className="range"
                         type="range"
-                        min={2}
-                        max={30}
+                        min={limits.minShot}
+                        max={limits.maxShot}
                         step={1}
                         value={shotDuration}
                         style={{ '--fill': `${durationFillPercent}%` } as CSSProperties}
@@ -343,8 +404,8 @@ export default function IdeaForm({
                       <input
                         className="range"
                         type="range"
-                        min={MIN_TOTAL_SECONDS}
-                        max={MAX_TOTAL_SECONDS}
+                        min={limits.minTotal}
+                        max={limits.maxTotal}
                         step={1}
                         value={totalDuration}
                         style={{ '--fill': `${totalFillPercent}%` } as CSSProperties}
@@ -354,7 +415,8 @@ export default function IdeaForm({
                       <span className="range-value">{totalDuration} 秒</span>
                     </div>
                     <div className="field-hint" style={{ marginTop: 7 }}>
-                      单镜 {MIN_SHOT_SECONDS}~{MAX_SHOT_SECONDS} 秒，由 AI 按剧情分配；串联性强的段落会合并成一个镜头
+                      单镜 {limits.minShot}~{limits.maxShot} 秒（{currentModel.label}
+                      ），由 AI 按剧情分配；串联性强的段落会合并成一个镜头
                     </div>
                   </div>
                 </>

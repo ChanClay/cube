@@ -3,12 +3,13 @@ import { logAgentWarn } from '@/lib/services/logger';
 import {
   fitDurations,
   splitByDuration,
+  shotLimits,
   MAX_SHOT_COUNT,
-  MAX_SHOT_SECONDS,
-  MIN_SHOT_SECONDS,
   type DurationSplit,
   type ScriptMode,
+  type ShotLimits,
 } from '@/lib/skills/shot-plan';
+import { normalizeVideoModel, type VideoModelId } from '@/lib/video-models';
 import { expandStyle } from '@/lib/skills/style-presets';
 import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
 import { adaptStory } from './adaptation';
@@ -55,6 +56,11 @@ export interface ScriptRequest {
   shotCount?: number;
   /** shots 模式下是总时长，duration 模式下是用户设定的视频总时长；source=novel 时忽略 */
   duration?: number;
+  /**
+   * 这次要用的视频模型（创建剧本时选定，见 lib/video-models）。
+   * 决定单镜 / 总时长的合法区间；缺省按旧剧本的 wan3.0 处理。
+   */
+  videoModel?: string;
 }
 
 export interface ScriptResult {
@@ -164,12 +170,13 @@ function buildUserPrompt(
    * - 蓝图给了每镜 duration → 逐条写进提示词，模型只负责照抄；
    * - 没有蓝图 → 只给区间和总和约束，让它自己按动作长度分配。
    */
+  const limits = shotLimits(req.videoModel);
   const isDurationMode = req.mode === 'duration';
   const timing =
     durations && durations.length === expectedShots
       ? `\n镜头时长分配（必须逐条对应，单位秒）：${durations.join(' / ')}`
       : isDurationMode
-        ? `\n每镜时长：在 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒之间自行分配，各镜 duration 之和必须等于 ${totalDuration} 秒`
+        ? `\n每镜时长：在 ${limits.minShot}~${limits.maxShot} 秒之间自行分配，各镜 duration 之和必须等于 ${totalDuration} 秒`
         : `\n各镜时长之和必须等于 ${totalDuration} 秒`;
 
   const head = `故事创意：
@@ -305,13 +312,17 @@ function parseBool(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function normalizeShot(raw: Record<string, unknown>, index: number): Shot {
+function normalizeShot(
+  raw: Record<string, unknown>,
+  index: number,
+  limits: ShotLimits,
+): Shot {
   const durationRaw = Number(raw.duration);
-  /** wan3.0 支持 2~30 秒，模型给出区间外的值就夹回来 */
+  /** 模型给出该模型区间外的值就夹回来；没给时按 5 秒兜底 */
   const duration =
-    Number.isFinite(durationRaw) && durationRaw >= MIN_SHOT_SECONDS
-      ? Math.round(clamp(durationRaw, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS))
-      : 5;
+    Number.isFinite(durationRaw) && durationRaw >= limits.minShot
+      ? Math.round(clamp(durationRaw, limits.minShot, limits.maxShot))
+      : Math.max(limits.minShot, Math.min(5, limits.maxShot));
   const narration = trimNarration(raw.narration, duration);
   const prompt = stripForbiddenPromptPhrases(
     str(raw.videoPrompt, str(raw.description)),
@@ -356,8 +367,16 @@ function normalizeShot(raw: Record<string, unknown>, index: number): Shot {
 /**
  * @param fallbackStyle 模型没写 style 时的兜底（用户填的风格或默认值）
  * @param userStyle 用户显式填写的风格；填了就优先用它
+ * @param limits 当前视频模型的时长边界
+ * @param videoModel 这一份剧本使用的视频模型，写进 Script 供生成视频时路由
  */
-function normalizeScript(raw: unknown, fallbackStyle: string, userStyle?: string): Script {
+function normalizeScript(
+  raw: unknown,
+  fallbackStyle: string,
+  userStyle: string | undefined,
+  limits: ShotLimits,
+  videoModel: VideoModelId,
+): Script {
   if (!raw || typeof raw !== 'object') throw new Error('模型返回内容不是对象');
   const obj = raw as Record<string, unknown>;
   const shotsRaw = Array.isArray(obj.shots) ? obj.shots : [];
@@ -365,7 +384,7 @@ function normalizeScript(raw: unknown, fallbackStyle: string, userStyle?: string
 
   const shots = shotsRaw
     .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
-    .map((s, i) => normalizeShot(s, i + 1));
+    .map((s, i) => normalizeShot(s, i + 1, limits));
 
   shots.forEach((s, i) => (s.index = i + 1));
 
@@ -407,6 +426,7 @@ function normalizeScript(raw: unknown, fallbackStyle: string, userStyle?: string
     characters,
     scenes,
     shots,
+    videoModel,
   };
 }
 
@@ -547,7 +567,11 @@ function reconcileReferences(script: Script, plan: StoryPlan | null): void {
 }
 
 /** 蓝图里各镜的时长。模型给的秒数都合法、且总和与总时长相差不多时才算可用 */
-function beatDurations(beats: Beat[], totalDuration: number): number[] | null {
+function beatDurations(
+  beats: Beat[],
+  totalDuration: number,
+  limits: ShotLimits,
+): number[] | null {
   if (beats.length === 0) return null;
 
   const list = beats.map((b) => b.duration);
@@ -556,8 +580,8 @@ function beatDurations(beats: Beat[], totalDuration: number): number[] | null {
       (d) =>
         typeof d !== 'number' ||
         !Number.isFinite(d) ||
-        d < MIN_SHOT_SECONDS ||
-        d > MAX_SHOT_SECONDS,
+        d < limits.minShot ||
+        d > limits.maxShot,
     )
   ) {
     return null;
@@ -569,51 +593,50 @@ function beatDurations(beats: Beat[], totalDuration: number): number[] | null {
   if (Math.abs(sum - totalDuration) > Math.max(2, beats.length)) return null;
 
   const last = durations[durations.length - 1] + (totalDuration - sum);
-  if (last < MIN_SHOT_SECONDS || last > MAX_SHOT_SECONDS) return null;
+  if (last < limits.minShot || last > limits.maxShot) return null;
 
   durations[durations.length - 1] = last;
   return durations;
 }
 
-/** 总时长模式下的预算：AI 可选的镜数区间、蓝图给出的每镜秒数（可能没有）、总时长 */
+/** 总时长模式下的预算：AI 可选的镜数区间、蓝图给出的每镜秒数（可能没有）、总时长与模型边界 */
 interface DurationBudget {
   split: DurationSplit;
   /** 蓝图给出的每镜秒数；没有蓝图或时长不规范时为 null，由模型自己分配 */
   durations: number[] | null;
   total: number;
+  limits: ShotLimits;
 }
 
 /**
  * 动态模式下模型自己给的秒数：总和接近总时长就微调最后一镜，
  * 否则整体摊平。这样 AI 排的节奏（长镜头 / 快切）不会被打乱。
  */
-function reconcileDurations(shots: Shot[], total: number): number[] {
-  const list = shots.map((s) =>
-    Math.round(clamp(s.duration, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS)),
-  );
+function reconcileDurations(shots: Shot[], total: number, limits: ShotLimits): number[] {
+  const list = shots.map((s) => Math.round(clamp(s.duration, limits.minShot, limits.maxShot)));
   const sum = list.reduce((a, b) => a + b, 0);
   const tolerance = Math.max(2, Math.ceil(total * 0.1));
 
   if (Math.abs(sum - total) <= tolerance) {
     const last = list[list.length - 1] + (total - sum);
-    if (last >= MIN_SHOT_SECONDS && last <= MAX_SHOT_SECONDS) {
+    if (last >= limits.minShot && last <= limits.maxShot) {
       list[list.length - 1] = last;
       return list;
     }
   }
-  return fitDurations(total, shots.length);
+  return fitDurations(total, shots.length, limits);
 }
 
 /**
  * 把模型返回的镜头数与总时长对齐。
  *
- * 镜数由模型决定，这里只夹上限（单镜不能短于 2 秒）：蓝图给了每镜秒数就照抄，
+ * 镜数由模型决定，这里只夹上限（单镜不能短于模型下限）：蓝图给了每镜秒数就照抄，
  * 否则保留模型自己排的节奏——长镜头和快切都是它的叙事判断，不该被摊平。
  */
 function applyDurationBudget(script: Script, budget: DurationBudget): void {
-  const { durations, total } = budget;
-  // 单镜最少 2 秒，决定了这条总时长最多能分几镜
-  const ceiling = clamp(Math.floor(total / MIN_SHOT_SECONDS), 1, MAX_SHOT_COUNT);
+  const { durations, total, limits } = budget;
+  // 单镜最短时长，决定了这条总时长最多能分几镜
+  const ceiling = clamp(Math.floor(total / limits.minShot), 1, MAX_SHOT_COUNT);
   if (script.shots.length > ceiling) {
     script.shots = script.shots.slice(0, ceiling);
   }
@@ -621,7 +644,7 @@ function applyDurationBudget(script: Script, budget: DurationBudget): void {
   const targets =
     durations && script.shots.length === durations.length
       ? durations
-      : reconcileDurations(script.shots, total);
+      : reconcileDurations(script.shots, total, limits);
 
   // reconcileDurations 在镜头过多时会把数组压短，多出来的镜头只能丢掉，总时长优先
   script.shots = script.shots.slice(0, targets.length);
@@ -635,27 +658,27 @@ function applyDurationBudget(script: Script, budget: DurationBudget): void {
  * 按镜头数模式：用户期望的总时长 = 镜头数 × 单镜时长，
  * 把模型给出的偏差吸收到末尾镜头，前面的节奏尽量不动。
  */
-function alignTotalDuration(script: Script, total: number): void {
+function alignTotalDuration(script: Script, total: number, limits: ShotLimits): void {
   if (script.shots.length === 0) return;
 
   const target = clamp(
     Math.round(total),
-    script.shots.length * MIN_SHOT_SECONDS,
-    script.shots.length * MAX_SHOT_SECONDS,
+    script.shots.length * limits.minShot,
+    script.shots.length * limits.maxShot,
   );
   let diff = target - script.shots.reduce((sum, shot) => sum + shot.duration, 0);
   if (diff === 0) return;
 
   for (let i = script.shots.length - 1; i >= 0 && diff !== 0; i -= 1) {
     const shot = script.shots[i];
-    const next = Math.round(clamp(shot.duration + diff, MIN_SHOT_SECONDS, MAX_SHOT_SECONDS));
+    const next = Math.round(clamp(shot.duration + diff, limits.minShot, limits.maxShot));
     diff -= next - shot.duration;
     shot.duration = next;
   }
 
   // 靠末尾镜头吸收不完（相差过大）时整体摊平
   if (diff !== 0) {
-    const fitted = fitDurations(target, script.shots.length);
+    const fitted = fitDurations(target, script.shots.length, limits);
     script.shots = script.shots.slice(0, fitted.length);
     script.shots.forEach((shot, i) => (shot.duration = fitted[i]));
   }
@@ -664,7 +687,7 @@ function alignTotalDuration(script: Script, total: number): void {
 /**
  * same-take 的成本上限：抽上一镜末帧当首帧的镜头不允许太长。
  * 一次生成 10 秒的连续动作时，末帧离这一镜的起点已经很远，接帧省不了事，
- * 反而白白丢掉角色卡参考图（wan3.0 首帧与参考图互斥）。
+ * 反而白白丢掉角色卡参考图（首帧与参考图互斥）。
  */
 const MAX_SAME_TAKE_SECONDS = 8;
 
@@ -813,6 +836,7 @@ function finalizeScript(
   expectedShots: number,
   budget: DurationBudget | null,
   totalDuration: number,
+  limits: ShotLimits,
 ): void {
   applyPlanFoundation(script, plan);
 
@@ -822,7 +846,7 @@ function finalizeScript(
   script.shots.forEach((shot, i) => (shot.index = i + 1));
 
   if (budget) applyDurationBudget(script, budget);
-  else alignTotalDuration(script, totalDuration);
+  else alignTotalDuration(script, totalDuration, limits);
 
   // 镜头时长被预算改过之后时间轴要跟着重算，否则「0~5 秒」对不上一个 3 秒的镜头
   script.shots.forEach((shot) => {
@@ -885,7 +909,8 @@ function mergeRepairedShots(
   script: Script,
   rawShots: Record<string, unknown>[],
 ): Script | null {
-  const shots = rawShots.map((raw, i) => normalizeShot(raw, i + 1));
+  const limits = shotLimits(script.videoModel);
+  const shots = rawShots.map((raw, i) => normalizeShot(raw, i + 1, limits));
   if (shots.length === 0) return null;
 
   if (shots.length === script.shots.length) {
@@ -978,12 +1003,15 @@ async function requestStoryboard(
 ): Promise<Script> {
   const system = buildSystemPrompt();
   const user = buildUserPrompt(req, expectedShots, totalDuration, plan, durations);
+  const limits = shotLimits(req.videoModel);
+  /** 剧本上记录的模型必须是规范化后的 id，生成视频时按它路由 provider */
+  const videoModel = normalizeVideoModel(req.videoModel);
   // 每镜多了秒级节奏，输出比以前长；预算跟随 LLM_MAX_TOKENS，被截断时 callChatJson 还会放大重试
   const budget = Math.max(config.llm.maxTokens, 6000);
   const first = await callChatJson({ system, user, temperature: 0.8, maxTokens: budget });
 
   try {
-    return normalizeScript(first, style, userStyle);
+    return normalizeScript(first, style, userStyle, limits, videoModel);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!/没有生成任何分镜|不是对象/.test(message)) throw err;
@@ -999,7 +1027,7 @@ async function requestStoryboard(
       temperature: 0.7,
       maxTokens: budget,
     });
-    return normalizeScript(retry, style, userStyle);
+    return normalizeScript(retry, style, userStyle, limits, videoModel);
   }
 }
 
@@ -1011,6 +1039,9 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
   const isNovel = req.source === 'novel';
   const mode: ScriptMode = req.mode === 'duration' ? 'duration' : 'shots';
   const style = req.style || '电影感写实';
+  /** 这一份剧本的模型与它的时长边界（wan3.0 2~30 / HappyHorse 3~15） */
+  const videoModel = normalizeVideoModel(req.videoModel);
+  const limits = shotLimits(videoModel);
 
   /** 总时长模式的拆解结果；null 表示「按镜头数量」或「小说自动决定」 */
   let budget: DurationBudget | null = null;
@@ -1024,16 +1055,16 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
    */
   if (!isNovel) {
     if (mode === 'duration') {
-      const split = splitByDuration(req.duration ?? MAX_SHOT_SECONDS);
+      const split = splitByDuration(req.duration ?? limits.maxShot, limits);
       totalDuration = split.total;
-      budget = { split, durations: null, total: split.total };
+      budget = { split, durations: null, total: split.total, limits };
     } else {
       plannedShotCount = clamp(Math.round(req.shotCount ?? 6), 1, MAX_SHOT_COUNT);
-      // 上限对齐 wan3.0 单镜 30 秒 × 最多 12 镜
+      // 上限对齐该模型的单镜上限 × 最多 12 镜
       totalDuration = clamp(
         Math.round(req.duration ?? plannedShotCount * 5),
-        5,
-        MAX_SHOT_SECONDS * MAX_SHOT_COUNT,
+        limits.minTotal,
+        limits.maxTotal,
       );
     }
   }
@@ -1055,6 +1086,7 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
       text: req.idea,
       idea: req.idea.slice(0, 200),
       style,
+      videoModel,
       // 不传 shotCount / shotRange / totalDuration：让剧本模型自己决定
     });
 
@@ -1076,6 +1108,7 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
       shotCount: plannedShotCount ?? undefined,
       shotRange,
       totalDuration,
+      videoModel,
     });
 
     if (!plan) {
@@ -1099,7 +1132,7 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
 
   // 蓝图给了每镜时长就照抄，节奏由它决定；没给则由模型自己分配
   if (budget && plan) {
-    budget.durations = beatDurations(plan.beats, budget.total);
+    budget.durations = beatDurations(plan.beats, budget.total, limits);
   }
   if (!isNovel) timingDurations = budget?.durations ?? null;
 
@@ -1113,7 +1146,8 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
     style,
     req.style,
   );
-  finalizeScript(script, plan, expectedShots, budget, totalDuration);
+  finalizeScript(script, plan, expectedShots, budget, totalDuration, limits);
+  script.videoModel = videoModel;
 
   // 第三步：中文定稿后单独翻英文提示词，保证英文严格对应中文
   script = await localizeScriptPrompts(script, plan);
@@ -1122,7 +1156,7 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
   script = await reviewAndRepair(script, plan, expectedShots, style);
 
   // 修复稿可能改了镜数 / 引用，重新收口一次
-  finalizeScript(script, plan, expectedShots, budget, totalDuration);
+  finalizeScript(script, plan, expectedShots, budget, totalDuration, limits);
 
   const remaining = auditScript(script, { expectedShots });
   if (remaining.length > 0) {

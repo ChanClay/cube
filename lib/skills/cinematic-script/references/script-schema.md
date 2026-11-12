@@ -51,9 +51,9 @@
 | 项 | 约束 | 代码位置 |
 | --- | --- | --- |
 | 镜头数 | 1~12 | `MAX_SHOT_COUNT` |
-| 单镜时长 | 2~30 秒整数，优先 ≤10 | `MIN/MAX_SHOT_SECONDS`、`PREFERRED_SHOT_SECONDS` |
-| 总时长 | 2~360 秒；镜头 duration 之和必须等于目标总时长 | `MAX_TOTAL_SECONDS` |
-| `duration` 模式镜数 | 只给区间 `ceil(总时长/30)` ~ `min(12, 总时长/2)`，由 AI 按剧情决定 | `splitByDuration` |
+| 单镜时长 | 随剧本视频模型：HappyHorse 3~15 秒 / wan3.0 2~30 秒，整数，优先 ≤10 | `lib/video-models.ts` + `shotLimits(videoModel)` |
+| 总时长 | 单镜下限 ~ 单镜上限 × 12；镜头 duration 之和必须等于目标总时长 | `shotLimits(videoModel).minTotal/maxTotal` |
+| `duration` 模式镜数 | 只给区间 `ceil(总时长/单镜上限)` ~ `min(12, 总时长/单镜下限)`，由 AI 按剧情决定 | `splitByDuration(total, limits)` |
 | 角色卡 | 2~4 个，`promptEn` 20~35 词 | `continuity.ts` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
 | `videoPrompt` | 英文，40~110 词（<30 或 >150 判不合格） | `PROMPT_*_WORDS` |

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-/** 生成好的视频落盘目录（已 gitignore），避免通义万相 24 小时的临时链接失效 */
+/** 生成好的视频落盘目录（已 gitignore），避免视频模型 24 小时的临时链接失效 */
 export const VIDEO_DIR = path.join(process.cwd(), '.data', 'videos');
 
 const LOCAL_PREFIX = '/api/videos/';
@@ -25,7 +25,7 @@ export function localVideoPath(url: string): string {
 
 /**
  * 把 provider 返回的临时地址下载到本地，返回站内永久地址。
- * 通义万相的 video_url 只保留 24 小时，不转存的话第二天链接就全失效了。
+ * 视频模型的 video_url 只保留 24 小时，不转存的话第二天链接就全失效了。
  *
  * 下载失败直接抛错，由调用方决定是否降级（保留临时地址）。
  */
