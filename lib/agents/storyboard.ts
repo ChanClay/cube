@@ -55,11 +55,6 @@ export interface ScriptRequest {
   shotCount?: number;
   /** shots 模式下是总时长，duration 模式下是用户设定的视频总时长；source=novel 时忽略 */
   duration?: number;
-  /**
-   * 仅 duration 模式生效，默认 true：
-   * true=镜头数取最少、每镜尽量凑满 10 秒（一次生成越长越不流畅）；false=镜数由 AI 按剧情决定（只约束区间）。
-   */
-  ensureCompleteness?: boolean;
 }
 
 export interface ScriptResult {
@@ -88,12 +83,13 @@ function buildSystemPrompt(): string {
    判断标准：摄影机有没有停机。还在同一次拍摄里才是 same-take，停机换机位就是 hard-cut。
    transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take。
    同时给出 referencePrevFrame（这一镜要不要用上一镜的最后一帧）：只有「同场景 + 同景别的 hard-cut」写 true——本镜第一帧与上一镜最后一帧完全相同，接缝不跳，代价是本镜传不了卡片。景别变了就别写 true：画面要重新构图，上一镜的构图接不住，交给角色卡 / 场景卡。time-jump、换场景一律写 false。拿不准时写 false。
+   镜数跟着「叙事断点」走，不跟着时长或景别走：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、连续对话——必须放进一个镜头，用 beatSheet 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要一个停顿。不要为了换景别、换机位、凑时长而切镜。
    一镜到底优先用一个镜头承载，不要拆：镜头内的景别变化靠 cameraMove（缓慢推近 / 缓慢拉远 / 跟随）+ beatSheet 表达。只有时长超过 8 秒、必须分段生成时才拆成多镜，且拆点两侧的景别、机位、人物姿势必须完全一致。
    确实要在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位：人物走过柱子、门框、走廊，镜头甩进暗处，雨幕或前景物件盖住画面。这时写 hiddenCut: true，景别可以随便跨，系统会把上一镜末帧降级成风格参考图而不会把它当首帧。
 
 
 【三、镜头语言】
-7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
+7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜。每个镜头承担的是一条连续的动作链（同一个主体在同一空间里连着做的一串事），不是一堆互不相干的动作；画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
 8. ${SHOT_LANGUAGE_RULES}
 9. 角色一致性：同一角色全片复用蓝图给出的英文外貌短语（promptEn），服装、发型、装甲涂装、机械部件与道具不得变化。没有蓝图时自拟角色卡：先判断主体类型——人类写年龄感、发色、服装；机甲 / 机器人 / 巨兽等非人主体只写机型与体量、装甲材质与涂装、头部传感器、关节液压、武器与配色，不要给它写年龄、发型、上衣与鞋。
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
@@ -165,8 +161,8 @@ function buildUserPrompt(
 ): string {
   /**
    * 总时长模式下时长是要对齐的：
-   * - 时长已经算好（保证完整性 / 蓝图给了 duration）→ 逐条写进提示词，模型只负责照抄；
-   * - 镜数由 AI 决定时算不出来 → 只给区间和总和约束，让它自己分配。
+   * - 蓝图给了每镜 duration → 逐条写进提示词，模型只负责照抄；
+   * - 没有蓝图 → 只给区间和总和约束，让它自己按动作长度分配。
    */
   const isDurationMode = req.mode === 'duration';
   const timing =
@@ -191,7 +187,7 @@ ${req.idea}
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作？
 5) 角色名 / 场景名是否逐字来自上方清单？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
-7) 每个 videoPrompt 是否逐项对应本镜 description：主体、动作、道具、环境、光线都在英文里，且没有中文没写过的元素？
+7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？
 8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
 9) 所有 duration 之和是否等于 ${totalDuration} 秒？`;
 
@@ -579,14 +575,10 @@ function beatDurations(beats: Beat[], totalDuration: number): number[] | null {
   return durations;
 }
 
-/** 总时长模式下的拆解结果：镜数、每镜秒数（可能未知）、总时长 */
+/** 总时长模式下的预算：AI 可选的镜数区间、蓝图给出的每镜秒数（可能没有）、总时长 */
 interface DurationBudget {
   split: DurationSplit;
-  /** 动态模式下镜数未知，只有区间 */
-  dynamic: boolean;
-  /** 固定镜数（dynamic=false 时有效） */
-  shotCount: number | null;
-  /** 每镜目标秒数；动态模式且蓝图没给时长时为 null（由 AI 分配） */
+  /** 蓝图给出的每镜秒数；没有蓝图或时长不规范时为 null，由模型自己分配 */
   durations: number[] | null;
   total: number;
 }
@@ -613,28 +605,25 @@ function reconcileDurations(shots: Shot[], total: number): number[] {
 }
 
 /**
- * 把模型返回的镜头数与总时长对齐：
- * - 固定镜数（保证完整性）：多出来的镜头直接截掉，秒数照计划落地；
- * - 动态镜数：只夹上限，秒数尽量保留模型自己的分配。
+ * 把模型返回的镜头数与总时长对齐。
+ *
+ * 镜数由模型决定，这里只夹上限（单镜不能短于 2 秒）：蓝图给了每镜秒数就照抄，
+ * 否则保留模型自己排的节奏——长镜头和快切都是它的叙事判断，不该被摊平。
  */
 function applyDurationBudget(script: Script, budget: DurationBudget): void {
-  const { durations, dynamic, total } = budget;
+  const { durations, total } = budget;
   // 单镜最少 2 秒，决定了这条总时长最多能分几镜
   const ceiling = clamp(Math.floor(total / MIN_SHOT_SECONDS), 1, MAX_SHOT_COUNT);
-  const limit = durations && !dynamic ? Math.min(durations.length, ceiling) : ceiling;
-
-  if (script.shots.length > limit) {
-    script.shots = script.shots.slice(0, limit);
+  if (script.shots.length > ceiling) {
+    script.shots = script.shots.slice(0, ceiling);
   }
 
   const targets =
     durations && script.shots.length === durations.length
       ? durations
-      : dynamic
-        ? reconcileDurations(script.shots, total)
-        : fitDurations(total, script.shots.length);
+      : reconcileDurations(script.shots, total);
 
-  // fitDurations 在镜头过多时会把数组压短，多出来的镜头只能丢掉，总时长优先
+  // reconcileDurations 在镜头过多时会把数组压短，多出来的镜头只能丢掉，总时长优先
   script.shots = script.shots.slice(0, targets.length);
   script.shots.forEach((shot, i) => {
     shot.index = i + 1;
@@ -874,6 +863,8 @@ async function localizeScriptPrompts(script: Script, plan: StoryPlan | null): Pr
       cameraMove: shot.cameraMove,
       characters: shot.characterNames ?? [],
       scenes: shot.sceneNames ?? [],
+      // 秒级节拍要一起交给译者，否则 beatSheet 里排的动作在英文提示词里会整段丢失
+      beatSheet: shot.beatSheet,
     })),
     characters,
     scenes,
@@ -1029,22 +1020,13 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
   /**
    * 小说模式不预设镜头数、单镜时长和总时长：
    * 全部由改编蓝图按剧情决定，用户不需要也不会在表单里看到这些旋钮。
+   * 总时长模式同理：只定总时长，镜数交给 AI 按剧情切。
    */
   if (!isNovel) {
     if (mode === 'duration') {
-      const split = splitByDuration(
-        req.duration ?? MAX_SHOT_SECONDS,
-        req.ensureCompleteness !== false,
-      );
+      const split = splitByDuration(req.duration ?? MAX_SHOT_SECONDS);
       totalDuration = split.total;
-      plannedShotCount = split.dynamic ? null : split.shotCount;
-      budget = {
-        split,
-        dynamic: split.dynamic,
-        shotCount: plannedShotCount,
-        durations: split.dynamic ? null : split.durations,
-        total: split.total,
-      };
+      budget = { split, durations: null, total: split.total };
     } else {
       plannedShotCount = clamp(Math.round(req.shotCount ?? 6), 1, MAX_SHOT_COUNT);
       // 上限对齐 wan3.0 单镜 30 秒 × 最多 12 镜
@@ -1056,11 +1038,10 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
     }
   }
 
-  /** 动态模式不给固定镜数，只给合法区间 */
-  const shotRange =
-    budget?.dynamic && budget.split
-      ? { min: budget.split.minShotCount, max: budget.split.maxShotCount }
-      : undefined;
+  /** 总时长模式不给固定镜数，只给 AI 可选的合法区间 */
+  const shotRange = budget
+    ? { min: budget.split.minShotCount, max: budget.split.maxShotCount }
+    : undefined;
 
   // 第一步：小说先压缩成蓝图；短创意直接由故事架构师规划
   let plan: StoryPlan | null = null;
@@ -1116,8 +1097,8 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
     ? (plan?.beats.length ?? fallbackShots)
     : (plannedShotCount ?? (plan ? plan.beats.length : fallbackShots));
 
-  // 非小说模式：动态时长由蓝图分配；固定模式直接沿用算好的分配
-  if (budget && budget.dynamic && plan) {
+  // 蓝图给了每镜时长就照抄，节奏由它决定；没给则由模型自己分配
+  if (budget && plan) {
     budget.durations = beatDurations(plan.beats, budget.total);
   }
   if (!isNovel) timingDurations = budget?.durations ?? null;

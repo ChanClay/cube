@@ -53,7 +53,7 @@
 | 镜头数 | 1~12 | `MAX_SHOT_COUNT` |
 | 单镜时长 | 2~30 秒整数，优先 ≤10 | `MIN/MAX_SHOT_SECONDS`、`PREFERRED_SHOT_SECONDS` |
 | 总时长 | 2~360 秒；镜头 duration 之和必须等于目标总时长 | `MAX_TOTAL_SECONDS` |
-| `duration` 模式镜数 | 保证完整性 = `ceil(总时长 / 10)`；不保证时只给区间由 AI 决定 | `splitByDuration` |
+| `duration` 模式镜数 | 只给区间 `ceil(总时长/30)` ~ `min(12, 总时长/2)`，由 AI 按剧情决定 | `splitByDuration` |
 | 角色卡 | 2~4 个，`promptEn` 20~35 词 | `continuity.ts` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
 | `videoPrompt` | 英文，40~110 词（<30 或 >150 判不合格） | `PROMPT_*_WORDS` |
@@ -95,6 +95,7 @@
 | `prompt-camera-mismatch` | warn | 英文无对应运镜 | 补标准运镜词 |
 | `prompt-shot-size-mismatch` | warn | 英文无对应景别 | 补标准景别词 |
 | `prompt-drift` | warn | 未复用固定 `promptEn`（命中 <50%） | 原文粘贴角色/场景短语 |
+| `prompt-temporal-adverb` | warn | 英文提示词用了 then / after that / finally | 改成并列的现在分词，把 `beatSheet` 各段串成一条链 |
 | `size-gap-carry` | warn | 景别跨 2 档以上还想接上一镜末帧 | 改走卡片，或用 `hiddenCut` 声明遮挡转场 |
 | `timeline-missing` | warn | 长镜没有秒级节拍 | 补 `beatSheet` |
 | `narration-long` | warn | 台词超出时长容量 | 删到一句一意 |
@@ -116,11 +117,10 @@
   "style": "电影感写实",
   "mode": "shots",
   "shotCount": 6,
-  "duration": 30,
-  "ensureCompleteness": true
+  "duration": 30
 }
 ```
 
 - `source: "novel"` 时 `idea` 是原文（200~30000 字），镜头数 / 时长 / 总时长由改编蓝图决定，上述参数被忽略。
-- `mode: "duration"` 时 `shotCount` 不生效，`duration` 是视频总时长。
+- `mode: "duration"` 时 `shotCount` 不生效，`duration` 是视频总时长；镜数由 AI 按剧情决定，只受 `minShotCount` ~ `maxShotCount` 区间约束。
 - 返回 `{ script, meta: { model, adaptedIdea } }`；`adaptedIdea` 是小说压出来的梗概，用它回填「故事创意」。

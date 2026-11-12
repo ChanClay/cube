@@ -23,7 +23,7 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 | --- | --- |
 | 输入 | 短创意（默认）或小说/章节原文（≥200 字，≤30000 字） |
 | 分镜方式 | 按镜头数 `shots`（默认）/ 按总时长 `duration` |
-| 镜头数 | 1~12；`duration` 且保证完整性时 = `ceil(总时长/10)` |
+| 镜头数 | 1~12；`duration` 模式只给区间 `ceil(总时长/30)` ~ `min(12, 总时长/2)`，由 AI 按剧情决定 |
 | 单镜时长 | 2~30 秒，优先 ≤10 秒（一次生成越长越糊） |
 | 总时长 | 2~360 秒 |
 | 视觉风格 | 预设短标签（见 `lib/skills/style-presets.ts`）或用户自定义描述 |
@@ -44,12 +44,13 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 
 逐镜写 `title / duration / shotSize / cameraMove / transition / referencePrevFrame / hiddenCut / entryState / exitState / beatSheet / description / videoPrompt / narration*`。
 
+- **镜数跟着「叙事断点」走，不跟着时长或景别走**：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、连续对话——放进一个镜头，用 `beatSheet` 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要停顿。不要为了换景别、换机位、凑时长而切镜。
 - 景别按「建立 → 逼近 → 细节 → 释放」推进：开场用大远景/全景交代空间关系，情绪高点用近景/特写，结尾释放回环境或留白。
 - 相邻两镜不要同景别 + 同运镜。景别一次最多跨 1 档（特写直接接大远景等于换了个世界）。
 - `transition` 只按「摄影机有没有停机」判断：同一次拍摄里切两刀 = `same-take`（单镜 ≤8 秒、全片连续不超过 2 次；景别与机位都不许变）；停机换机位 = `hard-cut`（绝大多数镜头）；时间或地点跳转 = `time-jump`。
 - `referencePrevFrame`：只有「同场景 + 同景别的 `hard-cut`」写 `true`（下一镜第一帧就是本镜最后一帧，接缝不跳）；景别变了还写 `true` 只会换来一次突兀的推拉，改走卡片；`time-jump`、换场景一律 `false`。拿不准写 `false`。
 - 一镜到底优先在单个镜头内用运镜 + `beatSheet` 完成景别变化，不要拆成多镜再靠 `same-take` 粘。必须在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位并写 `hiddenCut: true`——此时景别可随便跨，末帧只当风格参考图。
-- `beatSheet` 把 duration 切成 2~4 段（10~20 秒切 3~5 段）：首段 `from=0`、末段 `to=duration`，不断档不重叠，每段只写一个可见动作。没有这一层，20 秒的镜头只会得到一段半死不活的慢动作。
+- `beatSheet` 是这一镜的动作骨架，英文提示词照着它写，所以每段要写清三件事：谁做了什么可见动作、画面里什么随之变化、镜头这时在做什么。段数跟时长走（2~4 秒 2 段，5~10 秒 2~3 段，10~20 秒 3~5 段，20 秒以上每 5 秒左右一段，最多 8 段）；首段 `from=0`、末段 `to=duration`，不断档不重叠；段与段之间状态必须连着，不许瞬移或凭空换姿势。
 - `description` 用中文写清「景别 + 谁 + 在做什么 + 环境 + 光线」，`videoPrompt` 只做忠实英译（见下）。
 
 ### 4. 写 videoPrompt（最影响成片观感的一步）
@@ -63,7 +64,8 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 ```
 
 - 景别、运镜只用 `lib/skills/spec.ts` 的标准表内写法，且必须与本镜的 `shotSize` / `cameraMove` 一致。
-- 只写一个运镜、一条连续匀速的动作链，结尾用 `smooth continuous motion, steady pacing, stable framing` 收口。
+- 只写一个运镜；动作可以有多段，但必须是**一条**动作链，结尾用 `smooth continuous motion, steady pacing, stable framing` 收口。
+- **`beatSheet` 的每一段都要在英文里有对应**，按时间顺序用并列的现在分词短语串起来，不写 `first` / `then` / `after that` / `finally`——这类时间副词会让模型把画面切成两段，接缝处就是抽帧般的抖动。例：`0~2s 抬眼看向塔顶 / 2~4s 伸手拧开灯罩 / 4~5s 火苗窜起` → `his eyes lifting to the tower top, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass`。
 - 禁止字幕/文字/水印/logo/分屏/转场词/镜头编号；除「升格慢动作」外不写 `slow motion`，也不写 `time-lapse` / `speed ramp` / `jump cut` / `flicker` / `morphing`。
 - 不要用 `beautiful` / `sad` 单独代替画面；写可拍摄的名词与动词。
 
@@ -90,7 +92,7 @@ node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 
 1. 第 1 镜 3 秒内是否让人看懂「谁、在哪、发生了什么异常」？
 2. 第 1 镜到最后一镜连读，每处跳跃是否都在上一镜的 `transition` 里声明过？
-3. 相邻两镜是否同景别 + 同运镜？same-take 的景别是否完全没变、是否连续超过 2 次？跨了景别的长镜头是否都标了 `hiddenCut`？
+3. 镜数是否跟着叙事断点走：串联性强的段落（追逐、穿行、对峙）有没有被拆成好几镜？相邻两镜是否同景别 + 同运镜？same-take 的景别是否完全没变、是否连续超过 2 次？跨了景别的长镜头是否都标了 `hiddenCut`？
 4. 每镜是否只有一个可见动作，且这个动作在 duration 内做得完？
 5. 全片光比、色温、颗粒是否同一套语言（同一场景内不许一会儿日光一会儿霓虹）？
 6. 是否每镜都在解释剧情，而没有一镜只靠画面推进？

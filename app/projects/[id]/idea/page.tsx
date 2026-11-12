@@ -145,7 +145,6 @@ function IdeaPageInner() {
             formParams.mode === 'duration'
               ? formParams.totalDuration
               : formParams.shotCount * formParams.shotDuration,
-          ensureCompleteness: formParams.ensureCompleteness,
         });
 
         // 编辑时保留用户自己起的剧本名，不被模型标题冲掉

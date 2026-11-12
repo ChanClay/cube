@@ -115,8 +115,6 @@ export interface ScriptBody {
   shotCount: number;
   /** shots 模式下为总时长，duration 模式下为用户设定的视频总时长 */
   duration: number;
-  /** 仅 duration 模式生效，缺省 true */
-  ensureCompleteness?: boolean;
 }
 
 export interface VideoBody {

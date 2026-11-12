@@ -42,8 +42,6 @@ export async function POST(request: Request) {
   const duration = Number(payload.duration);
   /** 缺省仍是「按镜头数」，保持老调用方的行为 */
   const mode = payload.mode === 'duration' ? 'duration' : 'shots';
-  /** 默认开启：镜头少一点、每镜凑满 10 秒，故事更完整且单次生成更稳 */
-  const ensureCompleteness = payload.ensureCompleteness !== false;
 
   try {
     const result = await generateScript({
@@ -53,7 +51,6 @@ export async function POST(request: Request) {
       mode,
       shotCount: Number.isFinite(shotCount) ? shotCount : undefined,
       duration: Number.isFinite(duration) ? duration : undefined,
-      ensureCompleteness,
     });
     return NextResponse.json({
       script: result.script,

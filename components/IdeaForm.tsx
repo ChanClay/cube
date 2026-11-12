@@ -8,7 +8,6 @@ import {
   MIN_NOVEL_CHARS,
   MIN_SHOT_SECONDS,
   MIN_TOTAL_SECONDS,
-  PREFERRED_SHOT_SECONDS,
   splitByDuration,
   type ScriptMode,
 } from '@/lib/skills/shot-plan';
@@ -28,8 +27,6 @@ export interface ScriptParams {
   shotDuration: number;
   /** 按总时长模式下的视频总时长（秒） */
   totalDuration: number;
-  /** 按总时长模式：是否保证故事完整性（镜头更少、每镜凑满 PREFERRED_SHOT_SECONDS） */
-  ensureCompleteness: boolean;
 }
 
 interface Props {
@@ -75,8 +72,6 @@ export default function IdeaForm({
   const [shotCount, setShotCount] = useState(initialShotCount ?? 6);
   const [shotDuration, setShotDuration] = useState(initialShotDuration ?? 5);
   const [totalDuration, setTotalDuration] = useState(60);
-  /** 默认开启：宁可少切几刀，也别把故事切碎 */
-  const [ensureCompleteness, setEnsureCompleteness] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** 导入 txt / md：直接切到小说模式，超长由下方提示拦下 */
@@ -123,15 +118,14 @@ export default function IdeaForm({
       shotCount,
       shotDuration,
       totalDuration,
-      ensureCompleteness: source === 'novel' ? false : ensureCompleteness,
     });
   };
 
   const fillPercent = ((shotCount - 1) / 11) * 100;
   const durationFillPercent = ((shotDuration - 2) / 28) * 100;
 
-  /** 总时长模式下的分镜预览：镜头数与每镜秒数都由总时长反推 */
-  const split = splitByDuration(totalDuration, ensureCompleteness);
+  /** 总时长模式下的分镜预览：只给 AI 可选的镜数区间，由它按剧情决定切几刀 */
+  const split = splitByDuration(totalDuration);
   // 总时长按 1 秒粒度调整：2 秒（单镜下限）~ 360 秒（12 镜 × 30 秒）
   const totalFillPercent =
     ((totalDuration - MIN_TOTAL_SECONDS) / (MAX_TOTAL_SECONDS - MIN_TOTAL_SECONDS)) * 100;
@@ -342,9 +336,7 @@ export default function IdeaForm({
                     <div className="field-label">
                       视频总时长
                       <span className="field-hint">
-                        {split.dynamic
-                          ? `AI 决定 ${split.minShotCount}~${split.maxShotCount} 镜`
-                          : `${split.shotCount} 个镜头`}
+                        AI 决定 {split.minShotCount}~{split.maxShotCount} 镜
                       </span>
                     </div>
                     <div className="range-row">
@@ -362,37 +354,7 @@ export default function IdeaForm({
                       <span className="range-value">{totalDuration} 秒</span>
                     </div>
                     <div className="field-hint" style={{ marginTop: 7 }}>
-                      {split.dynamic
-                        ? `单镜 ${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒，由 AI 按剧情分配`
-                        : `镜头时长：${split.durations.join(' / ')} 秒`}
-                    </div>
-                  </div>
-    
-                  <div className="field">
-                    <div className="field-label">
-                      保证完整性
-                      <span className="field-hint">默认开启</span>
-                    </div>
-                    <label
-                      className="shot-switch"
-                      title={`开启后分镜数量减少，每个镜头尽量凑满 ${PREFERRED_SHOT_SECONDS} 秒（一次生成越长，后半段动作越容易变慢走形），故事被切碎的风险更低；关闭则由 AI 分析剧情自行判断切几刀，只保证单镜不超过 ${MAX_SHOT_SECONDS} 秒、总时长不变`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="shot-switch-input"
-                        checked={ensureCompleteness}
-                        disabled={loading}
-                        onChange={(e) => setEnsureCompleteness(e.target.checked)}
-                      />
-                      <span className="shot-switch-track" aria-hidden="true">
-                        <span className="shot-switch-thumb" />
-                      </span>
-                      <span>减少分镜、每镜凑满 {PREFERRED_SHOT_SECONDS} 秒</span>
-                    </label>
-                    <div className="field-hint" style={{ marginTop: 7 }}>
-                      {ensureCompleteness
-                        ? `固定 ${split.shotCount} 镜，每镜尽量凑满 ${PREFERRED_SHOT_SECONDS} 秒`
-                        : `由 AI 判断切几刀（${split.minShotCount}~${split.maxShotCount} 镜）`}
+                      单镜 {MIN_SHOT_SECONDS}~{MAX_SHOT_SECONDS} 秒，由 AI 按剧情分配；串联性强的段落会合并成一个镜头
                     </div>
                   </div>
                 </>

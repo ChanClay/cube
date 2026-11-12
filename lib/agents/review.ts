@@ -31,6 +31,12 @@ import { callChatJson } from './llm';
  * 确定性检查（不花钱、不发请求），只把真正需要重写的问题交给模型修一次。
  */
 
+/**
+ * 会把一条动作链切成两段的时间副词。
+ * 英文提示词里应该用并列的现在分词把 beatSheet 各段串起来，而不是写 then / finally。
+ */
+const TEMPORAL_ADVERB = /\b(then|after that|afterwards|finally)\b/i;
+
 export interface ScriptIssue {
   level: 'fatal' | 'warn';
   code: string;
@@ -146,6 +152,15 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
           message: `第 ${at} 镜的景别是「${shot.shotSize}」（${shotSizeEn(shot.shotSize)}），英文提示词里没有对应的景别`,
         });
       }
+      // 时间副词会把一镜的动作链切成两段：模型看到 then / finally 就会在接缝处跳一下
+      if (TEMPORAL_ADVERB.test(prompt)) {
+        issues.push({
+          level: 'warn',
+          code: 'prompt-temporal-adverb',
+          shotIndex: at,
+          message: `第 ${at} 镜的英文提示词用了时间副词（then / after that / finally），模型会把这一镜拆成两段；改用并列的现在分词短语把 beatSheet 的动作串起来`,
+        });
+      }
 
       // 蓝图锁定的固定英文短语没用上，说明这一镜的长相 / 空间写漂了
       for (const name of shot.characterNames ?? []) {
@@ -183,7 +198,7 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
         level: 'warn',
         code: 'timeline-missing',
         shotIndex: at,
-        message: `第 ${at} 镜 ${shot.duration} 秒只有 ${beatCount} 段节奏，需要切成 2~4 段秒级节拍（第几秒到第几秒各发生什么）`,
+        message: `第 ${at} 镜 ${shot.duration} 秒只有 ${beatCount} 段节奏，需要按 2~5 秒一段切开（长镜头最多 8 段），逐段写「第几秒到第几秒发生什么」`,
       });
     }
 
@@ -313,6 +328,7 @@ const REPAIRABLE = new Set([
   'duplicate-prompt',
   'prompt-camera-mismatch',
   'prompt-shot-size-mismatch',
+  'prompt-temporal-adverb',
   'prompt-drift',
   'state-missing',
   'continuity-gap',

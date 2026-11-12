@@ -3,6 +3,7 @@ import {
   MAX_SHOT_SECONDS,
   MIN_SHOT_COUNT,
   MIN_SHOT_SECONDS,
+  PREFERRED_SHOT_SECONDS,
 } from '@/lib/skills/shot-plan';
 import { logAgentWarn } from '@/lib/services/logger';
 import { expandStyle } from '@/lib/skills/style-presets';
@@ -92,7 +93,7 @@ export interface StoryPlan {
 export interface PlanRequest {
   idea: string;
   style?: string;
-  /** 固定镜头数（按镜头数量 / 保证完整性的总时长模式） */
+  /** 固定镜头数（按镜头数量模式） */
   shotCount?: number;
   /**
    * 动态模式：不给固定镜数，只给合法区间，由模型按剧情自己决定切几刀。
@@ -198,8 +199,8 @@ export function buildBlueprintSystemPrompt(
     一镜到底优先在一个镜头内完成：景别变化靠运镜（推近 / 拉远 / 跟随）表达，不要拆成多个镜头再靠 same-take 粘起来。必须在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位（人物走过柱子、门框、走廊，镜头甩进暗处），并在镜头上标 hiddenCut: true。
 11. 镜头语言成组：相邻镜头避免同样的景别 + 运镜，景别按「建立 → 逼近 → 细节 → 释放」的节奏推进。
 12. 情绪曲线：给每一镜 emotion（1~5）。不要一开场就 5，也不要全程 3；最高点落在全片后 1/3 的高潮镜。
-13. 镜头数量：给了明确的「镜头数量」就必须精确等于这个数量；如果给的是一段区间，则按故事节奏自己决定用几个镜头，必须落在区间内——不要为了凑数硬切，也不要把几个本该分开的节拍硬塞进一个镜头。
-14. duration 是这一镜的时长（秒，${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 的整数）。用户给了总时长时，所有镜头 duration 之和必须等于它；没给总时长时，由你按剧情节奏决定总时长（30~360 秒），不要套用固定值。
+13. 镜头数量：给了明确的「镜头数量」就必须精确等于这个数量；给的是一段区间时，按「叙事断点」自己决定用几个镜头，必须落在区间内。串联性强的段落——同一空间、同一主体连续推进的追逐、穿行、对峙、连续对话——合成一个镜头，不要拆；只有换空间、跳时间、要藏起一个信息、情绪需要停顿时才切。不要为了凑数硬切，也不要把几个本该分开的节拍硬塞进一个镜头。
+14. duration 是这一镜的时长（秒，${MIN_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 的整数）。${PREFERRED_SHOT_SECONDS} 秒以内质量最稳，普通镜头尽量排在这个范围内；只有串联性强的连续段落才用 ${PREFERRED_SHOT_SECONDS}~${MAX_SHOT_SECONDS} 秒的长镜，并且要确认这一段确实是一条不断开的动作链。用户给了总时长时，所有镜头 duration 之和必须等于它；没给总时长时，由你按剧情节奏决定总时长（30~360 秒），不要套用固定值。
 ${extraRules ? `\n${extraRules}\n` : ''}
 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 

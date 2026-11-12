@@ -1,5 +1,6 @@
 import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/services/logger';
+import type { ShotBeat } from '@/lib/types';
 import { callChatJson } from './llm';
 import {
   cameraMoveEn,
@@ -46,6 +47,11 @@ export interface LocalizeShot {
   characters: string[];
   /** 本镜所在场景名 */
   scenes: string[];
+  /**
+   * 这一镜的秒级节拍。它是 description 之内的时间切片，
+   * 英文动作链必须按同样的顺序把它们串起来，不能丢段、不能改序。
+   */
+  beatSheet?: ShotBeat[];
 }
 
 export interface LocalizeInput {
@@ -63,7 +69,8 @@ function buildSystemPrompt(): string {
 2. 不解释、不评价、不补充剧情、不写镜头编号与转场词。
 3. 角色、场景一律使用下方术语表给出的固定英文短语，逐字复用，不得改写年龄、发型、服装、装甲与涂装、道具与空间结构。
 4. 景别与运镜使用下方给定的标准英文写法，必须与本镜的 shotSize / cameraMove 一致。
-5. ${VIDEO_PROMPT_RULES}
+5. 有秒级节拍（beatSheet）时，它是这一镜的动作骨架：每一段都必须出现在英文里，按时间顺序用并列的现在分词短语串成一条动作链（例：eyes lifting to the tower top, hand rising to twist the lamp shade open, a small flame flaring inside the glass）。不要用 first / then / after that / finally / next 这类时间副词——模型看到它们会把画面切成两段，接缝处就是抽帧般的抖动。节拍有 3 段以上时，英文里对应的动作短语也不能少于 3 个。
+6. ${VIDEO_PROMPT_RULES}
 
 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。`;
 }
@@ -80,9 +87,14 @@ function buildUserPrompt(input: LocalizeInput): string {
     .map((shot) => {
       const who = shot.characters.length > 0 ? shot.characters.join('、') : '（无人物出镜）';
       const where = shot.scenes.length > 0 ? shot.scenes.join('、') : '（未标注）';
+      const beats = shot.beatSheet ?? [];
+      const timeline = beats.length
+        ? `\n秒级节拍（按时间顺序，每一段都要译进英文动作链）：\n` +
+          beats.map((beat) => `  ${beat.from}~${beat.to}s：${beat.action}`).join('\n')
+        : '';
       return (
         `镜头 ${shot.index}\n` +
-        `中文描述：${shot.description}\n` +
+        `中文描述：${shot.description}${timeline}\n` +
         `景别：${shot.shotSize}（英文 ${shotSizeEn(shot.shotSize)}）｜` +
         `运镜：${shot.cameraMove}（英文 ${cameraMoveEn(shot.cameraMove)}）｜` +
         `出镜：${who}｜场景：${where}`

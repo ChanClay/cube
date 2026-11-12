@@ -1,9 +1,9 @@
 /**
  * 分镜时长规划（纯计算，前后端共用）
  *
- * 视频模型单镜 2~30 秒（wan3.0），所以「按总时长生成」时镜头数量由总时长反推：
- * - 保证完整性：镜头数取最少，每镜尽量凑满 PREFERRED_SHOT_SECONDS（10 秒），节奏由时长决定；
- * - 不保证完整性：只给 AI 一个合法区间，镜数由它按剧情自己判断。
+ * 视频模型单镜 2~30 秒（wan3.0），所以「按总时长生成」时只能给出一个合法区间，
+ * 镜数由 AI 按剧情自己判断：串联性强的段落（同一空间、同一主体连续推进）放一个镜头里，
+ * 需要断开的地方才切。由时长反推固定镜数会把连续动作硬切成等长的几段。
  */
 
 /** 生成分镜的两种入口：直接给镜头数 / 只给视频总时长 */
@@ -15,12 +15,12 @@ export const MAX_SHOT_SECONDS = 30;
 export const MIN_SHOT_SECONDS = 2;
 
 /**
- * 单镜「一次生成」的推荐上限（秒）。
+ * 单镜「一次生成」的质量线（秒）。
  *
  * 30 秒是接口上限，不是质量上限：一次生成的时间越长，后半段的动作越容易变慢、
- * 变形、人物肢体开始糊在一起，看起来就是「不流畅」。10 秒以内基本能保持
- * 匀速运动和稳定构图，所以按总时长拆分镜头时优先切到 10 秒以内，
- * 镜头数上限 12 / 总时长 360 秒时仍会回落到 30 秒长镜。
+ * 变形、人物肢体开始糊在一起，看起来就是「不流畅」；10 秒以内基本能保持匀速运动
+ * 和稳定构图。这条只写进提示词供 AI 权衡，不再用来反推镜头数——一镜到底的连续
+ * 段落本来就该长，硬按 10 秒切只会把动作切碎。
  */
 export const PREFERRED_SHOT_SECONDS = 10;
 /** 一份剧本最多 12 镜：对齐 30 秒 × 12 = 360 秒的长度上限 */
@@ -60,36 +60,29 @@ export function clampTotalDuration(totalDuration: number): number {
 }
 
 export interface DurationSplit {
-  /**
-   * true：镜头数量交给 AI 按剧情判断（关闭「保证完整性」），
-   * 此时 shotCount / durations 不可用，只约束 minShotCount ~ maxShotCount 与总时长。
-   */
-  dynamic: boolean;
-  /** 固定镜头数（dynamic=false 时有效） */
-  shotCount: number;
-  /** 总时长不变时，单镜不超 PREFERRED_SHOT_SECONDS 所必需的最少镜头数 */
+  /** 镜数下限：总时长不变时，单镜不超 MAX_SHOT_SECONDS 所必需的最少镜头数 */
   minShotCount: number;
   /** 单镜不低于 2 秒所允许的最多镜头数（且不超过 12） */
   maxShotCount: number;
-  /** 每镜目标时长（dynamic=true 时为空，由 AI 分配） */
-  durations: number[];
   /** 规划后的总时长（已夹到合法范围） */
   total: number;
 }
 
 /**
- * 按总时长拆分镜头：
- * - ensureCompleteness = true（默认）：镜头数取最少 ceil(总时长 / 10)，每镜尽量凑满 10 秒；
- * - ensureCompleteness = false：不预设镜头数，只给出 AI 可以决定的区间，由它按剧情判断切几刀。
- * 两种方式都保证单镜 2~30 秒、镜头数 1~12。
+ * 按总时长规划镜头区间：不预设镜数，只给出 AI 可以决定的 minShotCount ~ maxShotCount
+ * 与总时长，由它按剧情判断切几刀。
  *
- * 为什么按 10 秒而不是接口上限 30 秒算镜头数：一次生成 20~30 秒时，模型后半段的
- * 动作会明显变慢、肢体开始糊，这类长镜头是成片「不流畅」的主要来源。
+ * 以前有个「保证完整性」开关，会强制 ceil(总时长 / 10) 镜并把秒数摊平；等长的镜头
+ * 装不下连续动作，串联性强的段落只能被硬切成几段，这是越切越碎的直接原因。
+ *
+ * 下限只按接口物理上限（单镜 30 秒）算，不再按 10 秒的质量线算：一镜到底的段落
+ * 本来就该长，把它逼成 10 秒一刀只会把连续动作切碎。质量提示放在提示词里
+ * （见 continuity.ts 的镜头数量规则），由 AI 自己权衡。
  */
-export function splitByDuration(totalDuration: number, ensureCompleteness = true): DurationSplit {
+export function splitByDuration(totalDuration: number): DurationSplit {
   const total = clampTotalDuration(totalDuration);
-  /** 单镜不超过 PREFERRED_SHOT_SECONDS 所必需的镜头数（上限 12，超了只能回到 30 秒长镜） */
-  const minShotCount = clamp(Math.ceil(total / PREFERRED_SHOT_SECONDS), 1, MAX_SHOT_COUNT);
+  /** 物理下限：单镜不超过 MAX_SHOT_SECONDS 所必需的镜头数 */
+  const minShotCount = clamp(Math.ceil(total / MAX_SHOT_SECONDS), 1, MAX_SHOT_COUNT);
   /** 单镜不低于 2 秒所允许的镜头数上限 */
   const maxShotCount = clamp(
     Math.floor(total / MIN_SHOT_SECONDS),
@@ -97,25 +90,7 @@ export function splitByDuration(totalDuration: number, ensureCompleteness = true
     MAX_SHOT_COUNT,
   );
 
-  if (!ensureCompleteness) {
-    return {
-      dynamic: true,
-      shotCount: 0,
-      minShotCount,
-      maxShotCount,
-      durations: [],
-      total,
-    };
-  }
-
-  return {
-    dynamic: false,
-    shotCount: minShotCount,
-    minShotCount,
-    maxShotCount,
-    durations: spreadDuration(total, minShotCount),
-    total,
-  };
+  return { minShotCount, maxShotCount, total };
 }
 
 /**

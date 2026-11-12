@@ -43,6 +43,30 @@
 - 只出现一个运镜、一个动作主体、一条匀速动作链。
 - 结尾固定收口：`smooth continuous motion, steady pacing, stable framing`。
 
+### 秒级节拍怎么进英文
+
+`beatSheet` 是这一镜的动作骨架，它的每一段都要在英文里有对应，按时间顺序用并列的现在分词短语串成一条动作链：
+
+| beatSheet | 英文片段 |
+| --- | --- |
+| 0~2s 抬眼看向塔顶 | `his eyes lifting toward the top of the tower` |
+| 2~4s 伸手拧开灯罩 | `his hand rising to twist the lamp shade open` |
+| 4~5s 火苗窜起 | `a small flame flaring up inside the glass` |
+
+拼进模板后：
+
+```
+Close-up of an old lighthouse keeper ..., his eyes lifting toward the top of the tower, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass, warm oil lamp light from below, slow push-in, shallow depth of field, 35mm film grain, smooth continuous motion, steady pacing, stable framing
+```
+
+三条硬规则：
+
+- **顺序不能改**：英文动作的出现顺序必须与秒级节拍一致，否则观众看到的是另一条动作线。
+- **不许丢段**：3 段节拍至少要有 3 个动作短语。丢一段等于把这一镜的叙事砍掉一截，长镜头会退化成一段慢动作。
+- **不许用时间副词**：`first` / `then` / `after that` / `finally` / `next` 会让模型把画面切成两段，接缝处就是抽帧般的抖动。用并列分词，让动作自己连起来。
+
+节拍之间本来就不连贯（前一段在室内、后一段已经在街上）时，说明切点选错了：那是两个镜头，不是一镜的两段。
+
 ## 三、正例
 
 中文 description：
@@ -62,7 +86,7 @@ Medium shot of an old lighthouse keeper with grey hair and a weathered face stan
 | 反例 | 问题 | 改法 |
 | --- | --- | --- |
 | `A beautiful sad scene of a man` | 形容词代替画面，无景别无动作 | 写清景别 + 主体 + 一个动作 |
-| `he looks up, then immediately turns and runs to the door` | 一镜两个动作，模型会把画面拆成两段 | 只留「抬头」，下一个动作开新镜 |
+| `he looks up, then immediately turns and runs to the door` | `then immediately` 这类时间副词会让模型把画面拆成两段 | 用并列分词串成一条链：`his eyes lifting, his body turning toward the door, breaking into a run` |
 | `medium shot ... extreme wide shot` | 两镜的景别写进同一段 | 一镜只留一个景别 |
 | `handheld push-in orbit` | 多个运镜 | 只留一个 |
 | `... with subtitles and a logo` | 禁用内容 | 全部删掉 |
