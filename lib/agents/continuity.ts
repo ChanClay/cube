@@ -54,6 +54,26 @@ export interface PlanScene {
   promptEn?: string;
 }
 
+/**
+ * 这一镜的对白设计（不是台词原文）。
+ *
+ * 台词必须在蓝图阶段就被设计：谁开口、想达成什么、为什么不明说、说完之后局面怎么变。
+ * 缺这一层，分镜阶段只能就着剧情「编一句话」，出来的就是念设定、复述画面的说明书。
+ * 一镜只有一个 speaker——两个人开口就是两个节拍、两个镜头。
+ */
+export interface BeatDialogue {
+  /** 这一镜唯一开口的人，必须逐字来自主体卡 */
+  speaker: string;
+  /** 这句话要达成什么：说服 / 试探 / 拒绝 / 威胁 / 拖延 / 摊牌 */
+  intent: string;
+  /** 潜台词：嘴上说的与心里要的不是同一件事 */
+  subtext?: string;
+  /** 对方听到之后的变化（让步 / 反击 / 沉默 / 动作停下），必须有可见结果 */
+  effect?: string;
+  /** 听者是谁（决定反打镜头里该出现谁） */
+  listener?: string;
+}
+
 export interface Beat {
   index: number;
   /** 经典结构里的节拍名，如「开场钩子」「激励事件」「高潮」「余韵」 */
@@ -64,6 +84,8 @@ export interface Beat {
   subject: string;
   /** 主体在做什么 */
   action: string;
+  /** 这一镜的对白设计；没有人开口时为空（让观众看画面，而不是听解释） */
+  dialogue?: BeatDialogue;
   /** 承接上一镜的什么状态；第一镜写「开场」 */
   entry: string;
   /** 结束时留下的状态，必须能被下一镜直接接住 */
@@ -129,7 +151,10 @@ export interface PlanProblem {
     | 'missing-subject-card'
     | 'missing-prompt-en'
     | 'scene-in-character-desc'
-    | 'missing-motion';
+    | 'missing-motion'
+    | 'missing-dialogue'
+    | 'dialogue-without-card'
+    | 'dialogue-repeat';
   message: string;
   blocking: boolean;
 }
@@ -213,7 +238,7 @@ export function buildBlueprintSystemPrompt(
   limits: ShotLimits = shotLimits(),
 ): string {
   return `你是「${role}」。上游只给一个故事创意，你要产出一份可拍摄蓝图：先确立故事内核与人物，再把故事拆成一条首尾相接的镜头状态链。
-你不写画面文案，也不写台词，只做结构与状态设计。
+你不写画面文案，也不写台词原文，但要设计每一镜的对白意图（谁开口、想达成什么、潜台词是什么、说完对方怎么变），以及这条状态链怎么接。
 
 【故事层】
 1. logline：一句话，必须包含「谁 + 想要什么 + 被什么阻碍 + 可能付出什么代价」，40 字以内。
@@ -259,21 +284,31 @@ export function buildBlueprintSystemPrompt(
    promptEn 写 20~35 个单词的固定英文外貌短语，与 desc 同序覆盖同样的可见项：人类写「主体 + 年龄感 + 头面部 + 服装 + 装备 + 配色 + 道具」；机械体写「主体 + 机型体量 + 头部传感器 + 装甲材质与涂装 + 关节结构 + 武器 + 配色」；载具写「主体 + 车型体量 + 车漆与涂装 + 玻璃 + 轮毂轮胎 + 灯具 + 改装件 + 标识」。不要给人以外的卡写年龄词与服装词。desc 里每个可见项都要在英文里有对应词。全片一字不改地复用。
 6. 场景 1~4 个：desc 写地点、空间尺度、时间、光源方向与色温、主要陈设与其材质；promptEn 写 15~25 个单词的固定英文空间短语，覆盖空间类型 + 关键陈设 + 光源与色调。同一个空间只写一次，不要按镜头重复。
 
+【对白层】
+7. 对白要在这一层设计好，不要留给分镜阶段现编。凡是这一镜里有人开口，就给该节拍写 dialogue 对象：
+   - speaker：这一镜唯一开口的人，必须逐字来自主体卡；一个节拍只能有一个 speaker；
+   - intent：这句台词要达成什么（说服 / 试探 / 拒绝 / 威胁 / 拖延 / 摊牌），写成动作性的一句话，不要写成台词原文；
+   - subtext：潜台词，嘴上说的与心里要的不是同一件事；
+   - effect：对方听到之后的可见变化（让步 / 反击 / 沉默 / 手停下来），没有变化就说明这句台词不该存在；
+   - listener：听者是谁，决定反打镜头里该出现谁。
+   一人一镜：两个人开口就是两个节拍、两个镜头。A 说完 B 接话，必须拆成两个相邻节拍（A 的镜头 → B 的反打镜头，transition 一律 hard-cut），不许把一问一答压进一个节拍；同一人物连续说几句可以留在同一节拍里，用 action 写清「说第一句 / 停顿 / 说第二句」。
+   不要为了「有台词」而加台词：画面能交代的信息不写台词，情绪最高点常常是一个不开口的反应镜头。全片至少有一个 dialogue 节拍（用户明确要求无对白除外），也不要把整条状态链写成对话。
+
 【串联层】
-7. entry 写这一镜开始时「谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝画面哪一侧运动」（第一镜写「开场」）。景别在近景 / 特写及以内的镜头，entry 还必须写清容器几何、两个以上固定件（车厢：方向盘 / 仪表台 / 后视镜 / 车窗框 / 雨刷；走廊：门框 / 踢脚线 / 顶灯），以及镜头相对主体的方位与高度——特写里没有这些，内饰与机位就会被模型凭空发明。上一镜 transition=same-take 时必须与它的 exit 是同一个画面事实；hard-cut / time-jump 允许换机位，但人物、场景、光线、运动方向与背景锚点必须与上一镜一致——换机位不换世界。
-8. exit 必须是一个可以直接拍出来的画面状态：谁、在哪里、什么姿势、朝向哪里、手里拿着什么、主体在画面哪个位置、朝哪个方向运动、背景里有什么锚点，以及光源方向与色温、画面里最显眼的一两个固定件（仪表台 / 门框 / 路灯）——这些是下一镜唯一能继承的空间情报。不要写情绪或抽象概念。
-9. transition=same-take 的两镜，action 必须首尾相接：上一镜没做完的动作，下一镜接着做完；hard-cut / time-jump 允许动作跳，但不许人物凭空换位、道具凭空出现。
+8. entry 写这一镜开始时「谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝画面哪一侧运动」（第一镜写「开场」）。景别在近景 / 特写及以内的镜头，entry 还必须写清容器几何、两个以上固定件（车厢：方向盘 / 仪表台 / 后视镜 / 车窗框 / 雨刷；走廊：门框 / 踢脚线 / 顶灯），以及镜头相对主体的方位与高度——特写里没有这些，内饰与机位就会被模型凭空发明。上一镜 transition=same-take 时必须与它的 exit 是同一个画面事实；hard-cut / time-jump 允许换机位，但人物、场景、光线、运动方向与背景锚点必须与上一镜一致——换机位不换世界。对白戏的 entry 还要写清听者在画面里的位置（肩 / 后脑 / 侧脸在画框哪一侧）。
+9. exit 必须是一个可以直接拍出来的画面状态：谁、在哪里、什么姿势、朝向哪里、手里拿着什么、主体在画面哪个位置、朝哪个方向运动、背景里有什么锚点，以及光源方向与色温、画面里最显眼的一两个固定件（仪表台 / 门框 / 路灯）——这些是下一镜唯一能继承的空间情报。不要写情绪或抽象概念。
+10. transition=same-take 的两镜，action 必须首尾相接：上一镜没做完的动作，下一镜接着做完；hard-cut / time-jump 允许动作跳，但不许人物凭空换位、道具凭空出现。
 ${CUT_POINT_RULES}
-10. 空间连续：全片尽量在同一个空间内完成，开场用大远景 / 全景把空间关系交代清楚。每一镜都必须写 transition，说明这一镜怎么交到下一镜，只能取三个值：
+11. 空间连续：全片尽量在同一个空间内完成，开场用大远景 / 全景把空间关系交代清楚。每一镜都必须写 transition，说明这一镜怎么交到下一镜，只能取三个值：
     - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续，景别与机位都不许变（景别一变就不是同一次拍摄）。全片连续出现不得超过 2 次——每接一次画面都会掉一点细节，接多了人物就漂了。
     - hard-cut：停机换了机位——换景别 / 换角度 / 正反打。下一镜是新的机位，画面必须重新构图。绝大多数镜头都应该是这个。
     - time-jump：时间或地点跳转（次日、片刻后、换场地）。
     判断标准只有一句：摄影机有没有停机。还在同一次拍摄里就是 same-take，停机换了机位就是 hard-cut。
     一镜到底优先在一个镜头内完成：景别变化靠运镜（推近 / 拉远 / 跟随）表达，不要拆成多个镜头再靠 same-take 粘起来。必须在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位（人物走过柱子、门框、走廊，镜头甩进暗处），并在镜头上标 hiddenCut: true。
-11. 镜头语言成组：相邻镜头避免同样的景别 + 运镜，景别按「建立 → 逼近 → 细节 → 释放」的节奏推进。
-12. 情绪曲线：给每一镜 emotion（1~5）。不要一开场就 5，也不要全程 3；最高点落在全片后 1/3 的高潮镜。
-13. 镜头数量：给了明确的「镜头数量」就必须精确等于这个数量；给的是一段区间时，按「叙事断点」自己决定用几个镜头，必须落在区间内。串联性强的段落——同一空间、同一主体连续推进的追逐、穿行、对峙、连续对话——合成一个镜头，不要拆；只有换空间、跳时间、要藏起一个信息、情绪需要停顿时才切。不要为了凑数硬切，也不要把几个本该分开的节拍硬塞进一个镜头。
-14. duration 是这一镜的时长（秒，${limits.minShot}~${limits.maxShot} 的整数，当前视频模型只吃这个区间）。${limits.preferredShot} 秒以内质量最稳，普通镜头尽量排在这个范围内；只有串联性强的连续段落才用 ${limits.preferredShot}~${limits.maxShot} 秒的长镜，并且要确认这一段确实是一条不断开的动作链。用户给了总时长时，所有镜头 duration 之和必须等于它；没给总时长时，由你按剧情节奏决定总时长（${limits.minTotal}~${limits.maxTotal} 秒），不要套用固定值。
+12. 镜头语言成组：相邻镜头避免同样的景别 + 运镜，景别按「建立 → 逼近 → 细节 → 释放」的节奏推进。
+13. 情绪曲线：给每一镜 emotion（1~5）。不要一开场就 5，也不要全程 3；最高点落在全片后 1/3 的高潮镜。
+14. 镜头数量：给了明确的「镜头数量」就必须精确等于这个数量；给的是一段区间时，按「叙事断点」自己决定用几个镜头，必须落在区间内。串联性强的段落——同一空间、同一主体连续推进的追逐、穿行、对峙——合成一个镜头，不要拆；但对话段落按「话轮」拆：换一个人开口就是一个新镜头（一人一镜，见第 7 条）。只有换空间、跳时间、要藏起一个信息、情绪需要停顿时才切。不要为了凑数硬切，也不要把几个本该分开的节拍硬塞进一个镜头。
+15. duration 是这一镜的时长（秒，${limits.minShot}~${limits.maxShot} 的整数，当前视频模型只吃这个区间）。${limits.preferredShot} 秒以内质量最稳，普通镜头尽量排在这个范围内；只有串联性强的连续段落才用 ${limits.preferredShot}~${limits.maxShot} 秒的长镜，并且要确认这一段确实是一条不断开的动作链。用户给了总时长时，所有镜头 duration 之和必须等于它；没给总时长时，由你按剧情节奏决定总时长（${limits.minTotal}~${limits.maxTotal} 秒），不要套用固定值。
 ${extraRules ? `\n${extraRules}\n` : ''}
 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
@@ -324,6 +359,13 @@ JSON 结构：
       "purpose": "这一镜的叙事任务",
       "subject": "画面主体",
       "action": "具体动作",
+      "dialogue": {
+        "speaker": "这一镜唯一开口的人（必须来自主体卡）；本镜没人开口时省略整个 dialogue 字段",
+        "intent": "这句台词要达成什么（说服 / 试探 / 拒绝 / 威胁 / 摊牌），不要写台词原文",
+        "subtext": "潜台词：嘴上说的与心里要的不是同一件事",
+        "effect": "对方听到之后的可见变化（让步 / 反击 / 沉默 / 手停下）",
+        "listener": "听者是谁"
+      },
       "entry": "承接的上一镜状态（谁 / 在哪 / 姿势 / 朝向 / 运动方向）；第一镜写「开场」",
       "exit": "结束时留下的可拍摄状态（谁 / 在哪 / 画面位置 / 运动方向 / 背景锚点），必须是可切帧",
       "shotSize": "特写/近景/中景/全景/远景/大远景",
@@ -351,10 +393,10 @@ function buildUserPrompt(req: PlanRequest, correction?: string): string {
     : `每一镜给出 ${limits.minShot}~${limits.maxShot} 秒的 duration；镜头数量、每镜时长与总时长都由你按剧情决定（${MIN_SHOT_COUNT}~${MAX_SHOT_COUNT} 镜）`;
 
   const tail = req.shotRange
-    ? `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计一条连贯的状态链（镜头数量由你决定），${durationRule}，输出 JSON。`
+    ? `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计一条连贯的状态链（镜头数量由你决定）与对白节拍（谁开口 / 意图 / 潜台词 / 说完的变化，一人一镜），${durationRule}，输出 JSON。`
     : req.shotCount
-      ? `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计 ${req.shotCount} 个镜头组成的连贯状态链，${durationRule}，输出 JSON。`
-      : `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计一条连贯的状态链，${durationRule}，输出 JSON。`;
+      ? `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计 ${req.shotCount} 个镜头组成的连贯状态链与对白节拍（谁开口 / 意图 / 潜台词 / 说完的变化，一人一镜），${durationRule}，输出 JSON。`
+      : `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计一条连贯的状态链与对白节拍（谁开口 / 意图 / 潜台词 / 说完的变化，一人一镜），${durationRule}，输出 JSON。`;
 
   const correctionBlock = correction
     ? `
@@ -449,6 +491,28 @@ function normalizeScene(raw: Record<string, unknown>): PlanScene | null {
   };
 }
 
+/**
+ * 对白设计：模型可能给对象，也可能只给一句「说话人：意图」的字符串。
+ * 只收结构化结果——一镜一个 speaker 是硬约束，靠字符串解析保不住。
+ */
+function normalizeDialogue(raw: unknown): BeatDialogue | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const speaker = str(record.speaker ?? record.who ?? record.name);
+  if (!speaker) return undefined;
+  const intent = str(record.intent ?? record.purpose ?? record.goal);
+  const subtext = str(record.subtext ?? record.inner);
+  const effect = str(record.effect ?? record.change ?? record.reaction);
+  const listener = str(record.listener ?? record.to ?? record.target);
+  return {
+    speaker,
+    intent,
+    ...(subtext ? { subtext } : {}),
+    ...(effect ? { effect } : {}),
+    ...(listener ? { listener } : {}),
+  };
+}
+
 function normalizeBeat(
   raw: Record<string, unknown>,
   index: number,
@@ -463,6 +527,7 @@ function normalizeBeat(
   const emotion = Number.isFinite(emotionRaw)
     ? Math.round(clamp(emotionRaw, 1, 5))
     : undefined;
+  const dialogue = normalizeDialogue(raw.dialogue ?? raw.line ?? raw.speech);
 
   return {
     index,
@@ -470,6 +535,7 @@ function normalizeBeat(
     purpose: str(raw.purpose, `推进第 ${index} 段`),
     subject: str(raw.subject, '主体'),
     action: str(raw.action),
+    ...(dialogue ? { dialogue } : {}),
     entry: str(raw.entry, index === 1 ? '开场' : ''),
     exit: str(raw.exit),
     shotSize: normalizeShotSize(raw.shotSize),
@@ -629,6 +695,62 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
     });
   }
 
+  /**
+   * 对白设计的三项确定性检查。
+   * 这些都不阻塞重试：台词是分镜阶段还能补的东西，但必须留痕——
+   * 蓝图没设计对白时，分镜只能现编，出来的就是念设定。
+   */
+  const speakers = beats
+    .map((beat) => beat.dialogue)
+    .filter((dialogue): dialogue is BeatDialogue => !!dialogue);
+  const castNames = new Set(characters.map((c) => c.name.trim()));
+  const unknownSpeakers = speakers
+    .map((dialogue) => dialogue.speaker)
+    .filter((name) => !castNames.has(name.trim()));
+  if (unknownSpeakers.length > 0) {
+    problems.push({
+      code: 'dialogue-without-card',
+      message:
+        `对白设计里的说话人 ${[...new Set(unknownSpeakers)].map((name) => `「${name}」`).join('、')} 不在主体卡里；` +
+        '不能给没有卡的人安排台词——分镜阶段映射不上 speaker，这一镜的台词会变成没人开口，' +
+        '成片里音色与长相都对不上。两条修法选一条：给这个人补一张主体卡（按人类 8 项写全），' +
+        '或者把台词改给已有卡的人说（一人一镜，不要两个人共用一镜）',
+      // 结构性问题，必须重试：否则分镜只能写出一句没人认领的台词，还要再花一次整稿修复
+      blocking: true,
+    });
+  }
+
+  // 相邻两镜同一个人连续开口：这两个节拍应该合成一镜，或中间插一个反应镜头
+  const repeated = beats.filter(
+    (beat, i) =>
+      i > 0 &&
+      beat.dialogue?.speaker &&
+      beat.dialogue.speaker === beats[i - 1].dialogue?.speaker &&
+      beat.transition === 'hard-cut',
+  );
+  if (repeated.length > 0) {
+    problems.push({
+      code: 'dialogue-repeat',
+      message:
+        `第 ${repeated.map((beat) => beat.index).join('、')} 镜与上一镜是同一个人开口（硬切）；` +
+        '同一人物连续说几句应合成一镜，或在中间插一个不开口的反打 / 反应镜头，' +
+        '否则成片里就是同一张脸连着两个同构图',
+      blocking: false,
+    });
+  }
+
+  const humanCards = characters.filter((c) => c.subjectType !== 'vehicle' && c.subjectType !== 'mech');
+  if (speakers.length === 0 && humanCards.length >= 2 && !/无对白|没有台词|无需台词|默片/.test(req.idea)) {
+    problems.push({
+      code: 'missing-dialogue',
+      message:
+        '蓝图没有设计任何对白节拍，但片中有两个以上人物；' +
+        '请在关键冲突处设计 dialogue（speaker / intent / subtext / effect），' +
+        '让人物开口推进关系，而不是全靠旁白解释',
+      blocking: false,
+    });
+  }
+
   // 运动基调是全片级的兜底：没有它，某一镜的特写就只能靠自己那句描述撑住速度感
   if (!str(obj.motion)) {
     problems.push({
@@ -681,7 +803,9 @@ async function requestPlan(
       system: buildBlueprintSystemPrompt(undefined, '', shotLimits(req.videoModel)),
       user: buildUserPrompt(req, correction),
       temperature: 0.7,
-      maxTokens: 4000,
+      // 每个节拍多了 dialogue（speaker / intent / subtext / effect / listener），
+      // 4000 会在 10 镜以上被截断，蓝图直接失败降级
+      maxTokens: 6000,
     });
     return normalizeStoryPlan(raw, req);
   } catch {

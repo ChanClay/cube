@@ -3,10 +3,12 @@ import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/services/logger';
 import { callChatJson } from '@/lib/agents/llm';
 import {
+  DIALOGUE_RULES,
   normalizeBeatSheet,
   normalizeCameraMove,
   normalizeShotSize,
   SHOT_LANGUAGE_RULES,
+  SPEAKER_SHOT_RULES,
   str,
   TIMELINE_RULES,
   trimNarration,
@@ -29,8 +31,10 @@ function buildSystemPrompt(): string {
 6. 若提供了相邻镜头，本镜的动作要能接住上一镜、并给下一镜留出衔接空间；运动方向要与相邻镜头一致（上一镜朝画右，本镜不要朝画左），并让本镜最后一拍停在可辨认的动作相位上（主体仍在画面内）。避免与相邻镜头重复同一构图。若给出了「上一镜末帧里实际在场的人物」，本镜开头的人物必须与这份名单完全一致，不许增删；需要新角色出场时，写成在这一镜的过程里走进画面，而不是一开始就站在那里。
 6.1 本镜出现的每一辆车（主角座驾、追车、警车…）都要按卡片写进提示词，并复用它的固定英文短语；漏一辆，这辆车在这一镜里就会变成另一辆。
 6.2 本镜的地点由「本镜所在场景」决定：英文提示词里的空间短语必须来自该场景卡，不许改写成别的场景的地点，也不许把画面带回片头场景。本镜没标场景时，按上一镜的场景承接；两者都没有时，只写画面描述里出现的地点。
-7. narration 是这一镜的旁白或台词，可为空字符串（不要写"旁白："前缀）。
-8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字；旁白或没有台词时 speaker 留空。
+7. narration 是这一镜唯一的说话人所说的一句台词，或一句画外旁白，可为空字符串（不要写"旁白："前缀）。一镜只能有一个说话人，严禁把两个人的对白写进同一镜——要换人开口就换镜。
+8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字且只有一个；旁白或没有台词时 speaker 留空。
+8.1 ${DIALOGUE_RULES}
+8.2 ${SPEAKER_SHOT_RULES}
 9. title 是这一镜的小标题，4~8 个字。
 10. ${TIMELINE_RULES}
 11. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。

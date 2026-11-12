@@ -7,6 +7,7 @@ import {
   CONTINUITY_RULES,
   countWords,
   CUT_POINT_RULES,
+  DIALOGUE_RULES,
   directionLabel,
   directionsConflict,
   endsOffscreen,
@@ -16,6 +17,7 @@ import {
   matchedWords,
   mergeCards,
   narrationLimit,
+  narrationSpeakerConflicts,
   PROMPT_REPAIR_MAX_WORDS,
   PROMPT_REPAIR_WORDS,
   promptCameraMatches,
@@ -23,6 +25,7 @@ import {
   screenDirection,
   SHOT_LANGUAGE_RULES,
   shotSizeEn,
+  SPEAKER_SHOT_RULES,
   stateOverlap,
   SUBJECT_CARD_RULES,
   TIMELINE_RULES,
@@ -234,6 +237,39 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
       });
     }
 
+    /**
+     * 一人一镜：一镜里塞两个人的对白，成片里只会念出一句，另一句凭空消失，
+     * 或者两个人一起动嘴。这是结构性错误，必须在成稿前抓住。
+     */
+    const extraSpeakers = narrationSpeakerConflicts(shot, [...cast]);
+    if (extraSpeakers.length > 0) {
+      issues.push({
+        level: 'warn',
+        code: 'multi-speaker',
+        shotIndex: at,
+        message:
+          `第 ${at} 镜的台词里出现了另外的说话人（${extraSpeakers.join('、')}）：` +
+          '一镜只能有一个 speaker。把这一镜拆成两镜——A 的镜头 → hard-cut 反打 B 的镜头（守轴线），' +
+          '每镜只留一个人的台词；听的那个人单独给一个反应镜头',
+      });
+    }
+
+    /**
+     * 台词复述画面：画面已经拍到了（灯灭了、车翻了），台词又念一遍，
+     * 观众就在听配图朗诵。用词面重合度做保守判断，只在高度重合时提示。
+     */
+    const line = shot.narration.trim();
+    if (line.length >= 8 && description.length > 0 && stateOverlap(description, line) >= 0.4) {
+      issues.push({
+        level: 'warn',
+        code: 'dialogue-flat',
+        shotIndex: at,
+        message:
+          `第 ${at} 镜的台词「${line}」基本在复述画面描述里已经拍到的东西；` +
+          '台词要说画面说不出来的部分——目的、潜台词、关系的变化，或者干脆让这一镜不开口',
+      });
+    }
+
     if (shot.narrationType === 'dialogue') {
       if (!shot.narration.trim()) {
         issues.push({
@@ -394,7 +430,11 @@ const REPAIRABLE = new Set([
   'prompt-not-english',
   'prompt-forbidden',
   'prompt-weak',
-  'prompt-long',
+  /**
+   * prompt-long 不进修复集：一次修复要把整份剧本重写一遍（十几镜约 60 秒），
+   * 而日志里修完仍然是 190~220 词——花了最贵的一次调用却没修好，只会把生成拖到超时。
+   * 它留着当提示，由下一轮人工或单镜重算处理。
+   */
   'duplicate-prompt',
   'prompt-camera-mismatch',
   'prompt-shot-size-mismatch',
@@ -409,6 +449,8 @@ const REPAIRABLE = new Set([
   'dialogue-empty',
   'dialogue-no-speaker',
   'speaker-not-on-screen',
+  'multi-speaker',
+  'dialogue-flat',
 ]);
 
 export function needsRepair(issues: ScriptIssue[]): boolean {
@@ -437,8 +479,11 @@ function buildSystemPrompt(): string {
 6.1 修衔接时按剪辑点规则改：出口停在可切帧、方向不翻转、硬切写清承接的相位或锚点。
 ${CUT_POINT_RULES}
 6.2 主体一致性：${SUBJECT_CARD_RULES}
-7. narration 是这一镜要说的唯一一句话，10~20 字；narrationType 只能是 dialogue / voiceover / none，none 时 narration 必须为空字符串。
+7. narration 是这一镜唯一的说话人所说的一句台词，10~20 字；narrationType 只能是 dialogue / voiceover / none，none 时 narration 必须为空字符串。
 8. dialogue 必须同时给 speaker（说话人，必须是本镜 characters 里的名字），并把 speaker 加进 characters；voiceover / none 时 speaker 留空。不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。
+8.1 一人一镜（修多说话人的唯一正确做法）：一镜里出现两个人的台词时，把这一镜拆成相邻两镜——A 的镜头（带听者的肩 / 侧脸）→ B 的反打镜头（带说话人的肩 / 后脑），每镜只留一个人的台词与 speaker，transition 写 hard-cut 并说明「反打承接 A 的话尾」；听者如果要单独给反应，就再占一镜。拆出来的镜头沿用原来的动作与状态链，不新增剧情。
+8.2 ${DIALOGUE_RULES}
+8.3 ${SPEAKER_SHOT_RULES}
 9. 每镜 duration 保持原值（除非镜数变化需要重新分配），所有 duration 之和等于原总时长。
 10. characters / scenes 里的名字必须逐字来自主体卡 / 场景表。
 11. 每个镜头都要输出 entryState 与 exitState；原本没写的要补上，原本写了的不要改坏。首尾状态要写清主体在画面里的位置、运动方向与背景锚点。
@@ -576,6 +621,16 @@ ${issues.map((issue) => `- ${issue.message}`).join('\n')}
 ${shotJson}
 
 请输出修复后的完整 shots 数组 JSON。`;
+}
+
+/**
+ * 允许改镜数的问题：镜数本身不对，或一镜里混进了两个人的对白。
+ * 后者只能靠拆镜修——拆完镜数一定变，所以这里必须放行，否则修复稿会被判成「只回了补丁」。
+ */
+const COUNT_CHANGING = new Set(['shot-count', 'multi-speaker']);
+
+export function canChangeShotCount(issues: ScriptIssue[]): boolean {
+  return issues.some((issue) => COUNT_CHANGING.has(issue.code));
 }
 
 /** 请求一次修复；失败返回 null，调用方保留原稿 */

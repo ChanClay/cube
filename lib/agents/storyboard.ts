@@ -16,12 +16,13 @@ import { adaptStory } from './adaptation';
 import { planStory, normalizeSubjectType, type Beat, type StoryPlan } from './continuity';
 import { callChatJson } from './llm';
 import { localizePrompts } from './localize';
-import { auditScript, needsRepair, requestRepair, type ScriptIssue } from './review';
+import { auditScript, canChangeShotCount, needsRepair, requestRepair, type ScriptIssue } from './review';
 import {
   APPEARANCE_ONLY_RULES,
   clamp,
   CONTINUITY_RULES,
   CUT_POINT_RULES,
+  DIALOGUE_RULES,
   dedupeByName,
   directionsConflict,
   endsOffscreen,
@@ -37,6 +38,7 @@ import {
   PROMPT_MIN_WORDS,
   SHOT_LANGUAGE_RULES,
   shotSizeGap,
+  SPEAKER_SHOT_RULES,
   stateOverlap,
   str,
   stripForbiddenPromptPhrases,
@@ -97,7 +99,7 @@ function buildSystemPrompt(): string {
    判断标准：摄影机有没有停机。还在同一次拍摄里才是 same-take，停机换机位就是 hard-cut。
    transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take。
    ${PREV_FRAME_RULES}
-   镜数跟着「叙事断点」走，不跟着时长或景别走：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、连续对话——必须放进一个镜头，用 beatSheet 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要一个停顿。不要为了换景别、换机位、凑时长而切镜。
+   镜数跟着「叙事断点」走，不跟着时长或景别走：同一空间、同一主体连续推进的段落——追逐、穿行、对峙——必须放进一个镜头，用 beatSheet 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要一个停顿，以及对话里换了一个人开口。不要为了换景别、换机位、凑时长而切镜。
    一镜到底优先用一个镜头承载，不要拆：镜头内的景别变化靠 cameraMove（缓慢推近 / 缓慢拉远 / 跟随）+ beatSheet 表达。只有时长超过 8 秒、必须分段生成时才拆成多镜，且拆点两侧的景别、机位、人物姿势必须完全一致。
    确实要在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位：人物走过柱子、门框、走廊，镜头甩进暗处，雨幕或前景物件盖住画面。这时写 hiddenCut: true，景别可以随便跨，系统会把上一镜末帧降级成风格参考图而不会把它当首帧。
    ${CUT_POINT_RULES}
@@ -121,12 +123,15 @@ function buildSystemPrompt(): string {
 【五、分镜时间轴】
 15. ${TIMELINE_RULES}
 
-【六、台词】
-16. narration 是这一镜要说出来的唯一一句话，10~20 字；不要写进 description 或 videoPrompt，也不要写「旁白：」前缀。
-17. narrationType：dialogue = 画面里的人物开口说话（会驱动口型）；voiceover = 画外旁白（画面里的人物闭嘴）；none = 这一镜完全无口播（此时 narration 必须为空字符串）。
-18. dialogue 必须同时给 speaker（说话的角色名），speaker 必须逐字来自本镜 characters；不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。
-19. 有人物出镜、且这一镜承载情绪或冲突时，优先写一句人物台词；全片至少 1 句 dialogue（创意明确要求无对白时除外）。
-20. 台词长度不能超过这一镜能说完的量：5 秒镜最多约 20 字，长镜头最多 60 字；一句台词只表达一个意思，要口语、有潜台词，不要念设定。
+【六、对白：先做分析，再写台词】
+16. ${DIALOGUE_RULES}
+17. ${SPEAKER_SHOT_RULES}
+18. 蓝图给了 dialogue 的镜头，台词必须落实它的 intent / subtext / effect：写出来的是话，不是意图说明，更不许把 intent 直接当台词写；说完之后画面里要真的出现 effect 里的那个变化。蓝图没给 dialogue 的镜头不要硬加台词。
+19. 一场对话的拆分顺序：先排话轮（谁先说、谁接、谁沉默），一个话轮一个镜头；再决定谁的反打更紧（占上风的一方）、谁的反应镜头单独占一镜（情绪转折处）；最后才写每一句台词。
+20. narration 是这一镜要说出来的唯一一句话，10~20 字；不要写进 description 或 videoPrompt，也不要写「旁白：」前缀。
+21. narrationType：dialogue = 画面里的人物开口说话（会驱动口型）；voiceover = 画外旁白（画面里的人物闭嘴）；none = 这一镜完全无口播（此时 narration 必须为空字符串）。
+22. dialogue 必须同时给 speaker（说话的角色名），speaker 必须逐字来自本镜 characters；不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。一场对话里换人开口就换镜：台词与 speaker 必须按话轮拆开，speaker 一镜只有一个。
+23. 台词长度不能超过这一镜能说完的量：5 秒镜最多约 20 字，长镜头最多 60 字。有人物出镜、且这一镜承载情绪或冲突时，优先写一句人物台词；全片至少 1 句 dialogue（创意明确要求无对白时除外）。
 
 【七、数据完整性】
 21. 每个镜头的 characters 是这一镜真正出镜的主体名数组（人物，以及本镜出现的载具卡 / 主要道具卡），必须逐字使用角色表名字（无主体出镜时给空数组）；每个镜头里的 scenes 必须逐字使用场景表名字。
@@ -162,9 +167,9 @@ JSON 结构：
       ],
       "description": "中文画面描述",
       "videoPrompt": "这一镜 description 的忠实英文翻译",
-      "narration": "这一镜要说的话，可为空",
-      "narrationType": "dialogue | voiceover | none",
-      "speaker": "说这句台词的角色名（仅 dialogue 时填写，其余留空）",
+      "narration": "这一镜唯一的说话人所说的一句台词（10~20 字），或一句画外旁白；没人开口时为空字符串。严禁写两个人的对白",
+      "narrationType": "dialogue（画面里的人物开口）| voiceover（画外旁白，人不开口）| none（无口播）",
+      "speaker": "说这句台词的角色名（仅 dialogue 时填写，必须来自本镜 characters；一镜只有一个）",
       "characters": ["出镜角色名"],
       "scenes": ["所在场景名"]
     }
@@ -210,7 +215,11 @@ ${req.idea}
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？两个以上主体（尤其载具）同框时，第一句有没有写机位锚（镜头装在哪 / 朝哪 / 多高），谁在画面哪一侧、谁挡住谁、接触点在哪个部位是否都写得出来？每个 left / right / front / behind 是否都带了参照系（frame left / 实体名 + 部位 / the left-hand lane）？裸写的一律不合格——中文写「车尾左后方」、英文写 front right 这种方位错位必须逐条核对掉。
 6.1) 空间描述是否「先机位、再布局、后动作」？把提示词当读者读一遍：如果需要猜「谁在谁的左边」，模型就会猜，而且经常猜反。
 7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？这一镜是否有至少一个贯穿全镜的持续运动源（特写 / 近景最容易漏，只写表情就是一张静止的肖像）？
-8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
+8) 台词逐镜过一遍：
+   8.1) 每一镜是不是只有一个说话人？narration 里有没有混进第二个人的台词（两人对白连写、一问一答、两行「名字：」）？有就拆成两镜：A 的镜头 → hard-cut 反打 B 的镜头；
+   8.2) 对话戏是否按话轮拆成了不同镜头？说话人的镜头里有没有听者的肩 / 侧脸 / 后脑？听到关键台词的人有没有单独占一个反应镜头？正反打有没有守轴线（A 看画右、B 看画左）？
+   8.3) 每句台词是否回答得了四个问题：想达成什么 / 为什么不明说 / 对方怎么变 / 说完画面变什么？只是复述画面、交代身份设定的句子要删；
+   8.4) 台词是否在该镜时长能说完的范围内（5 秒约 20 字）？dialogue 是否都填了 speaker，且 speaker 在本镜 characters 里、蓝图给的意图也落实了？
 9) 所有 duration 之和是否等于 ${totalDuration} 秒？
 10) 每镜的最后一个 beat 是不是落点（动作到达可辨认相位），exitState 是不是主体还在画面内、写清了画面位置 / 运动方向 / 背景锚点？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
 11) 相邻两镜的运动方向是否一致（左→右不能接右→左）？要越轴时，是不是先垫了一个中性机位（迎面 / 背面 / 空镜）？hard-cut 的 transitionReason 是否写清了切点承接的是哪个动作相位或背景锚点？
@@ -238,12 +247,29 @@ ${selfCheck}`;
     .map((s) => `- ${s.name}：${s.desc}${s.promptEn ? `｜英文空间：${s.promptEn}` : ''}`)
     .join('\n');
 
+  const castNames = new Set(plan.characters.map((c) => c.name.trim()));
   const beats = plan.beats
     .map((b) => {
       const emotion = b.emotion ? `｜情绪：${b.emotion}/5` : '';
+      /**
+       * 说话人不在主体卡时，台词没法落到具体的人身上（没有参考图、没有口型对象）。
+       * 这里直接把它标成禁用，并要求改给在场的角色，避免分镜照抄出一个「没人认领」的 speaker。
+       */
+      const speakerValid = !b.dialogue || castNames.has(b.dialogue.speaker.trim());
+      const dialogue = b.dialogue
+        ? `\n   对白设计（这一镜唯一的说话人，台词要落实意图与潜台词）：` +
+          `speaker=${b.dialogue.speaker}` +
+          (speakerValid
+            ? ''
+            : '（不在主体卡：禁止用这个说话人；改成本镜在场且有卡的角色开口，或这一镜不开口）') +
+          `｜意图=${b.dialogue.intent || '（未给出）'}` +
+          `｜潜台词=${b.dialogue.subtext || '（未给出）'}` +
+          `｜说完的变化=${b.dialogue.effect || '（未给出）'}` +
+          `｜听者=${b.dialogue.listener || '（未给出）'}`
+        : '\n   对白设计：本镜不开口（不要硬加台词；需要一个反应镜头就写下来）';
       return (
         `${b.index}. [${b.beat}] 任务：${b.purpose}\n` +
-        `   主体：${b.subject}｜动作：${b.action}\n` +
+        `   主体：${b.subject}｜动作：${b.action}${dialogue}\n` +
         `   entryState（与上一镜 exitState 是同一个状态）：${b.entry}\n` +
         `   exitState（下一镜要能直接接住）：${b.exit}\n` +
         `   景别：${b.shotSize}｜运镜：${b.cameraMove}｜到下一镜：${b.transition}${emotion}`
@@ -598,11 +624,18 @@ function reconcileReferences(script: Script, plan: StoryPlan | null): void {
      */
     if (shot.narrationType === 'dialogue') {
       const rawSpeaker = str(shot.speaker);
+      /**
+       * 台词里点到的人：模型常把 speaker 写成不在主体卡里的人（剧本里出现的张飞、
+       * 袁绍之类），映射不上就会被置空，审片再判一次「没指定说话人」，
+       * 白跑一次整稿修复。这里退一步，用台词里唯一出现的角色兜住。
+       */
+      const namedInLine = castNames.filter((name) => name && shot.narration.includes(name));
       const speaker =
         (rawSpeaker ? matchName(rawSpeaker, castNames) : null) ??
         (rawSpeaker ? matchName(rawSpeaker, shot.characterNames) : null) ??
         (shot.characterNames.length === 1 ? shot.characterNames[0] : null) ??
-        (castNames.length === 1 ? castNames[0] : null);
+        (castNames.length === 1 ? castNames[0] : null) ??
+        (namedInLine.length === 1 ? namedInLine[0] : null);
 
       if (speaker) {
         shot.speaker = speaker;
@@ -1040,18 +1073,29 @@ function mergeRepairedShots(
   return { ...script, shots };
 }
 
+/**
+ * 审片与修复的结果。
+ *
+ * 修复稿可能因为「一镜里混进了两个人的对白」被拆成两镜——这是唯一正确的修法，
+ * 所以镜数必须跟着变，否则成稿收口时会把它裁回去。
+ */
+interface ReviewOutcome {
+  script: Script;
+  expectedShots: number;
+}
+
 async function reviewAndRepair(
   script: Script,
   plan: StoryPlan | null,
   expectedShots: number,
   style: string,
-): Promise<Script> {
+): Promise<ReviewOutcome> {
   const issues = auditScript(script, { expectedShots });
-  if (issues.length === 0) return script;
+  if (issues.length === 0) return { script, expectedShots };
 
   if (!config.llm.review || !needsRepair(issues)) {
     // 剩下的都是可以确定性修掉的问题，没必要再花一次模型调用
-    return script;
+    return { script, expectedShots };
   }
 
   const repaired = await requestRepair({ script, plan, issues, expectedShots, style });
@@ -1060,24 +1104,35 @@ async function reviewAndRepair(
       reason: '审片修复失败，保留原稿',
       issues: summarizeIssues(issues),
     });
-    return script;
+    return { script, expectedShots };
   }
 
-  // 修复稿镜数变了但不是因为「镜数不对」，说明模型只回了补丁而非完整剧本，不能整份替换
-  const countIssue = issues.some((issue) => issue.code === 'shot-count');
-  if (!countIssue && repaired.length !== script.shots.length) {
+  /**
+   * 修复稿镜数变了但不是因为「镜数不对 / 需要拆对白」，说明模型只回了补丁而非完整剧本，
+   * 不能整份替换。
+   */
+  if (!canChangeShotCount(issues) && repaired.length !== script.shots.length) {
     void logAgentWarn('review', {
       reason: '修复稿镜数与要求不一致，保留原稿',
       expected: script.shots.length,
       received: repaired.length,
     });
-    return script;
+    return { script, expectedShots };
   }
 
   const merged = mergeRepairedShots(script, repaired);
-  if (!merged) return script;
+  if (!merged) return { script, expectedShots };
 
-  return merged;
+  const changed = merged.shots.length !== script.shots.length;
+  if (changed) {
+    void logAgentWarn('review', {
+      reason: '修复稿改变了镜数，按修复后的镜头数收口',
+      before: script.shots.length,
+      after: merged.shots.length,
+    });
+  }
+
+  return { script: merged, expectedShots: merged.shots.length };
 }
 
 const summarizeIssues = (issues: ScriptIssue[]): string[] =>
@@ -1220,8 +1275,8 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
 
   /** 动态模式下降级时没有蓝图，用最少镜数兜底（每镜尽量 10 秒，总时长不会缩水） */
   const fallbackShots = plannedShotCount ?? budget?.split.minShotCount ?? 6;
-  /** 用户要求的镜数优先；动态模式 / 小说模式由蓝图的节拍数决定 */
-  const expectedShots = isNovel
+  /** 用户要求的镜数优先；动态模式 / 小说模式由蓝图的节拍数决定。审片拆对白时会被改写 */
+  let expectedShots = isNovel
     ? (plan?.beats.length ?? fallbackShots)
     : (plannedShotCount ?? (plan ? plan.beats.length : fallbackShots));
 
@@ -1248,7 +1303,10 @@ export async function generateScript(req: ScriptRequest): Promise<ScriptResult> 
   script = await localizeScriptPrompts(script, plan);
 
   // 第四步：审片。有硬伤时让模型修一次，仍然失败就保留原稿，不让生成失败
-  script = await reviewAndRepair(script, plan, expectedShots, style);
+  const reviewed = await reviewAndRepair(script, plan, expectedShots, style);
+  script = reviewed.script;
+  // 一镜里混进两个人的对白时，修复稿会拆成两镜：镜数必须跟着改，否则收口时被裁掉
+  expectedShots = Math.min(reviewed.expectedShots, MAX_SHOT_COUNT);
 
   // 修复稿可能改了镜数 / 引用，重新收口一次
   finalizeScript(script, plan, expectedShots, budget, totalDuration, limits);

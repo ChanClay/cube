@@ -76,6 +76,7 @@
 | `videoPrompt` | 英文，40~125 词（<30 或 >170 判不合格） | `PROMPT_*_WORDS` |
 | `videoPrompt` 中文占比 | 汉字 / (字母 + 汉字) ≤ 12% | `isEnglishPrompt` |
 | 台词长度 | `min(60, max(16, duration × 4))` 字 | `narrationLimit` |
+| 一人一镜 | 一镜只有一个 `speaker`，`narration` 里也只能有这一个人的台词；合规写法见 `dialogue.md` | `SPEAKER_SHOT_RULES` / `narrationSpeakerConflicts` |
 | `beatSheet` | 首段 from=0、末段 to=duration、不断档不重叠、最多 8 段 | `normalizeBeatSheet` |
 | `beatSheet[].actionEn` | 每段 8~14 词英文动作短语；运行时拼成英文时间轴与 videoPrompt 一起提交 | `TIMELINE_RULES` / `timelineClause` |
 | `beatSheet` 段数 | duration ≥4 时至少 2 段；2~4 秒 2 段，5~10 秒 2~3 段，10~20 秒 3~5 段 | `TIMELINE_RULES` |
@@ -90,6 +91,7 @@
 - `transition`：`same-take / hard-cut / time-jump`。没写时系统按状态链重合度推断，拿不准一律写 `hard-cut`。
 - `hiddenCut`：布尔。这次换机位靠遮挡 / 甩镜 / 暗部完成时写 `true`——长镜头里换景别的唯一做法，此时景别可随便跨。
 - `narrationType`：`dialogue / voiceover / none`，缺省 `voiceover`。写了台词却标 `none` 会被降级成 `voiceover`。
+- `speaker`：只在一镜里唯一的那个人口时出现，必须逐字来自本镜 `characters`。两个人的对白必须拆成两镜——A 的镜头 → `hard-cut` 反打 B 的镜头，`transitionReason` 写「反打承接上一句的话尾」。
 
 ## 四、禁用词（`videoPrompt` 内）
 
@@ -121,6 +123,8 @@
 | `dialogue-empty` | warn | 标了台词却没内容 | 补台词或改 `voiceover`/`none` |
 | `dialogue-no-speaker` | warn | 没指定说话人 | 补 `speaker` |
 | `speaker-not-on-screen` | warn | 说话人不在本镜 | 把 `speaker` 加进本镜 `characters`，或换人 |
+| `multi-speaker` | warn | 一镜里出现两个人的台词（两人对白连写 / 一问一答 / 两行「名字：」） | 拆成相邻两镜：A 的镜头 → `hard-cut` 反打 B 的镜头，每镜只留一个 `speaker`；拆镜后镜数会覆盖原目标镜数 |
+| `dialogue-flat` | warn | 台词在复述画面（与 `description` 词面高度重合） | 改成说画面说不出的事（目的 / 潜台词 / 关系变化），或让这一镜 `narrationType: "none"` |
 | `unknown-character` / `unknown-scene` | warn | 引用了清单外的名字 | 逐字对齐顶层清单 |
 | `state-missing` | warn | 缺 `entryState` / `exitState` | 补上可拍摄的画面事实；hard-cut 的首尾状态同样是下一处剪辑点的依据 |
 | `continuity-gap` | warn | 上镜出口与本镜入口对不上 | 对齐状态，或在上一镜写 `hard-cut`/`time-jump` |

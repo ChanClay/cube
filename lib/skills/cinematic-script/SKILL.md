@@ -1,19 +1,20 @@
 ---
 name: cinematic-script
-description: This skill should be used when writing, rewriting, auditing, or fixing shot scripts for this project's text → storyboard → AI video pipeline, with the goal of a film-grade result. Trigger it when the user asks for 剧本 / 分镜 / 脚本 / 镜头语言 / 电影感 / 影视级 / 提示词, wants an idea or novel excerpt turned into Script JSON (characters, scenes, shots with entryState/exitState/beatSheet/videoPrompt), or complains that generated video looks 不电影 (画面漂移、镜头接不上、动作发糊、节奏拖沓、像 PPT). Not for editing video files, composing clips, or changing UI code.
+description: This skill should be used when writing, rewriting, auditing, or fixing shot scripts for this project's text → storyboard → AI video pipeline, with the goal of a film-grade result. Trigger it when the user asks for 剧本 / 分镜 / 脚本 / 台词 / 对白 / 对话 / 正反打 / 镜头语言 / 电影感 / 影视级 / 提示词, wants an idea or novel excerpt turned into Script JSON (characters, scenes, shots with entryState/exitState/beatSheet/videoPrompt/narration/speaker), or complains that generated video looks 不电影 (画面漂移、镜头接不上、动作发糊、节奏拖沓、像 PPT、台词在念设定、两个人抢一个镜头). Not for editing video files, composing clips, or changing UI code.
 ---
 
 # 影视级分镜脚本
 
 把创意 / 小说片段 / 已有分镜，写成这个项目能直接消费的 `Script` JSON（`lib/types.ts`），并且让每一镜单独看是电影画面、连着看是一条不跳的镜头链。
 
-## 五条不可让步的原则
+## 六条不可让步的原则
 
 1. **先蓝图，再分镜。** 没有 `StoryPlan`（主体卡、场景、entry/exit 状态链、情绪曲线）就直接写 shots，必然出现「每镜都成立、接起来就断」。先定故事层，再逐镜落地。
 2. **一镜一个动作。** 文生视频模型一镜塞两个动作就会把画面拆成两段再接起来，接缝就是抽帧般的抖动。多出来的动作放到下一镜，用 `hard-cut` 交棒。
 3. **一致性写在纸上，不靠记忆。** 主体外貌、场景光线必须落成全片一字不改的英文短语（`promptEn`），每镜提示词逐字复用。写漂的根源永远是「这一镜重新描述了一遍长相」。
 4. **一致性属于每一个会被认出的主体，不只属于人。** 车、飞行器、机甲、坐骑、标志性道具都要单独成卡：追逐戏里被追的车和追的车各一张。漏一张卡，那辆车就会在每一镜里重新设计一遍（车型、车漆、改装件全变）。
 5. **每个镜头都要停在可切的画面上。** 出口留在主体出画、全糊、或者动作做到一半，下一镜就没有落点可接——这就是「上一镜意犹未尽、下一镜接不上」的真正原因。出口要落在可辨认的动作相位上：要么动作顶点收，要么交给下一镜接着做（`same-take`），要么用遮挡 / 甩镜交接（`hiddenCut`）。
+6. **一句台词，一个说话人，一个镜头。** 台词是设计出来的，不是把剧情念出来；换人开口就必须换镜。一镜只有 `speaker` 一个字段，一镜的 `narration` 也只能有这一个人说的话——把两个人的对白塞进一镜，成片里模型只会念出一句，另一句凭空消失，或者两个人一起动嘴。对白戏按「话轮」拆镜、按正反打组接，细则见 `references/dialogue.md`。
 
 ## 执行流程
 
@@ -39,6 +40,8 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 - `logline` 必须包含「谁 + 想要什么 + 被什么阻碍 + 可能付出什么代价」，40 字内。
 - 结构用经典节拍（开场钩子 / 铺垫 / 激励事件 / 升级 / 中点转折 / 低谷 / 高潮 / 余韵），镜数少可省略中间节拍，但开场钩子、高潮、余韵不能缺。
 - 每个 beat 必写 `entry`（这一镜第一帧的画面事实）与 `exit`（最后一帧的画面事实），它们是全片唯一可靠的锚点。画面里有运动主体时，两者都要写清「画面位置 + 运动方向与速度 + 一个背景锚点」。禁止写「他很紧张」「气氛凝重」这类拍不出来的内容。
+- **对白在蓝图阶段就要设计，不要留给分镜现编。** 这一镜里有人开口，就给该 beat 写 `dialogue`：`speaker`（这一镜唯一开口的人，逐字来自主体卡）、`intent`（这句话要达成什么，写动作性的意图，不是台词原文）、`subtext`（嘴上说的与心里要的不是同一件事）、`effect`（对方听完之后的可见变化）、`listener`（听者是谁，决定反打镜头里出现谁）。没人开口就留空——反应镜头、环境镜、纯动作镜不需要台词。
+- **两个人开口 = 两个 beat = 两个镜头。** A 说完 B 接话，必须拆成相邻两个节拍（`hard-cut`），不许把一问一答压进一个 beat；同一人物连续说几句可以留在同一节拍里，用 `action` 写清「说第一句 / 停顿 / 说第二句」。蓝图里 `speaker` 不在主体卡、或相邻两镜同一个人连续开口（中间没有反应镜头），都会被判问题。
 - **主体卡 2~5 张，不只放人**：先列一遍「本片有哪些需要在两个以上镜头里被认出来的视觉主体」，逐个判断类型，再写卡。人按「廓形 / 头部 / 上装 / 下装与鞋 / 装备义体 / 配色 / 道具 / 气质」写；机甲、机器人、巨兽按「机型体量 / 头部传感器 / 装甲材质与涂装 / 关节液压 / 武器 / 配色 / 编号 / 动作特征」写；载具按「车型体量 / 车身与车漆 / 玻璃 / 轮毂与轮胎 / 灯具 / 改装件 / 标识 / 动态特征」写。**绝不能给人以外的卡写年龄、发型、上衣和鞋**。
 - 载具最容易漏：追车有卡、主角座驾没卡，成片里主角车每镜一个样。追逐 / 竞速 / 逃亡题材里，被追的与追的必须各占一张卡（见「主体卡缺口」校验）。
 - 场景 1~4 个。
@@ -48,7 +51,8 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 
 逐镜写 `title / duration / shotSize / cameraMove / transition / referencePrevFrame / hiddenCut / entryState / exitState / beatSheet / description / videoPrompt / narration*`。
 
-- **镜数跟着「叙事断点」走，不跟着时长或景别走**：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、连续对话——放进一个镜头，用 `beatSheet` 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要停顿。不要为了换景别、换机位、凑时长而切镜。
+- **镜数跟着「叙事断点」走，不跟着时长或景别走**：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、同一个人的连续台词——放进一个镜头，用 `beatSheet` 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要停顿，**以及对话里换了一个人开口**。不要为了换景别、换机位、凑时长而切镜。
+- **对话段落按「话轮」切，不按「对话段落」切**：话轮表（谁先说、谁接、谁沉默）先排出来，一个话轮一镜；换人开口就是一次 `hard-cut` 反打，`transitionReason` 写「反打承接上一句的话尾」。说话人的镜头里留听者的肩 / 侧脸 / 后脑，听到关键台词的人单独给一个不开口的反应镜头。
 - 景别按「建立 → 逼近 → 细节 → 释放」推进：开场用大远景/全景交代空间关系，情绪高点用近景/特写，结尾释放回环境或留白。
 - 相邻两镜不要同景别 + 同运镜。景别一次最多跨 1 档（特写直接接大远景等于换了个世界）。
 - `transition` 只按「摄影机有没有停机」判断：同一次拍摄里切两刀 = `same-take`（单镜 ≤8 秒、全片连续不超过 2 次；景别与机位都不许变）；停机换机位 = `hard-cut`（绝大多数镜头）；时间或地点跳转 = `time-jump`。
@@ -92,12 +96,50 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 
 细节与正反例见 `references/video-prompt.md`。
 
-### 5. 台词与声音
+### 5. 对白：先做台词分析，再拆镜，最后才写话
 
-- `narration` 一镜只有一句，10~20 字；上限 `min(60, max(16, duration×4))` 字，超了视频模型不会放慢语速，只会吞掉后半句。
+台词是最容易被糊过去的一步。跳过分析直接「让角色说点什么」，出来的必然是念设定、复述画面、两个人抢一个镜头。按下面四步走，细则与正反例见 `references/dialogue.md`。
+
+#### 5.1 每一句都过四问（答不上就删）
+
+| 问题 | 不合格的写法 | 合格的写法 |
+| --- | --- | --- |
+| 目的：这句要达成什么 | 「你回来了。」（只是打招呼） | 「灯油只剩半桶了。」（逼对方做选择） |
+| 潜台词：为什么不明说 | 直白宣布自己的动机 | 说天气、说工具、说钱，说的都不是真正想说的那件事 |
+| 变化：对方听完怎么变 | 对方毫无反应，剧情原地踏步 | 让步 / 反击 / 沉默 / 手上的动作停下来 |
+| 画面：说完画面变什么 | 只有嘴在动 | 灯被吹灭、手松开、视线移开、脚步停下 |
+
+另外三条硬约束：**一句一个意思**（10~20 字，口语、可念、带停顿）；**不念设定**（身份、世界观、上一场发生了什么，只要画面能拍到就不许说出来）；**不复述画面**（画面已经拍到谁受伤、车翻了、灯灭了，台词不许再说一遍——要说的是画面说不出来的关系、意图与代价）。
+
+#### 5.2 排话轮 → 拆镜头（一人一镜）
+
+1. 先列话轮：谁先说、谁接、谁沉默、谁在哪一句之后不说话了。
+2. 一个话轮一个镜头。**换人开口必须换镜**——这不是风格选择：一镜只有一个 `speaker`，模型按这一镜的台词合成音频，塞两个人的话进去，它只会念一句，另一句消失，或者两个人一起动嘴。
+3. 绝对禁止把两人对白写进同一镜的 `narration`：「老陈：撤。」「小满：不撤。」、一问一答连写、两组以上带说话人标签的引号，都属于结构性错误，校验会报 `multi-speaker`。
+4. 同一人物连续说几句可以留在同一镜里，用 `beatSheet` 分出「说第一句 / 停顿 / 说第二句」；一旦换人开口，必须切。
+5. 关键台词之后给听者一个**反应镜头**：不开口（`narrationType=none`）或只留一句短句。情绪转折常常落在这一镜，而不是说话人那一镜。
+
+正反打的写法：
+
+- 视线匹配：A 看画面右侧，B 就看画面左侧；机位停在两人连线的同一侧（轴线），不许越轴。
+- 换机位至少 30°，不要同景别同构图对切。
+- 说话人的镜头里必须有听者的一点存在（肩、后脑、耳、手），否则就成了独白。
+- 景别跟着权力关系走：占上风的一方给更紧的景别与更低的角度，让步的一方给更松的景别。
+- 硬切要写 `transitionReason`：「反打承接 A 的话尾」「B 抬眼之前的那次呼吸」。
+
+#### 5.3 字段与长度（硬约束）
+
+- `narration` 一镜只有一句，10~20 字；上限 `min(60, max(16, duration×4))` 字。超了视频模型不会放慢语速，只会吞掉后半句。
 - `narrationType`：`dialogue`（画面里的人物开口，驱动口型）/ `voiceover`（画外旁白，人物闭嘴）/ `none`（无口播，`narration` 必须为空字符串）。
-- `dialogue` 必须给 `speaker`，且 `speaker` 逐字来自本镜 `characterNames`。不要把人物台词写成旁白。全片至少 1 句 `dialogue`（用户明确要求无对白除外）。
-- 台词只表达一个意思、要口语、要留潜台词，不要念设定。画面已经说清的信息不要再用旁白解释。
+- `dialogue` 必须给 `speaker`，且 `speaker` 逐字来自本镜 `characterNames`；一镜只有一个 `speaker`。不要把人物台词写成旁白，也不要把旁白写成台词。
+- 全片至少 1 句 `dialogue`（用户明确要求无对白除外）；对白戏要占住关键冲突，不要整片只用旁白解说。
+- `voiceover` 只用来压缩画面拍不到的时间跨度（几年过去了、这个人后来怎样），一镜最多一句，绝不解释画面——旁白一密，戏就变成配图朗诵。
+
+#### 5.4 声音
+
+- 台词必须写进提示词才会被念出来（`lib/skills/dialogue.ts` 已经把它拼成「说话人 + 引号台词」的结构）。
+- HappyHorse 没有 `audio` 开关、也不接受参考音频：音色只能靠文字描述，所以同一人物的台词要维持同一套语气词与称呼，别一镜一个腔调。
+- 需要环境声时，在 `videoPrompt` 末尾加一句（如 `heavy rain and distant thunder`），不要单独写一大段声音描述。
 
 ### 6. 成稿自检（必做，不要凭感觉交付）
 
@@ -107,7 +149,7 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 ```
 
-校验覆盖：镜数与时长、英文提示词词数与禁用词、景别/运镜与英文是否对得上、固定短语是否复用、秒级节拍是否覆盖 0~duration、台词长度与说话人、主体/场景引用、跨镜状态链是否断开、出口是否出画（`exit-offscreen`）、运动方向是否翻转（`direction-flip`）、硬切是否写了切点说明（`cut-undeclared`）。`fatal` 必须清零，`warn` 逐条判断。
+校验覆盖：镜数与时长、英文提示词词数与禁用词、景别/运镜与英文是否对得上、固定短语是否复用、秒级节拍是否覆盖 0~duration、台词长度与说话人、一镜多人说话（`multi-speaker`）、台词复述画面（`dialogue-flat`）、主体/场景引用、跨镜状态链是否断开、出口是否出画（`exit-offscreen`）、运动方向是否翻转（`direction-flip`）、硬切是否写了切点说明（`cut-undeclared`）。`fatal` 必须清零，`warn` 逐条判断。
 
 自检清单：
 
@@ -123,9 +165,12 @@ node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 10. **每个出口是否可切**：最后一拍是不是落点？主体是否还在画面内？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
 11. **相邻两镜运动方向是否一致**？要越轴时是否先垫了中性机位？硬切的 `transitionReason` 是否写清承接了哪个相位或锚点？
 12. **空间是否无歧义**：多主体 / 载具镜有没有机位锚？每个方位词是否都带参照系？把提示词当读者读一遍——如果你需要猜「谁在谁的左边」，模型也一定会猜错，而且会猜成另一个方向。
+13. **对白是否一人一镜**：每镜 `speaker` 是否唯一？`narration` 里有没有混进第二个人的台词（两人对白连写、一问一答、两行「名字：」）？对话戏是否按话轮拆成了不同镜头？说话人的镜头里有没有听者的肩 / 侧脸，关键台词之后有没有给听者一个反应镜头，反打有没有守轴线？
+14. **每句台词是否经得起四问**：想达成什么 / 为什么不明说 / 对方怎么变 / 说完画面变什么？凡是复述画面、交代设定、谁听都不改变的句子，删掉；删完如果这一镜空了，说明这一镜本来就该用画面推进。
 
 ## 资源索引
 
+- `references/dialogue.md` — 台词分析四问、话轮拆分、正反打与反应镜头、旁白边界、常见失败模式表，以及一段原文对白改成分镜的完整示例。
 - `references/film-language.md` — 景别语义、运镜、构图、光线与调色、镜头组接、节奏曲线，以及「AI 视频为什么不像电影」的病历表。
 - `references/video-prompt.md` — 提示词模板、词表、正反例、常见失效模式。
 - `references/script-schema.md` — `Script` JSON 全字段、硬约束数值、审片问题码与修法、`/api/script` 入参。
@@ -134,6 +179,7 @@ node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 ## 与本仓库代码的关系
 
 - 本 skill 是「怎么写」的规范；运行时真正下发给模型的提示词在 `lib/agents/*.ts`。
-- 改代码里的提示词时，景别/运镜/词数/禁用词、跨镜连贯性、剪辑点（`CUT_POINT_RULES`）、主体卡（`SUBJECT_CARD_RULES`）等规则的**唯一来源**是 `lib/skills/spec.ts`，不要在 `storyboard.ts`、`review.ts`、`/api/shot/refine` 各写一份，否则模型会收到互相矛盾的指令。
+- 改代码里的提示词时，景别/运镜/词数/禁用词、跨镜连贯性、剪辑点（`CUT_POINT_RULES`）、主体卡（`SUBJECT_CARD_RULES`）、台词分析（`DIALOGUE_RULES`）、一人一镜（`SPEAKER_SHOT_RULES`）等规则的**唯一来源**是 `lib/skills/spec.ts`，不要在 `storyboard.ts`、`review.ts`、`/api/shot/refine` 各写一份，否则模型会收到互相矛盾的指令。
+- 对白设计在蓝图阶段就产出（`lib/agents/continuity.ts` 的 `Beat.dialogue`：speaker / intent / subtext / effect / listener），分镜阶段只负责把它落成台词与镜头；审片用 `narrationSpeakerConflicts` 兜住「一镜两人说话」，命中 `multi-speaker` 时允许拆镜，拆完的镜数会覆盖原目标镜数。
 - 主体卡复用 `Script.characters` 这个结构（含载具与关键道具），卡片的配图会作为参考图挂在它出镜的镜头上；`lib/skills/shot-media` 只认 `characterNames` 与描述里的名字，所以分镜时必须把载具写进本镜 `characters`。
 - 想把脚本直接跑成视频，走 app 的 `POST /api/script` 生成，再逐镜生成；`lib/agents/storyboard.ts` 已实现「蓝图 → 分镜 → 英译 → 审片 → 定稿」全链路，手写脚本只在用户要求离线输出或改稿时使用。

@@ -202,6 +202,90 @@ export function trimNarration(text: unknown, duration = 5): string {
   return cut >= 8 ? head.slice(0, cut + 1) : head;
 }
 
+/**
+ * 台词设计。
+ *
+ * 模型最容易把台词写成「剧情说明书」：交代身份、复述上一场、把画面已经说清的
+ * 信息再念一遍。台词一旦只是解释，观众就在听配图朗诵，而不是看戏。
+ * 所以写台词前必须先做一次分析，四个问题答不上来就删掉这句。
+ */
+export const DIALOGUE_RULES = `台词是设计出来的，不是把剧情念出来。写每一句之前先回答四个问题，答不上来就删掉这句：
+- 目的：这句要达成什么——说服 / 试探 / 拒绝 / 威胁 / 拖延 / 摊牌 / 求和？没有目的的台词只是在发音；
+- 潜台词：为什么不能直说——隐瞒、身份、场合、怕失去对方？嘴上说的和心里要的必须不是同一件事；
+- 变化：对方听到之后会怎么变——让步 / 反击 / 沉默 / 手停下来？说完什么都没变，这句就不该存在；
+- 画面：这句说完，画面里出现什么可见变化（放下的手、移开的视线、熄灭的灯）？
+其余硬约束：
+- 一句台词只表达一个意思，10~20 字，口语、可念、带停顿；短句比长句有力，问句比陈述有戏；
+- 不念设定：身份、世界观、上一场发生了什么，只要画面能拍到就不许由人物说出来；不许写「他心想」「他看着远方，思绪万千」这类既拍不出也念不出的内容；
+- 画面已经说清的（谁受伤了、车翻了、灯灭了）台词不许复述；台词要说画面说不出来的部分——关系、意图、代价；
+- 对白靠信息差推进：两个人知道的不是同一件事，台词才互相咬得住；双方都知情时，只能靠态度与潜台词区分；
+- 台词与这一镜的动作互补，不重复：手上在拧灯罩，嘴上就别说「我在点灯」；
+- 允许沉默：整镜没有台词（narrationType=none）比塞一句废话好；情绪最高点往往落在反应镜头而不是台词镜头；
+- voiceover 只用来压缩画面拍不到的时间跨度（几年过去了、这个人后来怎样），一镜最多一句，绝不用来解释画面；旁白一密，戏就变成配图朗诵。`;
+
+/**
+ * 一人一镜。
+ *
+ * 视频模型的音频是按「这一镜的台词」合成的：一镜里塞两个人的对白，
+ * 它只会挑一句念出来（另一句凭空消失），或者让画面里两个人一起动嘴。
+ * 所以「不同的人开口」必须对应「不同的镜头」——这不是风格选择，是结构性约束。
+ */
+export const SPEAKER_SHOT_RULES = `一人一镜：换人开口就必须换镜，这是硬规则，不是风格选择。
+- 一个镜头只能有一个说话人：speaker 只有一个，narration 里也只能有这一个人说的话；
+- 严禁把两个人的对白写进同一镜的 narration：「老陈：撤。」「小满：不撤。」、一问一答连写、两组以上带说话人标签的引号，都属于结构性错误——成片里模型只会挑一个人开口，另一个人的台词凭空消失，或者两个人都动嘴、口型全错；
+- A 说完、B 接话 = 两个镜头：A 的镜头（近景 / 中景，带听者的肩或侧脸）→ hard-cut 反打 B 的镜头（带说话人的肩或后脑），transitionReason 写「反打承接 A 的话尾」；
+- 同一说话人的连续几句可以留在同一镜里（用 beatSheet 分出「说第一句 / 停顿 / 说第二句」），但只要换人开口，必须切；
+- 反应镜头独立成镜：听到关键台词的人单独占一镜（不开口，或只留一句短句），它承担情绪转折，不要塞进说话人的镜头里；
+- 正反打守轴线：A 看画右，B 就看画左，机位停在两人连线的同一侧；要越轴必须先在中间垫一个中性机位（空镜、手部特写、背影跟拍）；
+- 景别跟着权力关系走：占上风的一方给更紧的景别与更低的角度，让步的一方给更松的景别；不要双方同景别同构图；
+- 说话人的镜头里必须有听者的一点存在（肩、后脑、耳、手），否则就成了独白；
+- 全片至少 1 句 dialogue（用户明确要求无对白除外）；没有台词的镜头写 narrationType=none，不要用空字符串糊过去。`;
+
+/** 说 / 问 / 答这类动词：名字后面跟着它们，说明这个人在这一镜里开口了 */
+const SPEECH_VERB = '(?:说|道|问|答|喊|叫|开口|低语|嘟囔|回话|回应|接过话|自语|念道)';
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * 这一镜的台词里还混进了谁在说话。
+ *
+ * 用于确定性检查「一人一镜」：模型把两个人的对白压进一镜时，
+ * 会在 narration 里留下「小满答：」「老陈说」或者两行「名字：」的痕迹。
+ * 只认这些硬证据，不做语义猜测——宁可漏报，也不要误报把单人台词判成多人。
+ */
+export function narrationSpeakerConflicts(
+  shot: { narration?: string; speaker?: string; characterNames?: string[] },
+  castNames: string[] = [],
+): string[] {
+  const narration = str(shot.narration);
+  if (!narration) return [];
+
+  const speaker = str(shot.speaker);
+  const others = [...new Set([...castNames, ...(shot.characterNames ?? [])])]
+    .map((name) => str(name))
+    // 名字是说话人名的子串（「陈」vs「老陈」）时无法判定，跳过，避免误报
+    .filter((name) => name && name !== speaker && !speaker.includes(name));
+
+  const evidence = others.filter((name) => {
+    const escaped = escapeRegExp(name);
+    // 「小满答：」/ 换行后的「小满：」——剧本格式的对白标签
+    const label = new RegExp(`(^|[\\n。！？；])\\s*${escaped}\\s*[：:]`);
+    const withVerb = new RegExp(`${escaped}\\s*${SPEECH_VERB}`);
+    return label.test(narration) || withVerb.test(narration);
+  });
+
+  // 同一镜里出现两个以上「名字：」标签：这是两人对白被塞进一镜的直接证据
+  const labels = narration.match(/(^|[\n。！？；])\s*[^\s：:，。！？；「」“”"']{1,10}\s*[：:]/g) ?? [];
+  const multiLabel = labels.length >= 2;
+
+  if (!speaker) {
+    // 没填 speaker 时，孤立的一个人名多半就是真正的说话人，交给「缺 speaker」那条规则
+    return evidence.length >= 2 ? evidence : multiLabel ? ['多人对白'] : [];
+  }
+  if (evidence.length > 0) return evidence;
+  return multiLabel ? ['多人对白'] : [];
+}
+
 /** 景别 / 运镜的合法取值说明，拼进提示词用 */
 export const SHOT_LANGUAGE_RULES =
   `shotSize 只能用：${SHOT_SIZES.join(' / ')}；` +

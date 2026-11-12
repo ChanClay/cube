@@ -43,7 +43,8 @@ A. 只保留一条主线：一个主角、一个核心欲望、一个关键阻�
 B. 必须保留原作的主角落点、核心冲突、关键道具与结局方向；可以合并场景、压缩时间、删减对白，不得新增原作没有的重大事件。
 C. 原文信息不足以撑满目标镜数时，用氛围、反应、细节、空镜补足，不要编造新剧情。
 D. 主体卡 2~5 张（人物 + 每一辆载具 + 关键道具）、场景 1~4 个，只保留最终成片里真正出镜的主体与空间；原文里出现的每一辆车 / 飞行器都要单独成卡，追逐双方各自一张。
-E. 额外输出 treatment：300~500 字的连贯中文梗概，按成片顺序写，供下一步分镜写作直接使用；不要写成分析、要点或列表。`;
+E. 额外输出 treatment：300~500 字的连贯中文梗概，按成片顺序写，供下一步分镜写作直接使用；不要写成分析、要点或列表。
+F. 对白是原作最值钱的部分，不许整段丢，也不许压成旁白：原作里标志性、推动关系的那几句台词要保留（可压缩、可口语化改写，不改原意），每句都写进对应节拍的 dialogue（speaker / intent / subtext / effect）。原文里一段两人对白必须按说话人拆成相邻节拍——A 一个节拍、B 一个节拍，一人一镜，不许把一个话轮压成一个 beat，更不许把两个人的台词并进一个节拍。纯交代信息的对白可以删掉，改用画面交代。`;
 
 export interface AdaptRequest extends PlanRequest {
   /** 小说 / 章节原文 */
@@ -125,7 +126,8 @@ async function summarizeChunk(chunk: string, index: number, total: number): Prom
   try {
     const raw = await callChatJson({
       system: `你是小说编辑。请从这段原文中提取后续改编要用的素材，不要评价文笔。
-只输出一个 JSON 对象：{ "summary": "按事件顺序压缩到 300~500 字，保留人物、地点、关键动作、转折与结局" }`,
+只输出一个 JSON 对象：{ "summary": "按事件顺序压缩到 300~500 字，保留人物、地点、关键动作、转折、结局，以及推动关系的关键台词（标明是谁说的）" }
+对白不要丢：谁对谁说了什么、说完对方怎么反应，是后面拆正反打的唯一依据。`,
       user: `原文第 ${index + 1}/${total} 段：\n${chunk}`,
       temperature: 0.3,
       maxTokens: 1600,
@@ -239,7 +241,8 @@ export async function adaptStory(req: AdaptRequest): Promise<AdaptedStory | null
         system,
         user: buildAdaptUserPrompt(req, sourceBlock, correction),
         temperature: 0.55,
-        maxTokens: 4000,
+        // 与 continuity 同因：节拍带 dialogue 后输出更长，4000 会被截断
+        maxTokens: 6000,
       });
       const normalized = normalizeStoryPlan(raw, baseReq);
       return normalized ? { raw, normalized } : null;

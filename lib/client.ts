@@ -248,10 +248,18 @@ export const api = {
     logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   },
 
+  /**
+   * 生成剧本是多次串行 LLM 调用（蓝图 → 分镜 → 翻译，审片命中问题时再修一次），
+   * 12 镜的长稿实测要 120~180 秒。这里必须对齐服务端的 maxDuration（300 秒），
+   * 用默认的 120 秒会在服务端还在跑的时候就被前端 abort 掉——用户看到「生成失败」，
+   * 实际剧本已经生成完并写进日志。
+   */
   createScript: (body: ScriptBody) =>
     request<{ script: Script; meta?: { model: string; adaptedIdea?: string } }>('/api/script', {
       method: 'POST',
       body: JSON.stringify(body),
+      // 留 20 秒余量：服务端在 300 秒被平台掐断，前端要比它晚断，才能把服务端的错误信息显示出来
+      timeoutMs: 280_000,
     }),
 
   saveScript: (body: SaveScriptBody) =>
