@@ -376,39 +376,83 @@ select {
   gap: 10px;
 }
 
-.range-row {
+/* 数字输入器：手动输入 + 左右加减，用于镜头数量 / 单镜时长 / 总时长 */
+.stepper {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  height: 34px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.range {
+.stepper:focus-within {
+  border-color: var(--accent-border);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.stepper-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.stepper-btn:disabled {
+  color: var(--placeholder);
+  border-color: var(--border-soft);
+  cursor: not-allowed;
+}
+
+.stepper-input {
   flex: 1;
-  appearance: none;
-  height: 4px;
-  border-radius: 99px;
-  background: linear-gradient(90deg, var(--accent) var(--fill, 40%), var(--track) var(--fill, 40%));
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.stepper-input:focus {
   outline: none;
 }
 
-.range::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  border: 3px solid var(--accent);
-  box-shadow: 0 1px 4px rgba(22, 34, 60, 0.2);
-  cursor: pointer;
+.stepper-input::-webkit-outer-spin-button,
+.stepper-input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 
-.range-value {
-  min-width: 34px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: 12.5px;
-  color: var(--accent);
+.stepper-unit {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* 分镜方式切换：按镜头数量 / 按总时长 */

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import NumberField from '@/components/NumberField';
 import {
   MAX_NOVEL_CHARS,
   MAX_SHOT_COUNT,
@@ -79,7 +80,8 @@ export default function IdeaForm({
   const [idea, setIdea] = useState(initialIdea);
   const [source, setSource] = useState<'idea' | 'novel'>('idea');
   const [style, setStyle] = useState(initialStyle || STYLES[0]);
-  const [mode, setMode] = useState<ScriptMode>('shots');
+  // 新建默认「按总时长」；编辑既有剧本时它已有明确镜头数，回到「按镜头数量」
+  const [mode, setMode] = useState<ScriptMode>(initialShotCount ? 'shots' : 'duration');
   const [shotCount, setShotCount] = useState(initialShotCount ?? 6);
   const [shotDuration, setShotDuration] = useState(initialShotDuration ?? 5);
   const [totalDuration, setTotalDuration] = useState(60);
@@ -151,16 +153,8 @@ export default function IdeaForm({
     });
   };
 
-  const fillPercent =
-    ((shotCount - MIN_SHOT_COUNT) / Math.max(1, MAX_SHOT_COUNT - MIN_SHOT_COUNT)) * 100;
-  const durationFillPercent =
-    ((shotDuration - limits.minShot) / Math.max(1, limits.maxShot - limits.minShot)) * 100;
-
   /** 总时长模式下的分镜预览：只给 AI 可选的镜数区间，由它按剧情决定切几刀 */
   const split = splitByDuration(totalDuration, limits);
-  // 总时长按 1 秒粒度调整：下限 = 单镜下限，上限 = 单镜上限 × 最多镜数（随模型变化）
-  const totalFillPercent =
-    ((totalDuration - limits.minTotal) / Math.max(1, limits.maxTotal - limits.minTotal)) * 100;
   const overallSeconds = mode === 'duration' ? split.total : shotCount * shotDuration;
   const currentModel = videoModelSpec(videoModel);
 
@@ -352,22 +346,17 @@ export default function IdeaForm({
                       镜头数量
                       <span className="field-hint">约 {shotCount * shotDuration} 秒</span>
                     </div>
-                    <div className="range-row">
-                      <input
-                        className="range"
-                        type="range"
-                        min={MIN_SHOT_COUNT}
-                        max={MAX_SHOT_COUNT}
-                        step={1}
-                        value={shotCount}
-                        style={{ '--fill': `${fillPercent}%` } as CSSProperties}
-                        onChange={(e) => setShotCount(Number(e.target.value))}
-                        aria-label="镜头数量"
-                      />
-                      <span className="range-value">{shotCount}</span>
-                    </div>
+                    <NumberField
+                      value={shotCount}
+                      min={MIN_SHOT_COUNT}
+                      max={MAX_SHOT_COUNT}
+                      unit="镜"
+                      ariaLabel="镜头数量"
+                      disabled={loading}
+                      onChange={setShotCount}
+                    />
                   </div>
-    
+
                   <div className="field">
                     <div className="field-label">
                       单镜头时长
@@ -375,51 +364,39 @@ export default function IdeaForm({
                         {limits.minShot}~{limits.maxShot} 秒
                       </span>
                     </div>
-                    <div className="range-row">
-                      <input
-                        className="range"
-                        type="range"
-                        min={limits.minShot}
-                        max={limits.maxShot}
-                        step={1}
-                        value={shotDuration}
-                        style={{ '--fill': `${durationFillPercent}%` } as CSSProperties}
-                        onChange={(e) => setShotDuration(Number(e.target.value))}
-                        aria-label="单镜头时长（秒）"
-                      />
-                      <span className="range-value">{shotDuration} 秒</span>
-                    </div>
+                    <NumberField
+                      value={shotDuration}
+                      min={limits.minShot}
+                      max={limits.maxShot}
+                      unit="秒"
+                      ariaLabel="单镜头时长"
+                      disabled={loading}
+                      onChange={setShotDuration}
+                    />
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="field">
-                    <div className="field-label">
-                      视频总时长
-                      <span className="field-hint">
-                        AI 决定 {split.minShotCount}~{split.maxShotCount} 镜
-                      </span>
-                    </div>
-                    <div className="range-row">
-                      <input
-                        className="range"
-                        type="range"
-                        min={limits.minTotal}
-                        max={limits.maxTotal}
-                        step={1}
-                        value={totalDuration}
-                        style={{ '--fill': `${totalFillPercent}%` } as CSSProperties}
-                        onChange={(e) => setTotalDuration(Number(e.target.value))}
-                        aria-label="视频总时长（秒）"
-                      />
-                      <span className="range-value">{totalDuration} 秒</span>
-                    </div>
-                    <div className="field-hint" style={{ marginTop: 7 }}>
-                      单镜 {limits.minShot}~{limits.maxShot} 秒（{currentModel.label}
-                      ），由 AI 按剧情分配；串联性强的段落会合并成一个镜头
-                    </div>
+                <div className="field">
+                  <div className="field-label">
+                    视频总时长
+                    <span className="field-hint">
+                      AI 决定 {split.minShotCount}~{split.maxShotCount} 镜
+                    </span>
                   </div>
-                </>
+                  <NumberField
+                    value={totalDuration}
+                    min={limits.minTotal}
+                    max={limits.maxTotal}
+                    unit="秒"
+                    ariaLabel="视频总时长"
+                    disabled={loading}
+                    onChange={setTotalDuration}
+                  />
+                  <div className="field-hint" style={{ marginTop: 7 }}>
+                    单镜 {limits.minShot}~{limits.maxShot} 秒（{currentModel.label}
+                    ），由 AI 按剧情分配；串联性强的段落会合并成一个镜头
+                  </div>
+                </div>
               )}
             </>
           )}
