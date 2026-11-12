@@ -20,7 +20,11 @@ import { auditScript, needsRepair, requestRepair, type ScriptIssue } from './rev
 import {
   clamp,
   CONTINUITY_RULES,
+  CUT_POINT_RULES,
   dedupeByName,
+  directionsConflict,
+  endsOffscreen,
+  screenDirection,
   hasTransitionHint,
   normalizeBeatSheet,
   normalizeCameraMove,
@@ -33,6 +37,7 @@ import {
   stateOverlap,
   str,
   stripForbiddenPromptPhrases,
+  SUBJECT_CARD_RULES,
   TIMELINE_RULES,
   trimNarration,
   VIDEO_PROMPT_RULES,
@@ -92,12 +97,15 @@ function buildSystemPrompt(): string {
    镜数跟着「叙事断点」走，不跟着时长或景别走：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、连续对话——必须放进一个镜头，用 beatSheet 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要一个停顿。不要为了换景别、换机位、凑时长而切镜。
    一镜到底优先用一个镜头承载，不要拆：镜头内的景别变化靠 cameraMove（缓慢推近 / 缓慢拉远 / 跟随）+ beatSheet 表达。只有时长超过 8 秒、必须分段生成时才拆成多镜，且拆点两侧的景别、机位、人物姿势必须完全一致。
    确实要在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位：人物走过柱子、门框、走廊，镜头甩进暗处，雨幕或前景物件盖住画面。这时写 hiddenCut: true，景别可以随便跨，系统会把上一镜末帧降级成风格参考图而不会把它当首帧。
+   ${CUT_POINT_RULES}
 
 
 【三、镜头语言】
 7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜。每个镜头承担的是一条连续的动作链（同一个主体在同一空间里连着做的一串事），不是一堆互不相干的动作；画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
 8. ${SHOT_LANGUAGE_RULES}
-9. 角色一致性：同一角色全片复用蓝图给出的英文外貌短语（promptEn），服装、发型、装甲涂装、机械部件与道具不得变化。没有蓝图时自拟角色卡：先判断主体类型——人类写年龄感、发色、服装；机甲 / 机器人 / 巨兽等非人主体只写机型与体量、装甲材质与涂装、头部传感器、关节液压、武器与配色，不要给它写年龄、发型、上衣与鞋。
+9. 主体一致性：同一主体（人 / 载具 / 机甲 / 关键道具）全片复用蓝图给出的英文短语（promptEn），服装、发型、车漆与涂装、改装件、机械部件与道具不得变化。没有蓝图时自拟主体卡：先判断主体类型——人类写年龄感、发色、服装；载具写车型与体量、车身轮廓、车漆与涂装、玻璃、轮毂与轮胎、灯具、改装件与标识；机甲 / 机器人 / 巨兽只写机型与体量、装甲材质与涂装、头部传感器、关节液压、武器与配色。不要给非人主体写年龄、发型、上衣与鞋。
+   ${SUBJECT_CARD_RULES}
+   本镜出现载具（主角座驾、追车、警车…）时，必须把它当成出镜主体写进本镜的 characters 数组并复用它的 promptEn；漏写就等于这一镜没有那辆车的参考图，车型与涂装每镜都会变。
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
 11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。
 
@@ -117,7 +125,7 @@ function buildSystemPrompt(): string {
 20. 台词长度不能超过这一镜能说完的量：5 秒镜最多约 20 字，长镜头最多 60 字；一句台词只表达一个意思，要口语、有潜台词，不要念设定。
 
 【七、数据完整性】
-21. 每个镜头的 characters 是这一镜真正出镜的角色名数组，必须逐字使用角色表名字（无人物出镜时给空数组）；每个镜头里的 scenes 必须逐字使用场景表名字。
+21. 每个镜头的 characters 是这一镜真正出镜的主体名数组（人物，以及本镜出现的载具卡 / 主要道具卡），必须逐字使用角色表名字（无主体出镜时给空数组）；每个镜头里的 scenes 必须逐字使用场景表名字。
 22. JSON 顶层的 scenes 是全片复用的场景卡（1~4 个），有蓝图时直接沿用蓝图；不要按镜头重复写场景卡。
 23. 所有镜头 duration 之和必须等于用户要求的总时长；给了「镜头时长分配」就逐条照抄，不要改动。
 24. shots 数组长度必须精确等于目标镜数。
@@ -128,7 +136,7 @@ JSON 结构：
   "title": "片名",
   "logline": "一句话故事梗概",
   "style": "整体视觉风格",
-  "characters": [{ "name": "角色名", "desc": "外形与身份描述：人类写年龄 / 头部 / 服装 / 道具，机甲 / 非人主体写机型体量 / 装甲材质与涂装 / 传感器 / 关节 / 武器 / 编号", "promptEn": "fixed English appearance phrase" }],
+  "characters": [{ "name": "角色名 / 载具名 / 道具备名", "desc": "主体描述：人类写年龄 / 头部 / 服装 / 道具，载具写车型体量 / 车身轮廓 / 车漆与涂装 / 玻璃 / 轮毂与轮胎 / 灯具 / 改装件 / 标识，机甲等非人主体写机型体量 / 装甲材质与涂装 / 传感器 / 关节 / 武器 / 编号", "promptEn": "fixed English phrase for this subject" }],
   "scenes": [{ "name": "场景名", "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设", "promptEn": "fixed English location phrase" }],
   "shots": [
     {
@@ -137,11 +145,11 @@ JSON 结构：
       "shotSize": "中景",
       "cameraMove": "缓慢推近",
       "transition": "same-take | hard-cut | time-jump",
-      "transitionReason": "一句话说明为什么这样衔接到下一镜",
+      "transitionReason": "一句话说明切点承接的是什么（同一瞬间的动作相位 / 同一个背景锚点），为什么这样衔接到下一镜",
       "referencePrevFrame": "true / false：本镜是否用上一镜最后一帧（只有同场景 + 同景别的 hard-cut 写 true）",
       "hiddenCut": "true / false：这次换机位是否靠遮挡 / 甩镜 / 暗部完成（长镜头里换景别时写 true，景别可随便跨）",
-      "entryState": "本镜第一帧的画面事实，与上一镜 exitState 一致",
-      "exitState": "本镜最后一帧的画面事实，供下一镜接住",
+      "entryState": "本镜第一帧的画面事实（谁 / 在哪 / 姿势 / 朝向 / 运动方向 / 背景锚点），与上一镜 exitState 一致",
+      "exitState": "本镜最后一帧的画面事实（画面位置 / 运动方向 / 背景锚点），必须是可切帧，供下一镜接住",
       "beatSheet": [
         { "from": 0, "to": 2, "action": "抬眼看向塔顶" },
         { "from": 2, "to": 5, "action": "伸手拧开灯罩" }
@@ -189,19 +197,21 @@ ${req.idea}
 
   const selfCheck = `输出前自检（不通过就改，不要把自检写进 JSON）：
 1) shots 是否正好 ${expectedShots} 个？
-2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线是否仍然与上一镜一致？
+2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝哪边运动），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线、运动方向与背景锚点是否仍然与上一镜一致？
 3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame=true 是否只出现在「同场景 + 同景别」的 hard-cut 上？跨了景别的长镜头是不是都写了 hiddenCut=true？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作？
-5) 角色名 / 场景名是否逐字来自上方清单？
+5) 主体名 / 场景名是否逐字来自上方清单？本镜出现的每一辆车（主角座驾、追车、警车…）是否都写进了 characters 并复用它的 promptEn？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
 7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？
 8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
-9) 所有 duration 之和是否等于 ${totalDuration} 秒？`;
+9) 所有 duration 之和是否等于 ${totalDuration} 秒？
+10) 每镜的最后一个 beat 是不是落点（动作到达可辨认相位），exitState 是不是主体还在画面内、写清了画面位置 / 运动方向 / 背景锚点？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
+11) 相邻两镜的运动方向是否一致（左→右不能接右→左）？要越轴时，是不是先垫了一个中性机位（迎面 / 背面 / 空镜）？hard-cut 的 transitionReason 是否写清了切点承接的是哪个动作相位或背景锚点？`;
 
   if (!plan) {
     return `${head}
 
-没有故事蓝图。请先在脑子里排出一条完整的动作链（谁从哪开始、每个镜头推进到什么状态），再逐镜写；写完回读一遍，确认相邻镜头之间没有跳跃。
+没有故事蓝图。请先列出本片需要在两个以上镜头里被认出来的所有主体（人物 + 每一辆载具 + 关键道具），再排出一条完整的动作链（谁从哪开始、每个镜头推进到什么状态、出口落在哪一拍），最后逐镜写；写完回读一遍，确认相邻镜头之间没有跳跃、方向没有翻转。
 
 请输出 ${expectedShots} 个镜头的分镜脚本 JSON。
 
@@ -211,7 +221,7 @@ ${selfCheck}`;
   const characters = plan.characters
     .map((c) => {
       const role = c.role ? `（${c.role}）` : '';
-      const promptEn = c.promptEn ? `｜英文外貌：${c.promptEn}` : '';
+      const promptEn = c.promptEn ? `｜英文固定短语：${c.promptEn}` : '';
       return `- ${c.name}${role}：${c.desc}${promptEn}`;
     })
     .join('\n');
@@ -247,7 +257,7 @@ ${selfCheck}`;
 主题：${plan.theme || '（未给出）'}
 基调与节奏：${plan.tone || '（未给出）'}
 
-角色（外形必须全片一致）：
+主体卡（人物 / 载具 / 关键道具，外形必须全片一致）：
 ${characters || '（无）'}
 
 场景（空间与光线必须全片一致）：
@@ -256,7 +266,7 @@ ${scenes || '（无）'}
 镜头状态链（共 ${plan.beats.length} 个节拍）：
 ${beats}${mergeHint}
 
-请输出 ${expectedShots} 个镜头的分镜脚本 JSON。每一镜的 entryState 都必须是上一镜 exitState 的延续，出口的 exitState 必须能被下一镜直接接住——这条状态链比任何单镜画面都重要。
+请输出 ${expectedShots} 个镜头的分镜脚本 JSON。每一镜的 entryState 都必须是上一镜 exitState 的延续，出口的 exitState 必须能被下一镜直接接住，而且每一镜都要停在可切帧上——这条状态链比任何单镜画面都重要。
 
 ${selfCheck}`;
 }
@@ -725,6 +735,16 @@ function sameTakeBlockers(shot: Shot, prev: Shot, chain: number): string[] {
     reasons.push('首尾状态对不上');
   }
 
+  // 摄影机没停机，主体不可能在切点掉头：方向翻转一定是两个不同的镜头
+  const prevDirection = screenDirection(exit);
+  const direction = screenDirection(entry);
+  if (prevDirection && direction && directionsConflict(prevDirection, direction)) {
+    reasons.push('运动方向翻转');
+  }
+
+  // 上一镜结束时主体已经出画：末帧是空画面，接不出连续动作
+  if (endsOffscreen(exit)) reasons.push('上一镜结尾主体已出画');
+
   /**
    * 长镜头只在「画面里有人」时才拒绝接帧：接帧意味着这一镜不能用角色卡，
    * 10 秒的生成过程本身就会让人脸漂，两者叠加就是肉眼可见的换脸。
@@ -922,10 +942,11 @@ function mergeRepairedShots(
       if (prev.continueFromPrev !== undefined) {
         shot.continueFromPrev = prev.continueFromPrev;
       }
-      // 衔接方式已被否决层校准过，修复稿不要重新引入 same-take
+      // 衔接方式已被否决层校准过，修复稿不要重新引入 same-take；
+      // 但原稿没有切点说明时，收下修复稿补写的 transitionReason（硬切要说明承接什么）
       if (prev.transition !== undefined) {
         shot.transition = prev.transition;
-        shot.transitionReason = prev.transitionReason;
+        shot.transitionReason = prev.transitionReason ?? shot.transitionReason;
       }
       // 末帧参考图同理：校准结果与用户的手动开关都要保留
       if (prev.referencePrevFrame !== undefined) {

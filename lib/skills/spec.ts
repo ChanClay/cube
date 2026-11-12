@@ -191,6 +191,18 @@ export const SHOT_LANGUAGE_RULES =
   `cameraMove 只能用：${CAMERA_MOVES.join(' / ')}。`;
 
 /**
+ * 主体卡：不只人物需要一致性。
+ * 追逐戏只给追车写卡、忘了主角座驾，是「主角车每一镜都不一样」的唯一成因。
+ */
+export const SUBJECT_CARD_RULES = `主体卡不是「人物卡」：凡是需要在两个以上镜头里被认出来的视觉主体，都必须单独占一张卡，并给一段全片一字不改的英文短语（promptEn）：
+- 人物：主角、对手、帮手；
+- 每一辆载具：主角的座驾、追车、警车、摩托车、飞行器——追逐戏里被追的人和追的人各一张卡，两辆车必须是两张卡，不许合成一张「追逐车组」，也不许只给其中一辆写卡；
+- 机甲 / 机器人 / 巨兽 / 坐骑；
+- 贯穿全片的关键道具：武器、箱子、信物。
+漏一张卡就是漏一份一致性：没写卡的那辆车，每一镜都会被模型重新设计一遍（车型、颜色、改装件全变）。`;
+
+
+/**
  * 视频提示词的写法约束。storyboard 与单镜重算共用同一份，
  * 避免两处对「多少词、写什么顺序」给出不同要求。
  */
@@ -211,8 +223,26 @@ export const VIDEO_PROMPT_RULES = `videoPrompt 是同一镜中文 description �
 export const CONTINUITY_RULES = `每个镜头都要显式写出 entryState 与 exitState，它们是状态链上唯一可靠的锚点：
 - entryState：本镜第一帧能拍到的画面事实——谁、在哪、什么姿势、朝向哪里、手里拿着什么、画面里还有什么道具；非第一镜必须与上一镜的 exitState 是同一个状态（可以换措辞，但人物、位置、姿势、道具不能变）；
 - exitState：本镜最后一帧的画面事实，必须能被下一镜直接接住；不许写情绪、心理或抽象判断；
+- 画面里有运动主体（人、载具、飞行器、巨兽）时，首尾状态还要写清三件事：主体在画面里的位置与大小（画面左 / 中 / 右、占画多少）、运动方向与速度（朝画右加速、迎面逼近）、一个贯穿场景的背景锚点（同一条路、同一盏灯、同一个弯道）；
+- 换机位不换世界：hard-cut / time-jump 可以换构图，但下一镜的 entryState 仍要重复上一镜的运动方向与背景锚点——方向翻转、锚点消失，观众看到的就是另一场戏；
+- 出口必须是可切帧：最后一拍结束时主体仍在画面内，动作到达一个可辨认的相位（车头咬住前车、车身摆正、轮子落回地面）。禁止用「冲出画外 / 消失在黑暗或雨幕 / 完全虚化」收尾——这类结尾没有落点，下一镜怎么切都接不上；确实要以遮挡 / 甩镜交出去时，本镜写 hiddenCut: true；
 - 上一镜没做完的动作，本镜接着做完；人物位置、道具、服装、光线不许在两镜之间凭空改变；
 - 确实要跳时间或换场地时，本镜 entryState 里必须写清跳转（例：「片刻后，老陈已经站在塔顶，手里仍握着那盏油灯」）。`;
+
+/**
+ * 剪辑点设计。
+ *
+ * 「上一镜意犹未尽，下一镜接不上」不是提示词问题，是剪辑点没设计：
+ * 出口停在没有落点的动态里，下一镜无论换不换机位都只能重新建立画面。
+ * 分镜写作、审片修复共用这一份。
+ */
+export const CUT_POINT_RULES = `剪辑点设计（决定下一镜能不能接上，比任何单镜画面都重要）：
+- 每镜的最后一段 beatSheet 必须是落点：动作到达一个可辨认的相位（咬住、落定、转头到位、灯灭），不是写到一半被时长截断；exitState 只描述这一拍结束时的画面；
+- 出口只有三种收法：动作顶点收（本镜做完一个完整动作）／动作交接收（same-take，下一镜接着做完剩下的部分）／遮挡甩镜收（hiddenCut）。不要停在半空、运动中消失，或速度感堆满却没有落点；
+- 出口必须给出可接三要素：主体在画面内的位置与大小、运动方向与速度、一个贯穿场景的背景锚点。下一镜即使换了机位，也要重述这三要素——方向不翻转、锚点不消失、速度感同一档；
+- 硬切的接缝靠视觉匹配：切点两侧主体落在相近的画面位置（都偏画右），或共享同一瞬间的动作相位（上一镜轮胎压过水洼，下一镜水花从车头炸开）；
+- 需要反向镜头时必须过桥：先垫一个中性机位（迎面 / 背面 / 空镜）或让主体在画面内完成转向，不许直接左右对切（越轴）。`;
+
 
 /**
  * 秒级节奏的写法约束。
@@ -237,6 +267,54 @@ const TRANSITION_HINT_EN =
 
 export function hasTransitionHint(text: string): boolean {
   return TRANSITION_HINT.test(text) || TRANSITION_HINT_EN.test(text);
+}
+
+/**
+ * 画面运动方向。同一段追逐 / 穿行里方向翻转，观众看到的就是「倒着跑」，
+ * 这也是「上一镜很带感、下一镜接不上」最常见的成因之一。
+ */
+export type ScreenDirection = 'left' | 'right' | 'toward' | 'away';
+
+const DIRECTION_PATTERNS: { direction: ScreenDirection; pattern: RegExp }[] = [
+  { direction: 'left', pattern: /(向左|朝左|左侧|画面左|由右向左|从右往左|左前方|左边)/ },
+  { direction: 'right', pattern: /(向右|朝右|右侧|画面右|由左向右|从左往右|右前方|右边)/ },
+  { direction: 'toward', pattern: /(迎面|冲向镜头|朝镜头|驶向镜头|扑向镜头|逼近镜头)/ },
+  { direction: 'away', pattern: /(背向|远离镜头|驶离镜头|退向远处|朝着远处|向远处)/ },
+];
+
+const DIRECTION_LABEL: Record<ScreenDirection, string> = {
+  left: '向左',
+  right: '向右',
+  toward: '迎面',
+  away: '远离',
+};
+
+export function screenDirection(text: string): ScreenDirection | null {
+  const value = str(text);
+  if (!value) return null;
+  return DIRECTION_PATTERNS.find((item) => item.pattern.test(value))?.direction ?? null;
+}
+
+export function directionLabel(direction: ScreenDirection): string {
+  return DIRECTION_LABEL[direction];
+}
+
+/** 两个方向是否互为正反（越轴 / 倒着跑） */
+export function directionsConflict(a: ScreenDirection, b: ScreenDirection): boolean {
+  return (
+    (a === 'left' && b === 'right') ||
+    (a === 'right' && b === 'left') ||
+    (a === 'toward' && b === 'away') ||
+    (a === 'away' && b === 'toward')
+  );
+}
+
+/** 主体已经出画的收尾：没有落点，下一镜接不住 */
+const OFFSCREEN_EXIT =
+  /(冲出画外|驶出画外|飞出画外|冲出画面|驶出画面|飞出画面|出画|掠过画外|离开画面|跑出画面|消失在(黑暗|夜色|雨幕|雨里|雾中|雾里|拐角|尽头|远处)|没入(黑暗|夜色|雨幕|雾中|雾里))/;
+
+export function endsOffscreen(text: string): boolean {
+  return OFFSCREEN_EXIT.test(str(text));
 }
 
 /** 衔接方式的三态取值，与 lib/types 的 ShotTransition 一致 */

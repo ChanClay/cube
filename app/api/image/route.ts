@@ -2,9 +2,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import {
-  CARD_IMAGE_SIZE,
   CARD_NEGATIVE_PROMPT,
   buildCardPrompt,
+  cardImageSize,
 } from '@/lib/skills/image-prompt';
 import { generateImage } from '@/lib/providers/image/wan-image';
 import { UPLOAD_DIR } from '@/lib/services/uploads';
@@ -58,7 +58,8 @@ export async function POST(request: Request) {
     const remoteUrl = await generateImage({
       // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/skills/image-prompt
       prompt: buildCardPrompt({ kind, prompt, promptEn, style }),
-      size: CARD_IMAGE_SIZE[kind],
+      // 载具卡是横图、人物卡是竖图，见 lib/skills/image-prompt 的 cardImageSize
+      size: cardImageSize(kind, `${prompt} ${promptEn}`),
       negativePrompt: CARD_NEGATIVE_PROMPT,
     });
 

@@ -23,6 +23,23 @@ export const CARD_IMAGE_SIZE: Record<CardKind, string> = {
   scene: '1696*960',
 };
 
+/**
+ * 载具卡（主角座驾 / 追车 / 警车）也放在 characters 里，
+ * 但它不能按「全身站姿」生成，也不适合竖构图。
+ */
+const VEHICLE_HINT =
+  /(跑车|轿跑|轿车|超跑|赛车|越野车|皮卡|卡车|货车|面包车|商务车|出租车|警车|救护车|消防车|摩托|机车|重机|飞船|战机|直升机|快艇|游艇|坦克|装甲车|列车|房车|载具|座驾|车型|车身|车漆|轮毂|轮胎|尾翼|挡风玻璃|车灯)/;
+
+export function isVehicleCard(text: string): boolean {
+  return VEHICLE_HINT.test(text);
+}
+
+/** 卡片配图的画幅：载具走横图，人物走竖图 */
+export function cardImageSize(kind: CardKind, text: string): string {
+  if (kind === 'character' && isVehicleCard(text)) return CARD_IMAGE_SIZE.scene;
+  return CARD_IMAGE_SIZE[kind];
+}
+
 /** 构图约束：避免出成海报、多人合影或带字的设定板 */
 const FRAMING: Record<CardKind, string> = {
   // 主体必须占满画面高度，否则全身图里服装与装备的细节会被压成一片糊
@@ -31,6 +48,11 @@ const FRAMING: Record<CardKind, string> = {
     '从头到脚完整入画，画面里只出现这一个角色',
   scene: '场景空镜，画面中没有人物，广角电影感构图，透视与景深真实，光源方向明确',
 };
+
+/** 载具卡的构图：侧前 3/4 才能同时看到车型轮廓、涂装、轮毂与灯具 */
+const VEHICLE_FRAMING =
+  '载具设定图，四分之三前侧视角，整车完整入画并占画面 80% 以上，车轮着地，' +
+  '背景简洁并轻微虚化，画面里只出现这一辆车与车内剪影，不出现站立的行人';
 
 /** 命中这些词说明是有机械 / 义体 / 装备细节的科技题材角色，需要补一层材质与结构描述 */
 const TECH_HINT =
@@ -69,6 +91,16 @@ const TEXTURE: Record<CardKind, string> = {
     '细腻颗粒，电影级调色，色调统一',
 };
 
+/** 载具的质感层：车漆、玻璃、金属、橡胶各说各的，否则模型会给一块塑料壳 */
+const VEHICLE_TEXTURE =
+  '画面质感：高细节，车漆有真实反射与细微橘皮，玻璃有环境反射与折射，' +
+  '金属件有边缘高光，轮胎橡胶有哑光质感与胎纹，车身带使用痕迹与泥点，' +
+  '灯光在车身上形成可见的明暗过渡，浅景深背景轻微虚化，35mm 电影镜头，细腻颗粒，电影级调色';
+
+const VEHICLE_TECH_DETAIL =
+  '科技细节：改装件与车身有清晰分件与接缝，进气口、扩散器与尾翼结构可见，' +
+  '灯具与灯带自己发光并照亮周围车身，金属与玻璃有真实反射，地面有湿反或胎烟';
+
 const NEGATIVE = '文字, 水印, logo, 分屏, 多人合影, 畸形肢体, 多余手指, 低清晰度, 画面撕裂';
 
 /** 万相单条提示词上限 2000 字符，留一点余量 */
@@ -98,11 +130,14 @@ export function buildCardPrompt({ kind, prompt, promptEn, style }: CardPromptInp
     ? `画面风格（严格遵循，不要自行更换画风）：${styleText}`
     : '画面风格：电影感写实风格，35mm 胶片质感，自然光，浅景深';
 
-  const tech = hasTechDetail(`${prompt} ${promptEn ?? ''}`);
+  const subjectText = `${prompt} ${promptEn ?? ''}`;
+  const tech = hasTechDetail(subjectText);
+  // 载具卡走自己的构图与质感层：按人物全身站姿生成的车，没有一辆能认出来
+  const vehicle = kind === 'character' && isVehicleCard(subjectText);
   const tail = [
-    FRAMING[kind],
-    TEXTURE[kind],
-    tech ? TECH_DETAIL[kind] : '',
+    vehicle ? VEHICLE_FRAMING : FRAMING[kind],
+    vehicle ? VEHICLE_TEXTURE : TEXTURE[kind],
+    tech ? (vehicle ? VEHICLE_TECH_DETAIL : TECH_DETAIL[kind]) : '',
     `不要画面文字 / 水印 / logo / 分屏 / 畸形肢体`,
   ]
     .filter(Boolean)
@@ -110,10 +145,10 @@ export function buildCardPrompt({ kind, prompt, promptEn, style }: CardPromptInp
 
   // 主体描述超长时先截主体，风格与质感（含科技细节层）必须完整保留
   const budget = MAX_PROMPT_LENGTH - head.length - tail.length - 2;
-  const subjectText = promptEn?.trim()
+  const subjectBody = promptEn?.trim()
     ? `${prompt.trim()}。固定外观（英文，必须逐字体现）：${promptEn.trim()}`
     : prompt.trim();
-  const subject = truncate(subjectText, Math.max(120, budget));
+  const subject = truncate(subjectBody, Math.max(120, budget));
 
   return [head, subject, tail].filter(Boolean).join('。');
 }

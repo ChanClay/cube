@@ -9,11 +9,13 @@ import { expandStyle } from '@/lib/skills/style-presets';
 import type { ShotTransition } from '@/lib/types';
 import {
   clamp,
+  CUT_POINT_RULES,
   dedupeByName,
   normalizeCameraMove,
   normalizeShotSize,
   normalizeTransition,
   str,
+  SUBJECT_CARD_RULES,
 } from '@/lib/skills/spec';
 import { callChatJson } from './llm';
 
@@ -115,7 +117,9 @@ export interface PlanProblem {
     | 'incomplete-beat'
     | 'no-character'
     | 'no-scene'
-    | 'off-model-character';
+    | 'off-model-character'
+    | 'missing-subject-card'
+    | 'missing-prompt-en';
   message: string;
   blocking: boolean;
 }
@@ -148,6 +152,48 @@ function humanizedMachine(idea: string, character: PlanCharacter): boolean {
 }
 
 /**
+ * 载具题材里最常见的漏卡：给追车写了卡，忘了主角的座驾。
+ * 没写卡的那辆车每一镜都会被模型重新设计（车型、车漆、改装件全变），
+ * 而追逐戏天然至少有两辆车，所以这里按「创意里出现了几辆 + 是不是追逐」反推需要几张卡。
+ */
+const CHASE_SUBJECT =
+  /(追逐|追车|飙车|竞速|赛车|追击|围追|围堵|拦截|截停|堵截|超车|并驾|夹击|甩尾|漂移|追尾|逃亡|飞车)/;
+/**
+ * 载具名词。不收单独的「车」与地铁 / 火车 / 巴士这类多半是地点的词，
+ * 避免「躲进地铁站」被当成一辆要走卡的车。
+ */
+const VEHICLE_TERM =
+  /(跑车|轿跑|轿车|超跑|赛车|越野车|皮卡|卡车|货车|面包车|商务车|出租车|警车|救护车|消防车|摩托|机车|重机|飞船|战机|直升机|无人机|快艇|游艇|坦克|装甲车|房车|载具|座驾|车辆|汽车)/;
+/** 载具卡的特征词：命中两个以上才算这张卡确实在写一辆车 */
+const VEHICLE_DESC =
+  /(车型|车系|车身|车漆|涂装|拉花|贴花|贴纸|轮毂|轮胎|胎|车灯|前灯|尾灯|大灯|尾翼|扰流|进气|排气|引擎盖|挡风|车窗|车顶|轴距|底盘|悬挂|车架|座舱|驾驶舱|后视镜|车牌|车头|车尾|舰体|机身|机翼|螺旋桨|履带|推进器)/g;
+
+function countVehicleCards(characters: PlanCharacter[]): number {
+  return characters.filter((character) => {
+    if (VEHICLE_TERM.test(character.name)) return true;
+    const hits = character.desc.match(VEHICLE_DESC) ?? [];
+    return hits.length >= 2;
+  }).length;
+}
+
+/**
+ * 追车戏的标识：主角确实在开车。
+ * 步行被警车追逐（只有一辆车出场）不该硬要求两张载具卡，否则只会逼模型编一辆车出来。
+ */
+const DRIVING_SUBJECT =
+  /(驾驶|驾车|开车|开着|骑着|坐在.{0,6}(车|座|摩托|机车上)|车内|副驾|后座|方向盘|油门|挡位|漂移|甩尾|超车|并线|赛道|赛段|追尾)/;
+
+/** 本片至少需要几张载具卡：追车 / 竞速且有驾驶主体时至少两辆，其余按创意里点到的载具种类算 */
+function requiredVehicleCards(idea: string): number {
+  const terms = new Set(idea.match(new RegExp(VEHICLE_TERM.source, 'g')) ?? []);
+  if (terms.size === 0) return 0;
+  if (CHASE_SUBJECT.test(idea) && (DRIVING_SUBJECT.test(idea) || terms.size >= 2)) {
+    return clamp(Math.max(2, terms.size), 2, 4);
+  }
+  return Math.min(4, terms.size);
+}
+
+/**
  * 蓝图提示词。默认是「故事架构师」，小说改编 agent 会换一个 role 并追加改编规则，
  * 两者共用同一套输出结构与校验，避免两份 schema 逐渐漂移。
  */
@@ -164,8 +210,10 @@ export function buildBlueprintSystemPrompt(
 2. theme：一句可以被画面证明的判断（例：「承认失去，才是活下去的开始」），不要写「关于爱」这类名词短语。
 3. tone：情绪基调与节奏（例：「压抑克制，前半慢，后半急促」），用来约束后面所有镜头。
 4. 结构：用经典节拍组织，每个 beat 标注 beat 字段，只能取：开场钩子 / 铺垫 / 激励事件 / 升级 / 中点转折 / 低谷 / 高潮 / 余韵。镜数少时可以省略部分节拍，但开场钩子、高潮、余韵不能缺。
-5. 角色 2~4 个：role 写叙事功能。
-   写 desc 之前先判断这个角色的主体类型；不判断类型就直接套人类模板，会把机甲、机器人、巨兽、载具写成「三十岁男人」。每项都要具体到「能照着画出来」，不许用「高科技感」「未来感的衣服」这类空话。
+5. 主体卡 2~5 张（最多 8 张，放在 characters 数组里）：role 写叙事功能。
+   写卡之前先列一遍「本片有哪些需要在两个以上镜头里被认出来的视觉主体」，再逐个判断主体类型。不判断类型就套人类模板，会把机甲、巨兽、载具写成「三十岁男人」；漏掉一个主体，就会在成片里每镜重新设计一遍。
+   ${SUBJECT_CARD_RULES}
+   每项都要具体到「能照着画出来」，不许用「高科技感」「未来感的衣服」这类空话。
    【A 人类 / 类人】按 8 项顺序写全：
    ① 廓形：性别、年龄感、身高体型、体态；
    ② 头部：脸型 + 肤色（或材质）、眉眼神态、发型（长度 / 走向 / 质地）+ 发色；
@@ -175,7 +223,7 @@ export function buildBlueprintSystemPrompt(
    ⑥ 配色：主色 / 辅色 / 发光色 + 色温；
    ⑦ 随身道具；
    ⑧ 气质与体态特征（站姿、视线习惯、手部小动作）。
-   【B 机械体 / 机甲 / 机器人 / 载具 / 巨型生物】禁止出现年龄、性别、发型发色、上装下装、鞋——这些字段对它没有意义，写进去就是把它写成了人。按 8 项顺序写：
+   【B 机械体 / 机甲 / 机器人 / 巨型生物】禁止出现年龄、性别、发型发色、上装下装、鞋——这些字段对它没有意义，写进去就是把它写成了人。按 8 项顺序写：
    ① 机型与体量：型号或代号、高度（按米计）、头身比例、整体轮廓（人形重装 / 四足 / 流线型 / 兽形 / 履带式）；
    ② 头部：头部件形态、面罩或目镜 / 传感器阵列（数量与排列）、天线或角；
    ③ 装甲：主装甲板形状 + 材质（轧制钢板 / 陶瓷复合装甲 / 拉丝钛 / 碳纤维板）+ 分件接缝 + 涂装 + 战损与污渍；
@@ -184,15 +232,25 @@ export function buildBlueprintSystemPrompt(
    ⑥ 配色：主色 / 辅色 + 发光色与发光部位 + 色温；
    ⑦ 标识与编号（喷印在哪个部位）；
    ⑧ 动作特征（站姿、行走时的机械节奏、攻击前的预备动作）。
-   题材里出现机甲 / 机器人 / 机械巨兽 / 飞船 / 装甲载具等非人主体时，这些主角必须按 B 写；驾驶员、乘客等人类角色按 A 写，并与机体分成两张卡，不许把人类特征混进机体描述。
+   【C 载具 / 车辆 / 飞行器】车辆不是道具，是主角之一。禁止写年龄、性别、发型、上装下装、鞋。按 8 项顺序写：
+   ① 车型与体量：类型（双门跑车 / 重型机车 / 装甲运兵车 / 直升机）、年代感、长宽高比例与整车轮廓；
+   ② 车身与车漆：主色 + 漆面状态（哑光 / 金属漆 / 清漆反光）+ 做旧、划痕、泥点、战损；
+   ③ 玻璃与车窗：贴膜深浅、反光度、能看见的内饰或驾驶员剪影；
+   ④ 车轮：轮毂样式与颜色、轮胎规格与磨损、胎烟与溅水；
+   ⑤ 灯具：前灯形态与光色、尾灯形态与光色、是否改装（灯带 / 爆闪 / 隐藏式）；
+   ⑥ 改装与识别特征：尾翼、宽体、进气口、防滚架、排气位置、行李架；
+   ⑦ 标识：编号、贴纸、涂装拉花、车牌（写在车身哪个部位）；
+   ⑧ 动态特征：过弯姿态、加速时的车身俯仰、排气与溅水的形态。
+   题材里出现机甲 / 机器人 / 机械巨兽 / 飞船等非人主体时，这些主角必须按 B 写；载具按 C 写；驾驶员、乘客等人类角色按 A 写，并与机体 / 载具分成两张卡，不许把人类特征混进机体或载具描述。追逐戏里被追的车与追的车必须各占一张卡。
    科幻 / 未来科技题材的装备必须写到具体技术名词与材质（拉丝钛、哑光碳纤维、半透明聚合物、液态金属、陶瓷装甲、全息喷绘、能量导管等），并写清分件与光源位置。
-   promptEn 写 20~35 个单词的固定英文外貌短语，与 desc 同序覆盖同样的可见项：人类写「主体 + 年龄感 + 头面部 + 服装 + 装备 + 配色 + 道具」；机械体写「主体 + 机型体量 + 头部传感器 + 装甲材质与涂装 + 关节结构 + 武器 + 配色」，不要给机械体写年龄词与服装词。desc 里每个可见项都要在英文里有对应词。全片一字不改地复用。
+   promptEn 写 20~35 个单词的固定英文外貌短语，与 desc 同序覆盖同样的可见项：人类写「主体 + 年龄感 + 头面部 + 服装 + 装备 + 配色 + 道具」；机械体写「主体 + 机型体量 + 头部传感器 + 装甲材质与涂装 + 关节结构 + 武器 + 配色」；载具写「主体 + 车型体量 + 车漆与涂装 + 玻璃 + 轮毂轮胎 + 灯具 + 改装件 + 标识」。不要给人以外的卡写年龄词与服装词。desc 里每个可见项都要在英文里有对应词。全片一字不改地复用。
 6. 场景 1~4 个：desc 写地点、空间尺度、时间、光源方向与色温、主要陈设与其材质；promptEn 写 15~25 个单词的固定英文空间短语，覆盖空间类型 + 关键陈设 + 光源与色调。同一个空间只写一次，不要按镜头重复。
 
 【串联层】
-7. entry 写这一镜开始时「谁 / 在哪 / 什么姿势 / 手里拿着什么」（第一镜写「开场」）。上一镜 transition=same-take 时必须与它的 exit 是同一个画面事实；hard-cut / time-jump 允许换机位，但人物、场景、光线必须与上一镜一致——换机位不换世界。
-8. exit 必须是一个可以直接拍出来的画面状态：谁、在哪里、什么姿势、朝向哪里、手里拿着什么。不要写情绪或抽象概念。
+7. entry 写这一镜开始时「谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝画面哪一侧运动」（第一镜写「开场」）。上一镜 transition=same-take 时必须与它的 exit 是同一个画面事实；hard-cut / time-jump 允许换机位，但人物、场景、光线、运动方向与背景锚点必须与上一镜一致——换机位不换世界。
+8. exit 必须是一个可以直接拍出来的画面状态：谁、在哪里、什么姿势、朝向哪里、手里拿着什么、主体在画面哪个位置、朝哪个方向运动、背景里有什么锚点。不要写情绪或抽象概念。
 9. transition=same-take 的两镜，action 必须首尾相接：上一镜没做完的动作，下一镜接着做完；hard-cut / time-jump 允许动作跳，但不许人物凭空换位、道具凭空出现。
+${CUT_POINT_RULES}
 10. 空间连续：全片尽量在同一个空间内完成，开场用大远景 / 全景把空间关系交代清楚。每一镜都必须写 transition，说明这一镜怎么交到下一镜，只能取三个值：
     - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续，景别与机位都不许变（景别一变就不是同一次拍摄）。全片连续出现不得超过 2 次——每接一次画面都会掉一点细节，接多了人物就漂了。
     - hard-cut：停机换了机位——换景别 / 换角度 / 正反打。下一镜是新的机位，画面必须重新构图。绝大多数镜头都应该是这个。
@@ -224,6 +282,12 @@ JSON 结构：
       "role": "对手",
       "desc": "【B 机械体】① 机型与体量：代号「熔核」，人形重装机体，全高 42 米，肩宽接近身高一半；② 头部：楔形面罩后一枚广角单眼传感器，头顶两根短天线；③ 装甲：轧制钢板外套陶瓷复合装甲，板缝露出黄黑警示条，胸甲有熔穿战损；④ 关节与肢体：外露的液压缸与粗线缆，三指机械手，足部为爪式支撑；⑤ 武器 / 装备：右臂 30 毫米转管炮，背部双推进器喷口有余温红光；⑥ 配色：主色锈红，辅色黑铁，发光色熔橙，色温偏暖；⑦ 标识：左肩喷白色编号 K-09；⑧ 动作：站姿前倾，开炮前右肩先下沉",
       "promptEn": "35-words fixed English appearance phrase in the same order as desc, no age or clothing words"
+    },
+    {
+      "name": "主角座驾（载具代号）",
+      "role": "主角的延伸",
+      "desc": "【C 载具】① 车型与体量：双门宽体跑车，低趴长头短尾，长 4.5 米；② 车身与车漆：哑光枪灰金属漆，轮拱与保险杠有碎石划痕和泥点；③ 玻璃与车窗：深色贴膜，隐约可见防滚架与驾驶者剪影；④ 车轮：深灰六辐锻造轮毂，半热熔胎，胎肩有明显磨损；⑤ 灯具：细长 LED 前灯冷白光，贯穿式尾灯暗红；⑥ 改装件：固定式碳纤维尾翼、前铲、侧出排气；⑦ 标识：车门喷白色编号 07，后窗贴一道褪色拉力条纹；⑧ 动态：过弯时车身侧倾很小，压水洼溅起扇形水花",
+      "promptEn": "30-words fixed English vehicle phrase: body type and proportions, paint and weathering, glass, wheels and tires, lights, aero parts, markings — no age or clothing words"
     }
   ],
   "scenes": [
@@ -242,8 +306,8 @@ JSON 结构：
       "purpose": "这一镜的叙事任务",
       "subject": "画面主体",
       "action": "具体动作",
-      "entry": "承接的上一镜状态；第一镜写「开场」",
-      "exit": "结束时留下的可拍摄状态",
+      "entry": "承接的上一镜状态（谁 / 在哪 / 姿势 / 朝向 / 运动方向）；第一镜写「开场」",
+      "exit": "结束时留下的可拍摄状态（谁 / 在哪 / 画面位置 / 运动方向 / 背景锚点），必须是可切帧",
       "shotSize": "特写/近景/中景/全景/远景/大远景",
       "cameraMove": "固定机位/缓慢推近/缓慢拉远/横向移动/环绕/跟随/手持晃动/升格慢动作",
       "transition": "same-take | hard-cut | time-jump"
@@ -269,10 +333,10 @@ function buildUserPrompt(req: PlanRequest, correction?: string): string {
     : `每一镜给出 ${limits.minShot}~${limits.maxShot} 秒的 duration；镜头数量、每镜时长与总时长都由你按剧情决定（${MIN_SHOT_COUNT}~${MAX_SHOT_COUNT} 镜）`;
 
   const tail = req.shotRange
-    ? `请先定人物与场景，再设计一条连贯的状态链（镜头数量由你决定），${durationRule}，输出 JSON。`
+    ? `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计一条连贯的状态链（镜头数量由你决定），${durationRule}，输出 JSON。`
     : req.shotCount
-      ? `请先定人物与场景，再设计 ${req.shotCount} 个镜头组成的连贯状态链，${durationRule}，输出 JSON。`
-      : `请先定人物与场景，再设计一条连贯的状态链，${durationRule}，输出 JSON。`;
+      ? `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计 ${req.shotCount} 个镜头组成的连贯状态链，${durationRule}，输出 JSON。`
+      : `请先定主体卡（人物 + 每一辆载具 + 关键道具）与场景，再设计一条连贯的状态链，${durationRule}，输出 JSON。`;
 
   const correctionBlock = correction
     ? `
@@ -445,6 +509,32 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
         `角色 ${humanized.map((c) => `「${c.name}」`).join('、')} 在本片的机械 / 非人题材里被写成了人类` +
         '（出现年龄、发型或服装，且没有任何机体特征）；必须按机械体重写：机型与体量、头部传感器、装甲材质与涂装、关节液压、武器、配色与编号，不要写年龄、发型、上衣与鞋',
       blocking: true,
+    });
+  }
+
+  // 载具题材漏卡：主角车没有卡，成片里每一镜都是另一辆车
+  const requiredVehicles = requiredVehicleCards(req.idea);
+  const vehicleCards = countVehicleCards(characters);
+  if (requiredVehicles > vehicleCards) {
+    problems.push({
+      code: 'missing-subject-card',
+      message:
+        `本片需要至少 ${requiredVehicles} 张载具卡，但主体卡里只有 ${vehicleCards} 张能认作载具。` +
+        '载具不是道具：主角座驾与对手载具（追车 / 警车 / 摩托 / 飞行器）必须各自单独成卡，' +
+        '每张卡按【C 载具】写车型与体量、车身轮廓、车漆与涂装、玻璃、轮毂与轮胎、灯具、改装件、标识与动态特征，' +
+        '并给出 20~35 个单词的固定英文 promptEn；不许把两辆车合成一张「追逐车组」，也不许只给其中一辆写卡',
+      blocking: true,
+    });
+  }
+
+  const lackPromptEn = characters.filter((c) => !c.promptEn?.trim()).map((c) => c.name);
+  if (lackPromptEn.length > 0) {
+    problems.push({
+      code: 'missing-prompt-en',
+      message:
+        `主体卡 ${lackPromptEn.map((name) => `「${name}」`).join('、')} 没有给出固定英文 promptEn；` +
+        '没有这段短语，分镜阶段会逐镜重新描述长相，成片里每个主体都会漂',
+      blocking: false,
     });
   }
 

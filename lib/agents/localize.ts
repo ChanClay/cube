@@ -67,7 +67,7 @@ function buildSystemPrompt(): string {
 翻译铁律（违反任何一条都算失败）：
 1. 只翻译，不创作：中文里的主体、动作、道具、环境、光线、景别、运镜逐项对应到英文；中文没有的元素一律不写，中文有的元素一个都不许漏。
 2. 不解释、不评价、不补充剧情、不写镜头编号与转场词。
-3. 角色、场景一律使用下方术语表给出的固定英文短语，逐字复用，不得改写年龄、发型、服装、装甲与涂装、道具与空间结构。
+3. 主体（人物 / 载具 / 关键道具）、场景一律使用下方术语表给出的固定英文短语，逐字复用，不得改写年龄、发型、服装、装甲与涂装、车型与车漆、道具与空间结构。
 4. 景别与运镜使用下方给定的标准英文写法，必须与本镜的 shotSize / cameraMove 一致。
 5. 有秒级节拍（beatSheet）时，它是这一镜的动作骨架：每一段都必须出现在英文里，按时间顺序用并列的现在分词短语串成一条动作链（例：eyes lifting to the tower top, hand rising to twist the lamp shade open, a small flame flaring inside the glass）。不要用 first / then / after that / finally / next 这类时间副词——模型看到它们会把画面切成两段，接缝处就是抽帧般的抖动。节拍有 3 段以上时，英文里对应的动作短语也不能少于 3 个。
 6. ${VIDEO_PROMPT_RULES}
@@ -85,7 +85,7 @@ function buildUserPrompt(input: LocalizeInput): string {
 
   const shots = input.shots
     .map((shot) => {
-      const who = shot.characters.length > 0 ? shot.characters.join('、') : '（无人物出镜）';
+      const who = shot.characters.length > 0 ? shot.characters.join('、') : '（无主体出镜）';
       const where = shot.scenes.length > 0 ? shot.scenes.join('、') : '（未标注）';
       const beats = shot.beatSheet ?? [];
       const timeline = beats.length
@@ -104,8 +104,8 @@ function buildUserPrompt(input: LocalizeInput): string {
 
   return `整体视觉风格：${input.style || '电影感写实风格，35mm 胶片质感，自然光，浅景深'}
 
-术语表（英文短语必须逐字复用）：
-角色：
+术语表（英文短语必须逐字复用；主体包含人物、载具与关键道具）：
+主体：
 ${cast || '（无）'}
 
 场景：

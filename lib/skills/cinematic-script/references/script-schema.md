@@ -44,7 +44,7 @@
 - `id`、`media`、`lastFrameCast` 由系统写入，手写脚本可以省略。
 - 首镜没有 `transition` / `referencePrevFrame` / `transitionReason` / `hiddenCut`。
 - `referencePrevFrame` 只表达「要不要用上一镜末帧」，怎么用由景别跨度决定：同景别 → 当首帧；跨 1 档或 `hiddenCut` → 只当 `reference_image`；跨 2 档以上 → 不用。代码见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`。
-- 镜头的角色 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`）；名字必须逐字来自顶层清单。
+- 镜头的主体 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`）；名字必须逐字来自顶层清单。载具卡同样要写进本镜 `characters`，否则那一镜不会带它的参考图。
 
 ## 二、数值约束
 
@@ -54,7 +54,8 @@
 | 单镜时长 | 随剧本视频模型：HappyHorse 3~15 秒 / wan3.0 2~30 秒，整数，优先 ≤10 | `lib/video-models.ts` + `shotLimits(videoModel)` |
 | 总时长 | 单镜下限 ~ 单镜上限 × 12；镜头 duration 之和必须等于目标总时长 | `shotLimits(videoModel).minTotal/maxTotal` |
 | `duration` 模式镜数 | 只给区间 `ceil(总时长/单镜上限)` ~ `min(12, 总时长/单镜下限)`，由 AI 按剧情决定 | `splitByDuration(total, limits)` |
-| 角色卡 | 2~4 个，`promptEn` 20~35 词 | `continuity.ts` |
+| 主体卡 | 2~5 张（最多 8）：人物 + 每一辆载具 + 关键道具，`promptEn` 20~35 词 | `continuity.ts` |
+| 载具卡缺口 | 追逐 / 竞速且有驾驶主体时至少 2 张载具卡（被追的与追的各一张） | `requiredVehicleCards` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
 | `videoPrompt` | 英文，40~110 词（<30 或 >150 判不合格） | `PROMPT_*_WORDS` |
 | `videoPrompt` 中文占比 | 汉字 / (字母 + 汉字) ≤ 12% | `isEnglishPrompt` |
@@ -94,7 +95,7 @@
 | `duplicate-prompt` | warn | 与前面某镜完全相同 | 改动作与环境，不要复制 |
 | `prompt-camera-mismatch` | warn | 英文无对应运镜 | 补标准运镜词 |
 | `prompt-shot-size-mismatch` | warn | 英文无对应景别 | 补标准景别词 |
-| `prompt-drift` | warn | 未复用固定 `promptEn`（命中 <50%） | 原文粘贴角色/场景短语 |
+| `prompt-drift` | warn | 未复用固定 `promptEn`（命中 <50%） | 原文粘贴主体 / 场景短语 |
 | `prompt-temporal-adverb` | warn | 英文提示词用了 then / after that / finally | 改成并列的现在分词，把 `beatSheet` 各段串成一条链 |
 | `size-gap-carry` | warn | 景别跨 2 档以上还想接上一镜末帧 | 改走卡片，或用 `hiddenCut` 声明遮挡转场 |
 | `timeline-missing` | warn | 长镜没有秒级节拍 | 补 `beatSheet` |
@@ -103,8 +104,11 @@
 | `dialogue-no-speaker` | warn | 没指定说话人 | 补 `speaker` |
 | `speaker-not-on-screen` | warn | 说话人不在本镜 | 把 `speaker` 加进本镜 `characters`，或换人 |
 | `unknown-character` / `unknown-scene` | warn | 引用了清单外的名字 | 逐字对齐顶层清单 |
-| `state-missing` | warn | 缺 `entryState` / `exitState` | 补上可拍摄的画面事实 |
+| `state-missing` | warn | 缺 `entryState` / `exitState` | 补上可拍摄的画面事实；hard-cut 的首尾状态同样是下一处剪辑点的依据 |
 | `continuity-gap` | warn | 上镜出口与本镜入口对不上 | 对齐状态，或在上一镜写 `hard-cut`/`time-jump` |
+| `exit-offscreen` | warn | 上一镜以「冲出画外 / 消失在雨幕 / 完全虚化」收尾 | 出口改到主体仍在画面内、动作可辨认的相位；或本镜写 `hiddenCut` 遮挡交接 |
+| `direction-flip` | warn | 相邻两镜运动方向相反（左→右 接 右→左） | 方向保持一致；要越轴先垫中性机位（迎面 / 背面 / 空镜），或让主体在画面内转向 |
+| `cut-undeclared` | warn | hard-cut 没写 `transitionReason` | 写清切点承接的是同一瞬间的动作相位，还是同一个背景锚点（同一条路 / 同一盏灯 / 同一个弯） |
 
 ## 六、app 侧入口（想把脚本跑成片时）
 

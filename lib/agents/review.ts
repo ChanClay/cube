@@ -6,6 +6,10 @@ import {
   cameraMoveEn,
   CONTINUITY_RULES,
   countWords,
+  CUT_POINT_RULES,
+  directionLabel,
+  directionsConflict,
+  endsOffscreen,
   hasForbiddenPromptPhrase,
   hasTransitionHint,
   isEnglishPrompt,
@@ -15,9 +19,11 @@ import {
   PROMPT_REPAIR_WORDS,
   promptCameraMatches,
   promptShotSizeMatches,
+  screenDirection,
   SHOT_LANGUAGE_RULES,
   shotSizeEn,
   stateOverlap,
+  SUBJECT_CARD_RULES,
   TIMELINE_RULES,
   VIDEO_PROMPT_RULES,
 } from '@/lib/skills/spec';
@@ -264,37 +270,85 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
   /**
    * 跨镜状态链：本镜的入口必须与上一镜的出口是同一个画面事实。
    * 一条都没写时不做这项检查——那种稿子需要的是重写分镜，不是补字段。
+   *
+   * 硬切虽然没有「承接动作」的义务，但每一镜的出口仍然是下一处剪辑点的依据：
+   * 出口停在主体出画处、运动方向翻转、切点没有声明，都会让下一镜看起来接不上。
    */
   const hasAnyState = script.shots.some((shot) => shot.entryState?.trim() || shot.exitState?.trim());
   if (hasAnyState) {
     script.shots.forEach((shot, i) => {
-      if (i === 0) return;
-      // 已经声明成剪辑点的镜头本来就不承接上一镜，不必再要求状态链衔接
-      if (shot.transition === 'hard-cut' || shot.transition === 'time-jump') return;
-      const prev = script.shots[i - 1];
-      const entry = shot.entryState?.trim() ?? '';
-      const exit = prev.exitState?.trim() ?? '';
+      const prev = i > 0 ? script.shots[i - 1] : null;
 
-      if (!entry) {
+      if (i > 0 && !shot.entryState?.trim()) {
         issues.push({
           level: 'warn',
           code: 'state-missing',
           shotIndex: shot.index,
-          message: `第 ${shot.index} 镜没有写 entryState，无法确认它接住了第 ${prev.index} 镜`,
+          message: `第 ${shot.index} 镜没有写 entryState，无法确认它接住了第 ${script.shots[i - 1].index} 镜`,
         });
-        return;
       }
-      if (!exit) {
+      if (i < script.shots.length - 1 && !shot.exitState?.trim()) {
         issues.push({
           level: 'warn',
           code: 'state-missing',
-          shotIndex: prev.index,
-          message: `第 ${prev.index} 镜没有写 exitState，第 ${shot.index} 镜没有状态可接`,
+          shotIndex: shot.index,
+          message: `第 ${shot.index} 镜没有写 exitState，第 ${script.shots[i + 1].index} 镜没有状态可接`,
         });
-        return;
       }
+      if (!prev) return;
+
+      const entry = shot.entryState?.trim() ?? '';
+      const exit = prev.exitState?.trim() ?? '';
+
+      // 时间跳转是刻意断开，方向和锚点都不再适用
+      if (shot.transition === 'time-jump') return;
+
+      /**
+       * 出口留在主体出画的瞬间，观众抓不到落点：
+       * 下一镜无论怎么切都得重新建立画面，这就是「上一镜意犹未尽、下一镜接不上」。
+       */
+      if (exit && endsOffscreen(exit) && !shot.hiddenCut) {
+        issues.push({
+          level: 'warn',
+          code: 'exit-offscreen',
+          shotIndex: prev.index,
+          message:
+            `第 ${prev.index} 镜以「${exit}」收尾，主体已经出画，第 ${shot.index} 镜没有落点可接；` +
+            '把出口放在主体仍在画面内、动作到达可辨认相位的位置，或改用遮挡 / 甩镜交接（hiddenCut）',
+        });
+      }
+
+      // 同一段追逐里方向翻转：看起来像倒着跑，越轴必须有中性机位过桥
+      const prevDirection = screenDirection(exit);
+      const direction = screenDirection(entry);
+      if (!shot.hiddenCut && prevDirection && direction && directionsConflict(prevDirection, direction)) {
+        issues.push({
+          level: 'warn',
+          code: 'direction-flip',
+          shotIndex: shot.index,
+          message:
+            `第 ${prev.index} 镜结束在${directionLabel(prevDirection)}运动，第 ${shot.index} 镜却${directionLabel(direction)}运动；` +
+            '同一段动作方向翻转会看起来倒着跑，要换向时先垫一个中性机位（迎面 / 背面 / 空镜）或让主体在画面内完成转向',
+        });
+      }
+
+      // 硬切必须说明切点承接的是什么，否则下一镜只能重新建立画面
+      if (shot.transition === 'hard-cut' && !shot.transitionReason?.trim()) {
+        issues.push({
+          level: 'warn',
+          code: 'cut-undeclared',
+          shotIndex: shot.index,
+          message:
+            `第 ${shot.index} 镜是硬切，但没有写 transitionReason；` +
+            '请写清切点承接的是同一瞬间的动作相位，还是同一个背景锚点（同一条路、同一盏灯、同一个弯）',
+        });
+      }
+
+      if (shot.transition === 'hard-cut') return;
+
       // 明确写了跳转（片刻后 / 次日 / 转场）时，允许状态不连续
-      if (hasTransitionHint(entry)) return;
+      if (entry && hasTransitionHint(entry)) return;
+      if (!entry || !exit) return;
 
       if (stateOverlap(exit, entry) < 0.15) {
         issues.push({
@@ -332,6 +386,9 @@ const REPAIRABLE = new Set([
   'prompt-drift',
   'state-missing',
   'continuity-gap',
+  'exit-offscreen',
+  'direction-flip',
+  'cut-undeclared',
   'timeline-missing',
   'dialogue-empty',
   'dialogue-no-speaker',
@@ -358,16 +415,20 @@ function buildSystemPrompt(): string {
 1. 只改有问题的镜头，其余镜头保持原文；人物、场景、动作顺序与结尾不得改变。
 2. 修镜数时：多了就合并相邻镜头（保留两镜的进入 / 结束状态），少了就把信息量最大的镜头拆成两镜（新增镜头不得引入新剧情）。
 3. 修连贯性时：按「上一镜 exitState → 本镜 entryState」对齐，只改断裂的那一镜，不要重排剧情、不要为了接上而新增动作。
-4. 修提示词时，沿用角色表里的英文外貌短语与场景表里的英文空间短语，保持全片一致；英文必须逐项对应当镜的中文 description，不许补充中文里没写的元素，也不许漏掉中文写了的主体 / 动作 / 道具。
+4. 修提示词时，沿用主体卡（人物 / 载具 / 关键道具）的英文固定短语与场景表的英文空间短语，保持全片一致；英文必须逐项对应当镜的中文 description，不许补充中文里没写的元素，也不许漏掉中文写了的主体 / 动作 / 道具。本镜出现的每一辆车都要写进 characters 并复用它的 promptEn。
 5. ${VIDEO_PROMPT_RULES}
 6. ${SHOT_LANGUAGE_RULES}
+6.1 修衔接时按剪辑点规则改：出口停在可切帧、方向不翻转、硬切写清承接的相位或锚点。
+${CUT_POINT_RULES}
+6.2 主体一致性：${SUBJECT_CARD_RULES}
 7. narration 是这一镜要说的唯一一句话，10~20 字；narrationType 只能是 dialogue / voiceover / none，none 时 narration 必须为空字符串。
 8. dialogue 必须同时给 speaker（说话人，必须是本镜 characters 里的名字），并把 speaker 加进 characters；voiceover / none 时 speaker 留空。不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。
 9. 每镜 duration 保持原值（除非镜数变化需要重新分配），所有 duration 之和等于原总时长。
-10. characters / scenes 里的名字必须逐字来自角色表 / 场景表。
-11. 每个镜头都要输出 entryState 与 exitState；原本没写的要补上，原本写了的不要改坏。
-12. 每个镜头都要输出 beatSheet（秒级节奏）；改了动作或时长时同步改时间轴，时间轴必须覆盖 0~duration。
-13. 输出完整的 shots 数组（不是补丁），只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
+10. characters / scenes 里的名字必须逐字来自主体卡 / 场景表。
+11. 每个镜头都要输出 entryState 与 exitState；原本没写的要补上，原本写了的不要改坏。首尾状态要写清主体在画面里的位置、运动方向与背景锚点。
+12. 每个镜头都要输出 beatSheet（秒级节奏）；改了动作或时长时同步改时间轴，时间轴必须覆盖 0~duration；最后一拍必须落在可辨认的动作相位上。
+13. 硬切镜头要写 transitionReason（切点承接的是哪个动作相位或背景锚点），需要遮挡交接时写 hiddenCut。
+14. 输出完整的 shots 数组（不是补丁），只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
 连贯性约束：
 ${CONTINUITY_RULES}
@@ -383,15 +444,17 @@ JSON 结构：
       "duration": 5,
       "shotSize": "中景",
       "cameraMove": "缓慢推近",
-      "entryState": "本镜第一帧的画面事实，与上一镜 exitState 一致",
-      "exitState": "本镜最后一帧的画面事实",
+      "transitionReason": "切点承接的动作相位或背景锚点",
+      "hiddenCut": "true / false",
+      "entryState": "本镜第一帧的画面事实（谁 / 在哪 / 姿势 / 运动方向 / 背景锚点），与上一镜 exitState 一致",
+      "exitState": "本镜最后一帧的画面事实（画面位置 / 运动方向 / 背景锚点），必须是可切帧",
       "beatSheet": [{ "from": 0, "to": 2, "action": "这一段里发生的可见动作" }],
       "description": "中文画面描述",
       "videoPrompt": "English prompt",
       "narration": "台词或旁白，可为空",
       "narrationType": "dialogue | voiceover | none",
       "speaker": "说话的角色名（仅 dialogue，其余留空）",
-      "characters": ["出镜角色名"],
+      "characters": ["出镜主体名"],
       "scenes": ["所在场景名"]
     }
   ]
@@ -405,7 +468,7 @@ function buildUserPrompt(input: RepairInput): string {
   // 蓝图里有固定的英文外貌 / 空间短语时优先给模型，修复才不会把长相写漂
   const cast = (plan && plan.characters.length > 0 ? plan.characters : script.characters)
     .map((c) => {
-      const promptEn = 'promptEn' in c && c.promptEn ? `｜英文外貌：${c.promptEn}` : '';
+      const promptEn = 'promptEn' in c && c.promptEn ? `｜英文固定短语：${c.promptEn}` : '';
       return `- ${c.name}：${c.desc}${promptEn}`;
     })
     .join('\n');
@@ -440,6 +503,9 @@ ${plan.beats
       duration: shot.duration,
       shotSize: shot.shotSize,
       cameraMove: shot.cameraMove,
+      transition: shot.transition ?? '',
+      transitionReason: shot.transitionReason ?? '',
+      hiddenCut: shot.hiddenCut ?? false,
       entryState: shot.entryState ?? '',
       exitState: shot.exitState ?? '',
       beatSheet: shot.beatSheet ?? [],
@@ -459,7 +525,7 @@ ${plan.beats
 目标镜头数：${expectedShots}
 当前总时长：${totalDuration} 秒（修复后总和必须不变）
 
-角色表：
+主体卡（人物 / 载具 / 关键道具）：
 ${cast || '（无）'}
 
 场景表：

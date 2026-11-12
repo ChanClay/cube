@@ -1,5 +1,5 @@
 import { MAX_MEDIA_TOTAL, isCarryFrameUrl } from './media';
-import { shotSizeGap } from './spec';
+import { endsOffscreen, shotSizeGap } from './spec';
 import type { MediaInput, Script, Shot, ShotTransition } from '@/lib/types';
 
 /**
@@ -67,13 +67,18 @@ export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   if (!prev) return null;
 
   const gap = shotSizeGap(shot, prev);
+  /**
+   * 上一镜结束时主体已经出画（冲出画外 / 消失在雨幕）：那张末帧是空的，
+   * 当首帧只会让这一镜从空画面开始。降级成参考图，只借光线与色调。
+   */
+  const offscreen = endsOffscreen(prev.exitState ?? '');
 
   /**
    * same-take 的物理前提是「摄影机没停机」，所以景别必须完全一致。
    * 分镜把景别写跳了还标 same-take 属于误判，这时宁可什么都不接：
    * 硬接的结果是本镜从上一镜的构图里拉远 / 推近，等于凭空多了一次运镜。
    */
-  if (isSameTakeShot(shot)) return gap === 0 ? 'first_frame' : null;
+  if (isSameTakeShot(shot)) return gap === 0 && !offscreen ? 'first_frame' : null;
 
   // 分镜 / 用户关掉了就完全不抽
   if (shot.referencePrevFrame === false) return null;
@@ -93,7 +98,8 @@ export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
    *   改成参考图，既重新构图又保住角色卡与场景卡；
    * - 跨 2 档以上：接不住也不该接，走卡片保人物一致。
    */
-  if (gap === 0) return 'first_frame';
+  // 同景别但上一镜已经出画：首帧会是一张空路，改用参考图保住光线与卡片
+  if (gap === 0) return offscreen ? 'reference_image' : 'first_frame';
   if (gap === 1 || shot.hiddenCut) return 'reference_image';
   return null;
 }
