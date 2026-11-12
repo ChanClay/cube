@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { generateScript } from '@/lib/agents/storyboard';
-import { MAX_NOVEL_CHARS, MIN_NOVEL_CHARS } from '@/lib/shot-plan';
+import { MAX_NOVEL_CHARS, MIN_NOVEL_CHARS } from '@/lib/skills/shot-plan';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

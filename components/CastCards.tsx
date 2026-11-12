@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/client';
-import { STYLE_LABELS } from '@/lib/style-presets';
+import { STYLE_LABELS } from '@/lib/skills/style-presets';
 import type { Character, Scene } from '@/lib/types';
 
 /**

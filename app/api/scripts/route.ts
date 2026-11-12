@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { logAgentWarn } from '@/lib/logger';
-import { touchProject } from '@/lib/project-store';
-import { listScripts, saveScript } from '@/lib/script-store';
+import { logAgentWarn } from '@/lib/services/logger';
+import { touchProject } from '@/lib/services/project-store';
+import { listScripts, saveScript } from '@/lib/services/script-store';
 import type { Script } from '@/lib/types';
 
 export const runtime = 'nodejs';

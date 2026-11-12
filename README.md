@@ -140,7 +140,7 @@ wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `tru
 
 - 分镜输出 `narration`（这一镜要说的话）和 `narrationType`：`dialogue` 是角色开口、会驱动口型；`voiceover` 是画外旁白、人物闭嘴
 - `dialogue` 还会输出 `speaker`（谁在说，必须是本镜 `characters` 里的名字）。多人物镜头会把说话人写进提示词，避免模型挑错人开口
-- 提交生成时由 `lib/dialogue.ts` 拼接到画面描述末尾，画面描述保持纯英文，台词保留原文（官方支持中英混写）
+- 提交生成时由 `lib/skills/dialogue.ts` 拼接到画面描述末尾，画面描述保持纯英文，台词保留原文（官方支持中英混写）
 - 镜头卡片上的台词框可直接编辑，类型下拉逐个切换；切成角色台词时可指定说话人。旧剧本没有 `speaker` 时保持原行为，一律按 `voiceover` 处理，避免旁白变成人物开口
 - 台词要短：一句 10~20 字，5 秒左右的镜头最多一句；同一句台词只表达一个意思
 - 首帧/首尾帧模式**不能**同时传 `reference_audio`，所以音色不可指定。想要固定音色只能放弃首尾帧衔接，改走全模态参考模式（`reference_image` + `reference_audio`）
@@ -160,7 +160,7 @@ wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `tru
 
 剧本头部的角色卡、场景卡各挂一张参考图，有两种来源：
 
-- **生成配图**：`POST /api/image` → 万相文生图（默认 `wan2.6-t2i`）。请求里除了中文的「名称：外形描述」，还会带上蓝图锁定的 `promptEn`（固定英文外貌 / 空间短语），保证卡片和逐镜视频里长得一样；描述命中机甲 / 义体 / 装甲 / 全息等科技词时，`lib/image-prompt.ts` 会自动追加一层「科技细节」（分件、接缝、发光线条、金属反射、磨损），否则文生图对「科技角色」的默认输出是光滑的塑料块。接口返回的图片地址只保留 24 小时，服务端会立刻下载并转存到 `.data/uploads/`，前端拿到的是站内永久地址
+- **生成配图**：`POST /api/image` → 万相文生图（默认 `wan2.6-t2i`）。请求里除了中文的「名称：外形描述」，还会带上蓝图锁定的 `promptEn`（固定英文外貌 / 空间短语），保证卡片和逐镜视频里长得一样；描述命中机甲 / 义体 / 装甲 / 全息等科技词时，`lib/skills/image-prompt.ts` 会自动追加一层「科技细节」（分件、接缝、发光线条、金属反射、磨损），否则文生图对「科技角色」的默认输出是光滑的塑料块。接口返回的图片地址只保留 24 小时，服务端会立刻下载并转存到 `.data/uploads/`，前端拿到的是站内永久地址
 - **上传**：复用 `/api/uploads`
 - 换图时**不删除**旧文件：旧图可能已经被某个镜头的首帧引用着，删掉会让那条任务直接 404
 
@@ -214,7 +214,7 @@ wan3.0 原生生成人声台词、BGM 和音效（`parameters.audio` 默认 `tru
 
 **第四步 `lib/agents/review.ts`（审片编辑）**：先做不发请求的体检——镜数、英文提示词长度、禁用词（字幕 / 水印 / logo / 分屏）、台词长度、角色与场景引用、重复提示词，以及两组新增的硬伤：**跨镜连贯性**（上一镜 `exitState` 与本镜 `entryState` 是否还是同一个状态，刻意跳转需写明「片刻后 / 次日」等转场词）与**中英一致性**（英文里的景别 / 运镜是否与 `shotSize` / `cameraMove` 对得上、有没有用上蓝图锁定的外貌与空间短语）。有硬伤才额外调用一次模型修复（`SCRIPT_REVIEW=false` 可关闭）；修复失败保留原稿，不让生成失败。
 
-公共规范收在 `lib/agents/spec.ts`（景别 / 运镜的英文对照表、提示词 / 台词 / 连贯性约束与清洗、状态相似度），分镜写作、提示词翻译、单镜重算（`/api/shot/refine`）、审片共用同一份，避免各处规则漂移。
+公共规范收在 `lib/skills/spec.ts`（景别 / 运镜的英文对照表、提示词 / 台词 / 连贯性约束与清洗、状态相似度），分镜写作、提示词翻译、单镜重算（`/api/shot/refine`）、审片共用同一份，避免各处规则漂移。
 
 降级：蓝图规划失败会退回一次性生成，翻译失败会保留分镜阶段写好的英文，都会往 `.data/logs/agent.log` 记一条 warn。正常生成是 3 次 LLM 调用（蓝图 / 分镜 / 翻译），触发审片时才多一次。
 
@@ -294,12 +294,12 @@ scripts     -- 剧本：所属 project_id、原始创意、标题、风格、完
 video_jobs  -- 视频任务：状态、provider 任务 id、视频地址、提示词、错误（保留最近 300 条）
 ```
 
-- 连接池用 `mysql2`，单例复用；表结构见 `lib/db.ts`
+- 连接池用 `mysql2`，单例复用；表结构见 `lib/services/db.ts`
 - 旧库升级自动执行：给 `scripts` 补 `project_id` 列与索引，并把没有归属的历史剧本收进「默认项目」（`id = default`）
 - 剧本编辑后 1.2 秒防抖写库，刷新页面从 MySQL 恢复（不依赖 localStorage）
 - 查看：`make db`；从旧 SQLite 迁移：`make migrate`（幂等，可重复执行）
 - 备份：`mysqldump -u root -p ai_video > backup.sql`
-- 换 Postgres 只需替换 `lib/db.ts` + `lib/store.ts` / `lib/script-store.ts` 的 SQL 方言，接口层不动
+- 换 Postgres 只需替换 `lib/services/db.ts` + `lib/services/store.ts` / `lib/services/script-store.ts` 的 SQL 方言，接口层不动
 
 ## 项目结构
 
@@ -314,26 +314,42 @@ scripts/
   migrate-sqlite-to-mysql.mjs  旧 SQLite 数据迁移
   db-stats.mjs                 表统计（make db）
 lib/
-  db.ts                 MySQL 连接池、建表与旧库迁移（mysql2）
-  project-store.ts      项目读写 + 素材库校验
-  store.ts              视频任务读写
-  script-store.ts       剧本读写（按 projectId 归属）
-  uploads.ts            本地上传目录与大小限制
-  logger.ts             视频调用错误日志（终端 + .data/logs/video.log）
   client.ts             前端 API 封装
   config.ts             环境变量读取与就绪判断
-  video-service.ts      创建任务、状态同步
-  compose.ts            下载 + ffmpeg 拼接成片（导出到 .data/exports）
-  frame.ts              从镜头视频抽关键帧（导出到 .data/frames，供下一镜当首帧）
-  agents/              所有「让模型做判断」的逻辑，与存储 / 路由 / 视频 provider 分离
+  types.ts              领域类型（Script / Shot / Project / VideoJob ...）
+  video-options.ts      画幅 / 画质 / 时长的合法取值
+  agents/               所有「让模型做判断」的逻辑
     index.ts            统一出口
-    spec.ts             影视语言规范（景别 / 运镜 / 提示词 / 台词约束与清洗）
     llm.ts              LLM 调用与 JSON 提取（最底层，其余 agent 共用）
     adaptation.ts       小说 / 章节改编（分段摘要 → 压缩蓝图 + 梗概）
     continuity.ts       故事架构师（主题 / 人物 / 场景 + entry/exit 状态链）
     storyboard.ts       分镜编剧（照蓝图写画面与提示词 + 时长 / 引用收口）
+    localize.ts         提示词译者（中文定稿后单独翻英文）
     review.ts           审片编辑（确定性体检 + 只修复有硬伤的镜头）
-  media.ts              素材类型与校验（前后端共用）
+  skills/               确定性能力：规则、提示词构造、纯计算
+    spec.ts             影视语言规范（景别 / 运镜 / 提示词 / 台词约束与清洗）
+    shot-plan.ts        镜数与时长规划（单镜 2~30 秒、最多 12 镜）
+    style-presets.ts    视觉风格预设与展开
+    image-prompt.ts     文生图提示词（科技细节增强）
+    dialogue.ts         逐镜视频提示词拼装（台词 / 素材）
+    shot-media.ts       单镜素材决策（接帧 / 卡片兜底）
+    media.ts            素材类型与校验（前后端共用）
+    blank-script.ts     空剧本构造
+    demo-script.ts      示例剧本（未配 LLM 时预览）
+    format.ts           相对时间格式化
+  services/             存储、文件与视频链路等 I/O
+    db.ts               MySQL 连接池、建表与旧库迁移（mysql2）
+    auth.ts             注册 / 登录 / 会话
+    project-store.ts    项目读写 + 素材库校验
+    store.ts            视频任务读写
+    script-store.ts     剧本读写（按 projectId 归属）
+    queue-store.ts      串行队列标记
+    uploads.ts          本地上传目录与大小限制
+    logger.ts           视频调用错误日志（终端 + .data/logs/video.log）
+    video-service.ts    创建任务、状态同步
+    videos.ts           成片文件索引
+    compose.ts          下载 + ffmpeg 拼接成片（导出到 .data/exports）
+    frame.ts            从镜头视频抽关键帧（导出到 .data/frames，供下一镜当首帧）
   providers/video/      通义万相 wan3.0（types.ts / index.ts / wan.ts）
 ```
 

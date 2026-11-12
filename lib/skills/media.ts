@@ -1,4 +1,4 @@
-import type { MediaInput, MediaType } from './types';
+import type { MediaInput, MediaType } from '@/lib/types';
 
 export const MEDIA_LABEL: Record<MediaType, string> = {
   first_frame: '首帧图',

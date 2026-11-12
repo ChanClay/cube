@@ -1,5 +1,5 @@
 import { config } from '@/lib/config';
-import { expandStyle } from '@/lib/style-presets';
+import { expandStyle } from '@/lib/skills/style-presets';
 import type { Script } from '@/lib/types';
 import type { StoryPlan } from './continuity';
 import {
@@ -20,7 +20,7 @@ import {
   stateOverlap,
   TIMELINE_RULES,
   VIDEO_PROMPT_RULES,
-} from './spec';
+} from '@/lib/skills/spec';
 import { callChatJson } from './llm';
 
 /**

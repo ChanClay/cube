@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getLatestScript } from '@/lib/script-store';
+import { getLatestScript } from '@/lib/services/script-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

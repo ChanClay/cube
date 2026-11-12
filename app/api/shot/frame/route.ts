@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
-import { FrameError, extractFrame, type FramePosition } from '@/lib/frame';
-import { logVideoError } from '@/lib/logger';
-import { isPublicOrigin } from '@/lib/media';
-import { getJob } from '@/lib/store';
+import { FrameError, extractFrame, type FramePosition } from '@/lib/services/frame';
+import { logVideoError } from '@/lib/services/logger';
+import { isPublicOrigin } from '@/lib/skills/media';
+import { getJob } from '@/lib/services/store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

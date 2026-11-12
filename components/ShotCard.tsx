@@ -9,13 +9,13 @@ import {
   isCarryFrameUrl,
   mediaSummary,
   validateMedia,
-} from '@/lib/media';
+} from '@/lib/skills/media';
 import { api } from '@/lib/client';
 import {
   TRANSITION_HINT,
   TRANSITION_LABEL,
   isSameTakeShot,
-} from '@/lib/shot-media';
+} from '@/lib/skills/shot-media';
 import type {
   Character,
   MediaInput,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser, registrationOpen } from '@/lib/auth';
+import { getCurrentUser, registrationOpen } from '@/lib/services/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

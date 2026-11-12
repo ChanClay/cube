@@ -135,7 +135,7 @@ export interface Shot {
   characterNames?: string[];
   /**
    * 与上一镜的衔接方式；第一镜恒为 undefined。
-   * 旧剧本没有这个字段时回落到 continueFromPrev（见 lib/shot-media 的 isSameTakeShot）。
+   * 旧剧本没有这个字段时回落到 continueFromPrev（见 lib/skills/shot-media 的 isSameTakeShot）。
    */
   transition?: ShotTransition;
   /** 衔接方式的判断依据 / 否决原因，UI 上展示，便于人工复核 */

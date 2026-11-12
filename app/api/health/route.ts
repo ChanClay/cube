@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { ffmpegMissingMessage, resolveFfmpeg } from '@/lib/compose';
+import { ffmpegMissingMessage, resolveFfmpeg } from '@/lib/services/compose';
 import { config, llmConfigured, videoConfigured } from '@/lib/config';
-import { databaseInfo, getDb } from '@/lib/db';
+import { databaseInfo, getDb } from '@/lib/services/db';
 import { getProvider } from '@/lib/providers/video';
 
 export const runtime = 'nodejs';

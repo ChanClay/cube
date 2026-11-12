@@ -1,5 +1,5 @@
 import { hasPrevFrameReference } from './media';
-import type { MediaInput, Shot } from './types';
+import type { MediaInput, Shot } from '@/lib/types';
 
 type PromptShot = Pick<Shot, 'narration' | 'narrationType' | 'speaker'> &
   Partial<Pick<Shot, 'characterNames'>>;
@@ -76,7 +76,7 @@ export function buildVideoPrompt(
   prompt: string,
   shot: PromptShot,
   media: MediaInput[] = [],
-  /** 参考图里实际在场的人物名（见 lib/shot-media 的 prevFrameCast） */
+  /** 参考图里实际在场的人物名（见 lib/skills/shot-media 的 prevFrameCast） */
   refCast: string[] = [],
 ): string {
   const base = (prompt ?? '').trim();

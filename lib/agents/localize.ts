@@ -1,5 +1,5 @@
 import { config } from '@/lib/config';
-import { logAgentWarn } from '@/lib/logger';
+import { logAgentWarn } from '@/lib/services/logger';
 import { callChatJson } from './llm';
 import {
   cameraMoveEn,
@@ -11,7 +11,7 @@ import {
   stripForbiddenPromptPhrases,
   str,
   VIDEO_PROMPT_RULES,
-} from './spec';
+} from '@/lib/skills/spec';
 
 /**
  * 提示词本地化 agent（中文 description → 英文 videoPrompt）

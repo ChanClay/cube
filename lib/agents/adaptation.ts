@@ -4,8 +4,8 @@ import {
   MIN_SHOT_COUNT,
   MAX_SHOT_SECONDS,
   MIN_SHOT_SECONDS,
-} from '@/lib/shot-plan';
-import { logAgentWarn, logEvent } from '@/lib/logger';
+} from '@/lib/skills/shot-plan';
+import { logAgentWarn, logEvent } from '@/lib/services/logger';
 import {
   buildBlueprintSystemPrompt,
   normalizeStoryPlan,
@@ -14,7 +14,7 @@ import {
   type StoryPlan,
 } from './continuity';
 import { callChatJson } from './llm';
-import { clamp, str } from './spec';
+import { clamp, str } from '@/lib/skills/spec';
 
 /**
  * 小说 / 章节改编 agent

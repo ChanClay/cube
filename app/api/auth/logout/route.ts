@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { clearSessionCookie, destroySession, readSessionCookie } from '@/lib/auth';
+import { clearSessionCookie, destroySession, readSessionCookie } from '@/lib/services/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

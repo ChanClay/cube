@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
-import { absolutizeMediaUrl, isPublicOrigin, sanitizeMedia, validateMedia } from '@/lib/media';
-import { listJobs } from '@/lib/store';
-import { syncAllJobs, startVideoJob } from '@/lib/video-service';
+import { absolutizeMediaUrl, isPublicOrigin, sanitizeMedia, validateMedia } from '@/lib/skills/media';
+import { listJobs } from '@/lib/services/store';
+import { syncAllJobs, startVideoJob } from '@/lib/services/video-service';
 import { normalizeRatio, normalizeResolution } from '@/lib/video-options';
 import type { MediaInput } from '@/lib/types';
 

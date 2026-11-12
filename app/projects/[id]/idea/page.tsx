@@ -5,9 +5,9 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import IdeaForm, { type ScriptParams } from '@/components/IdeaForm';
 import TopBar from '@/components/TopBar';
-import { NEW_SCRIPT_TITLE } from '@/lib/blank-script';
+import { NEW_SCRIPT_TITLE } from '@/lib/skills/blank-script';
 import { api, type HealthInfo } from '@/lib/client';
-import { demoScript } from '@/lib/demo-script';
+import { demoScript } from '@/lib/skills/demo-script';
 import type { Project, Script, StoredScript } from '@/lib/types';
 
 /**

@@ -1,4 +1,4 @@
-import type { Script, Shot } from './types';
+import type { Script, Shot } from '@/lib/types';
 
 /** 新建项目 / 新建剧本时的占位名，生成剧本时不会被模型标题覆盖 */
 export const NEW_SCRIPT_TITLE = '未命名剧本';

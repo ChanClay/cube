@@ -1,6 +1,6 @@
 import { currentUserId } from './auth';
 import { getDb } from './db';
-import type { JobStatus, MediaInput, VideoJob } from './types';
+import type { JobStatus, MediaInput, VideoJob } from '@/lib/types';
 
 const MAX_JOBS = 300;
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createProject, listProjects } from '@/lib/project-store';
+import { createProject, listProjects } from '@/lib/services/project-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

@@ -1,7 +1,7 @@
 import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { VIDEO_DIR } from '@/lib/videos';
+import { VIDEO_DIR } from '@/lib/services/videos';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

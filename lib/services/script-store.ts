@@ -1,7 +1,7 @@
 import type { ResultSetHeader } from 'mysql2';
 import { currentUserId } from './auth';
 import { DEFAULT_PROJECT_ID, getDb } from './db';
-import type { Script, StoredScript, StoredScriptSummary } from './types';
+import type { Script, StoredScript, StoredScriptSummary } from '@/lib/types';
 
 const MAX_SCRIPTS = 200;
 /** 与表结构对齐的长度上限，避免模型输出超长导致 ER_DATA_TOO_LONG */

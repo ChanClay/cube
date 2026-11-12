@@ -38,4 +38,4 @@ export {
   VIDEO_PROMPT_RULES,
   narrationLimit,
   trimNarration,
-} from './spec';
+} from '@/lib/skills/spec';

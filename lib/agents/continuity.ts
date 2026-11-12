@@ -3,9 +3,9 @@ import {
   MAX_SHOT_SECONDS,
   MIN_SHOT_COUNT,
   MIN_SHOT_SECONDS,
-} from '@/lib/shot-plan';
-import { logAgentWarn } from '@/lib/logger';
-import { expandStyle } from '@/lib/style-presets';
+} from '@/lib/skills/shot-plan';
+import { logAgentWarn } from '@/lib/services/logger';
+import { expandStyle } from '@/lib/skills/style-presets';
 import type { ShotTransition } from '@/lib/types';
 import {
   clamp,
@@ -14,7 +14,7 @@ import {
   normalizeShotSize,
   normalizeTransition,
   str,
-} from './spec';
+} from '@/lib/skills/spec';
 import { callChatJson } from './llm';
 
 /**

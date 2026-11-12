@@ -5,9 +5,9 @@ import {
   CARD_IMAGE_SIZE,
   CARD_NEGATIVE_PROMPT,
   buildCardPrompt,
-} from '@/lib/image-prompt';
+} from '@/lib/skills/image-prompt';
 import { generateImage } from '@/lib/providers/image/wan-image';
-import { UPLOAD_DIR } from '@/lib/uploads';
+import { UPLOAD_DIR } from '@/lib/services/uploads';
 import type { ProjectMedia } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
   try {
     const remoteUrl = await generateImage({
-      // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/image-prompt
+      // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/skills/image-prompt
       prompt: buildCardPrompt({ kind, prompt, promptEn, style }),
       size: CARD_IMAGE_SIZE[kind],
       negativePrompt: CARD_NEGATIVE_PROMPT,

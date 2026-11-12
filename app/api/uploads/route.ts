@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
-import { MAX_UPLOAD_BYTES, UPLOAD_DIR, compressImage } from '@/lib/uploads';
+import { MAX_UPLOAD_BYTES, UPLOAD_DIR, compressImage } from '@/lib/services/uploads';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

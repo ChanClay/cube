@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
-import { logAgentWarn } from '@/lib/logger';
+import { logAgentWarn } from '@/lib/services/logger';
 import { callChatJson } from '@/lib/agents/llm';
 import {
   normalizeBeatSheet,
@@ -11,7 +11,7 @@ import {
   TIMELINE_RULES,
   trimNarration,
   VIDEO_PROMPT_RULES,
-} from '@/lib/agents/spec';
+} from '@/lib/skills/spec';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

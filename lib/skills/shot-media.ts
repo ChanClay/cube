@@ -1,5 +1,5 @@
 import { MAX_MEDIA_TOTAL, isCarryFrameUrl } from './media';
-import type { MediaInput, Script, Shot, ShotTransition } from './types';
+import type { MediaInput, Script, Shot, ShotTransition } from '@/lib/types';
 
 /**
  * 镜头级的自动素材关联。
@@ -88,7 +88,7 @@ export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   return shot.referencePrevFrame === true ? 'reference_image' : null;
 }
 
-/** 单次最多 10 张参考图（与 lib/media.ts 的 reference_image 上限一致） */
+/** 单次最多 10 张参考图（与 lib/skills/media.ts 的 reference_image 上限一致） */
 const MAX_REFERENCE_IMAGES = 10;
 
 /** 全片角色卡 + 场景卡的配图地址，用来识别上一轮自动注入的素材 */

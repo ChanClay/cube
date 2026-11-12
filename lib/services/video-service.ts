@@ -1,9 +1,9 @@
 import { config } from '@/lib/config';
-import { logVideoError } from '@/lib/logger';
-import { hasCarryFrame } from '@/lib/media';
+import { logVideoError } from '@/lib/services/logger';
+import { hasCarryFrame } from '@/lib/skills/media';
 import { getProvider } from '@/lib/providers/video';
-import { getJob, listJobs, saveJob, updateJob } from '@/lib/store';
-import { isLocalVideoUrl, persistRemoteVideo } from '@/lib/videos';
+import { getJob, listJobs, saveJob, updateJob } from '@/lib/services/store';
+import { isLocalVideoUrl, persistRemoteVideo } from '@/lib/services/videos';
 import type { MediaInput, VideoJob } from '@/lib/types';
 
 export interface StartVideoJobInput {

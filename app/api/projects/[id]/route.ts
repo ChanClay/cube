@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { deleteProject, getProject, updateProject } from '@/lib/project-store';
-import { listScripts } from '@/lib/script-store';
+import { deleteProject, getProject, updateProject } from '@/lib/services/project-store';
+import { listScripts } from '@/lib/services/script-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

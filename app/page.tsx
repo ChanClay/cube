@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
-import { timeAgo } from '@/lib/format';
+import { timeAgo } from '@/lib/skills/format';
 import type { ProjectSummary } from '@/lib/types';
 import {
   DEFAULT_VIDEO_RATIO,

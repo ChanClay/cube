@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { countScripts, deleteScript, getScript } from '@/lib/script-store';
+import { countScripts, deleteScript, getScript } from '@/lib/services/script-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

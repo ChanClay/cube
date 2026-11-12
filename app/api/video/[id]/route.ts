@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getJob, updateJob } from '@/lib/store';
-import { syncVideoJob } from '@/lib/video-service';
+import { getJob, updateJob } from '@/lib/services/store';
+import { syncVideoJob } from '@/lib/services/video-service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

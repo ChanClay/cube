@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import CastCards from './CastCards';
 import ShotCard from './ShotCard';
-import { isSameTakeShot, prevFrameCast } from '@/lib/shot-media';
+import { isSameTakeShot, prevFrameCast } from '@/lib/skills/shot-media';
 import type {
   Character,
   ComposeResult,

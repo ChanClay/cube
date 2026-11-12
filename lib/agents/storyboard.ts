@@ -1,5 +1,5 @@
 import { config } from '@/lib/config';
-import { logAgentWarn } from '@/lib/logger';
+import { logAgentWarn } from '@/lib/services/logger';
 import {
   fitDurations,
   splitByDuration,
@@ -8,8 +8,8 @@ import {
   MIN_SHOT_SECONDS,
   type DurationSplit,
   type ScriptMode,
-} from '@/lib/shot-plan';
-import { expandStyle } from '@/lib/style-presets';
+} from '@/lib/skills/shot-plan';
+import { expandStyle } from '@/lib/skills/style-presets';
 import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
 import { adaptStory } from './adaptation';
 import { planStory, type Beat, type StoryPlan } from './continuity';
@@ -35,7 +35,7 @@ import {
   TIMELINE_RULES,
   trimNarration,
   VIDEO_PROMPT_RULES,
-} from './spec';
+} from '@/lib/skills/spec';
 
 export interface ScriptRequest {
   /** 故事创意；source=novel 时这里是小说 / 章节原文 */

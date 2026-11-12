@@ -1,4 +1,4 @@
-import type { Script } from './types';
+import type { Script } from '@/lib/types';
 
 /** 未配置 LLM 时用于预览界面与联调视频链路（不调用任何模型接口） */
 export const demoScript: Script = {

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { ComposeError, composeVideos } from '@/lib/compose';
+import { ComposeError, composeVideos } from '@/lib/services/compose';
 import { config } from '@/lib/config';
-import { listJobs } from '@/lib/store';
+import { listJobs } from '@/lib/services/store';
 import { exportSize } from '@/lib/video-options';
 import type { VideoJob } from '@/lib/types';
 

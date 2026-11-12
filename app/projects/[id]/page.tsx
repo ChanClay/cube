@@ -3,19 +3,19 @@
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { blankShot } from '@/lib/blank-script';
-import { buildVideoPrompt } from '@/lib/dialogue';
+import { blankShot } from '@/lib/skills/blank-script';
+import { buildVideoPrompt } from '@/lib/skills/dialogue';
 import ScriptView from '@/components/ScriptView';
 import TopBar from '@/components/TopBar';
 import { api, type HealthInfo } from '@/lib/client';
-import { validateMedia } from '@/lib/media';
-import { clearQueueMark, markQueueRunning, readQueueMark } from '@/lib/queue-store';
+import { validateMedia } from '@/lib/skills/media';
+import { clearQueueMark, markQueueRunning, readQueueMark } from '@/lib/services/queue-store';
 import {
   collectCardMedia,
   hasManualFirstFrame,
   prevFrameUsage,
   resolveShotMedia,
-} from '@/lib/shot-media';
+} from '@/lib/skills/shot-media';
 import {
   DEFAULT_VIDEO_RATIO,
   DEFAULT_VIDEO_RESOLUTION,
@@ -590,7 +590,7 @@ function ProjectPageInner() {
   /**
    * 单镜生成：按这一镜的 transition 决定上一镜末帧当首帧还是当参考图；
    * 没有可用末帧时挂上本镜的角色卡 / 场景卡参考图。
-   * 与串行队列走同一套镜头素材决策（lib/shot-media）。
+   * 与串行队列走同一套镜头素材决策（lib/skills/shot-media）。
    */
   const handleGenerateOne = useCallback(
     async (shot: Shot) => {

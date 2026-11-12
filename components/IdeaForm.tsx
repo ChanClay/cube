@@ -11,10 +11,10 @@ import {
   PREFERRED_SHOT_SECONDS,
   splitByDuration,
   type ScriptMode,
-} from '@/lib/shot-plan';
-import { STYLE_LABELS } from '@/lib/style-presets';
+} from '@/lib/skills/shot-plan';
+import { STYLE_LABELS } from '@/lib/skills/style-presets';
 
-/** 预设风格标签（明细描述见 lib/style-presets，生成时自动展开） */
+/** 预设风格标签（明细描述见 lib/skills/style-presets，生成时自动展开） */
 const STYLES = STYLE_LABELS;
 
 export interface ScriptParams {

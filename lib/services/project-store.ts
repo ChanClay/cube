@@ -1,8 +1,8 @@
 import type { ResultSetHeader } from 'mysql2';
 import { currentUserId } from './auth';
 import { getDb } from './db';
-import type { Project, ProjectSummary } from './types';
-import { normalizeRatio, normalizeResolution } from './video-options';
+import type { Project, ProjectSummary } from '@/lib/types';
+import { normalizeRatio, normalizeResolution } from '@/lib/video-options';
 
 const MAX_PROJECTS = 200;
 
