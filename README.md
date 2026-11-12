@@ -40,6 +40,11 @@ make distclean    # 连 node_modules 一起清理
 
 未填 Key 也能启动：剧本生成只依赖 `LLM_API_KEY`；未填 `VIDEO_API_KEY` 时「生成视频」会直接提示未配置。左栏「加载示例剧本」可预览完整交互，访问 `/?demo=1` 直接打开示例剧本。
 
+## 文档
+
+- [视频模型](./docs/video-models.md)：HappyHorse 1.1 / wan3.0 的生成模式分流、素材限制、音轨、接口参数与全部环境变量
+- [文生图模型](./docs/image-models.md)：角色卡 / 场景卡配图用的万相模型、协议差异与提示词增强
+
 ## 环境变量
 
 全部配置写在 `.env.local`（参考 `.env.example`，该文件已 gitignore）。
@@ -68,48 +73,14 @@ make distclean    # 连 node_modules 一起清理
 | `happyhorse-1.1` | `happyhorse` | **3~15 秒** | 首帧 / 参考图（≤9 张） | 原生音视频联合生成，**始终带音轨、不可关** |
 | `wan3.0-video` | `wan` | **2~30 秒** | 首尾帧 + 参考图 / 视频 / 音频 / 文档 / 网页 | 原生，可用 `audio` 开关 |
 
-分镜规划按剧本的模型走：按镜头数模式下滑块范围、按总时长模式下的镜数区间（`总时长 / 单镜上限` 起、`总时长 / 单镜下限` 止）、AI 提示词里写的时长规则，全部由这张表推导；旧剧本没有 `videoModel` 字段，按 wan3.0 处理。
-
-**HappyHorse 1.1** 在百炼上按生成模式拆成三个模型 ID，本实现按这一镜的素材自动分流（代码见 `lib/providers/video/happyhorse.ts` 的 `planMedia` / `buildBody`）：
-
-| 模式 | 模型 ID | 触发条件 | 请求差异 |
-| --- | --- | --- | --- |
-| t2v 文生视频 | `happyhorse-1.1-t2v` | 没有任何图片素材 | 只发 `input.prompt`，`parameters` 带 `ratio` |
-| i2v 首帧生视频 | `happyhorse-1.1-i2v` | 只有一张帧图（首帧优先，无首帧时尾帧兜底） | `input.media` 有且仅有 1 个 `first_frame`；**不传 `ratio`**（画幅跟随首帧），`prompt` 可选 |
-| r2v 参考生视频 | `happyhorse-1.1-r2v` | 有 `reference_image` | `input.media` 1~9 个 `reference_image`，顺序即提示词里的 `[Image N]`；`prompt` 必填；支持 `ratio` |
-
-HappyHorse 的素材限制：只吃图片（JPEG / JPG / PNG / WEBP，≤20MB）。`last_frame` / `reference_video` / `reference_audio` / 文档 / 网页都不支持：首帧 + 尾帧同时给时 i2v 只取首帧，其余不支持的素材在提交前摘掉并在服务端日志告警。三种模式都没有 `prompt_extend`。镜头卡片的素材下拉会按剧本的模型过滤，HappyHorse 剧本里不会出现这些类型。
-
-**HappyHorse 的音轨**：它是单流 Transformer 原生音视频联合生成，对白 / 环境音 / 拟音跟画面一起产出（音素级口型同步），所以 `parameters` 里没有 `audio` 字段——不是没有声音，而是**音轨不可关闭**。写进 prompt 的台词会被真的念出来；也因此没法用 `reference_audio` 指定音色。
-
-**wan3.0** 是单模型全模态：首尾帧与 `reference_*` 互斥，带首帧 / 尾帧时画幅固定 `adaptive`，支持 `audio` 与 `prompt_extend`。
-
-| 变量 | 说明 |
-| --- | --- |
-| `VIDEO_API_KEY` | 阿里云百炼 DashScope API Key（`sk-` 开头），两个模型共用 |
-| `VIDEO_BASE_URL` | 原生异步接口地址，默认 `https://cn-beijing.maas.qianwenaiapi.com/api/v1`（**不要**用 `/compatible-mode/v1`） |
-| `VIDEO_MODEL_HAPPYHORSE` | HappyHorse 基础模型名，默认 `happyhorse-1.1`；三个模式 ID 由它派生（旧的 `VIDEO_MODEL` 仍兼容） |
-| `VIDEO_MODEL_T2V` / `VIDEO_MODEL_I2V` / `VIDEO_MODEL_R2V` | 单独覆盖 HappyHorse 某个模式的模型 ID，留空则按基础名派生 |
-| `VIDEO_MODEL_WAN` | wan3.0 模型 ID，默认 `wan3.0-video` |
-| `VIDEO_RESOLUTION` | 兜底画质：`480p` / `720p` / `1080p`。实际画质按项目设置（创建项目时选择，默认 `480p`） |
-| `VIDEO_RATIO` | 兜底画幅：`21:9` / `16:9` / `4:3` / `3:4` / `4:5` / `5:4` / `1:1` / `9:21` / `9:16`。实际画幅按项目设置（默认 `16:9`）；HappyHorse i2v 画幅跟随首帧，wan3.0 带首尾帧固定 `adaptive` |
-| `VIDEO_DURATION` | 兜底时长（秒），实际以每个镜头的 duration 为准（按模型区间夹住） |
-| `VIDEO_WATERMARK` | HappyHorse 是否打「Happy Horse」右下角水印，默认 `false` |
-| `VIDEO_AUDIO` / `VIDEO_PROMPT_EXTEND` | **仅 wan3.0 生效**：音轨开关 / 提示词智能扩写，默认 `true` / `false`。HappyHorse 1.1 的音轨始终生成且没有开关，这两项对它无效 |
-| `VIDEO_REFERENCE_PREV_FRAME` | 「硬切镜头用上一镜末帧」的全局总开关，默认 `true`。同景别当首帧、跨景别当参考图，逐镜的默认值由分镜阶段写进剧本（`Shot.referencePrevFrame`），这里置 `0` 可以一次性全关，适合 A/B 对比 |
+最小配置：
 
 ```env
 VIDEO_API_KEY=sk-your-dashscope-key
-VIDEO_MODEL_HAPPYHORSE=happyhorse-1.1
-VIDEO_MODEL_WAN=wan3.0-video
-VIDEO_RESOLUTION=480p
-VIDEO_RATIO=16:9
-VIDEO_WATERMARK=false
+VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
 ```
 
-走百炼 MaaS 异步接口：`POST /services/aigc/video-generation/video-synthesis`（需 `X-DashScope-Async: enable`），创建后轮询 `GET /tasks/{task_id}`，`video_url` 有效期 24 小时（服务层会立刻转存到本地）。任务回查按 `VideoJob.provider` 找实现，换模型不影响已提交的任务。
-
-注意两个模型的参数不通用：HappyHorse 用 `parameters.resolution`（`480P` / `720P` / `1080P`）+ `parameters.ratio` + `duration` + `watermark` + `seed`，没有 `audio`（音轨恒有）/ `prompt_extend`，i2v 传 `ratio` 会被当非法参数拒单；wan3.0 额外接受 `audio` / `prompt_extend` 与多模态素材。画幅 / 画质在创建项目时选择（默认 480p / 16:9），存在项目表里，`VIDEO_RATIO` / `VIDEO_RESOLUTION` 只作为兜底。
+生成模式分流、素材限制、音轨差异、接口参数与全部 `VIDEO_*` 变量见 [docs/video-models.md](./docs/video-models.md)。
 
 ### 站点
 
@@ -164,10 +135,7 @@ VIDEO_WATERMARK=false
 
 ## 台词与声音
 
-两个模型都会原生出声，差别只在能不能关：
-
-- **HappyHorse 1.1**：单流 Transformer 原生音视频联合生成，对白 / 环境音 / 拟音与画面一次成型，音素级口型同步；`parameters` 里没有 `audio` 字段，**音轨始终生成、无法关闭**，也不接受 `reference_audio` 指定音色；
-- **wan3.0**：同样原生生成人声台词、BGM 和音效，但可以用 `parameters.audio`（见 `VIDEO_AUDIO`）关掉。
+两个模型都会原生出声，差别只在能不能关：HappyHorse 1.1 是音视频联合生成、**音轨不可关闭**，也不接受 `reference_audio` 指定音色；wan3.0 可以用 `VIDEO_AUDIO` 关掉。细节见 [docs/video-models.md](./docs/video-models.md)。
 
 两种模型都必须**把台词写进 prompt 才会被说出来**，写法一致：
 
@@ -198,17 +166,11 @@ VIDEO_WATERMARK=false
 
 剧本头部的角色卡、场景卡各挂一张参考图，有两种来源：
 
-- **生成配图**：`POST /api/image` → 万相文生图（默认 `wan2.6-t2i`）。请求里除了中文的「名称：外形描述」，还会带上蓝图锁定的 `promptEn`（固定英文外貌 / 空间短语），保证卡片和逐镜视频里长得一样；描述命中机甲 / 义体 / 装甲 / 全息等科技词时，`lib/skills/image-prompt.ts` 会自动追加一层「科技细节」（分件、接缝、发光线条、金属反射、磨损），否则文生图对「科技角色」的默认输出是光滑的塑料块。接口返回的图片地址只保留 24 小时，服务端会立刻下载并转存到 `.data/uploads/`，前端拿到的是站内永久地址
+- **生成配图**：`POST /api/image` → 万相文生图（默认 `wan2.6-t2i`）。请求里除了中文的「名称：外形描述」，还会带上蓝图锁定的 `promptEn`（固定英文外貌 / 空间短语），保证卡片和逐镜视频里长得一样；接口返回的图片地址只保留 24 小时，服务端会立刻下载并转存到 `.data/uploads/`，前端拿到的是站内永久地址。模型选择、协议差异与提示词增强见 [docs/image-models.md](./docs/image-models.md)
 - **上传**：复用 `/api/uploads`
 - 换图时**不删除**旧文件：旧图可能已经被某个镜头的首帧引用着，删掉会让那条任务直接 404
 
 配图在「上一镜末帧拿不到」时作为首帧兜底；只要末帧可用，配图就不会被提交。因为首帧需要云端可下载，配图同样依赖 `PUBLIC_BASE_URL`。
-
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `IMAGE_API_KEY` | 复用 `VIDEO_API_KEY` | 百炼 API Key |
-| `IMAGE_BASE_URL` | 复用 `VIDEO_BASE_URL` | 文生图接口地址 |
-| `IMAGE_MODEL` | `wan2.6-t2i` | `wan2.6` 及以上（含 `wan2.7-image`）走多模态同步协议；`wan2.5` 及以下自动切换成异步轮询 |
 
 > 注意：镜头素材里的本地文件存在本机，视频模型在云端拉取，无法访问 `localhost`。要让本地上传的素材真正参与生成，需要配置 `PUBLIC_BASE_URL` 指向公网可访问地址（反向代理 / 对象存储），否则请改用公网 URL。
 
@@ -348,6 +310,7 @@ app/
   projects/[id]/page.tsx  项目工作台（素材库、创意、剧本、轮询、导出）
   api/                  health / projects / script(s) / video / shot / frames / uploads / compose 路由
 components/             TopBar · ProjectMediaPanel · IdeaForm · ScriptView · ShotCard
+docs/                  模型文档（视频模型 / 文生图模型）
 scripts/
   migrate-sqlite-to-mysql.mjs  旧 SQLite 数据迁移
   db-stats.mjs                 表统计（make db）
@@ -390,8 +353,6 @@ lib/
     frame.ts            从镜头视频抽关键帧（导出到 .data/frames，供下一镜当首帧）
   providers/video/      阿里云百炼：HappyHorse 1.1 + 万相 wan3.0（types.ts / index.ts / happyhorse.ts / wan.ts）
 ```
-
-若将来接入其它视频平台：实现 `lib/providers/video/types.ts` 中的 `VideoProvider` 接口，在 `lib/providers/video/index.ts` 的 `FACTORIES` 注册，再到 `lib/video-models.ts` 的 `VIDEO_MODELS` 加一条能力（单镜区间、镜数上限），表单与分镜规划会自动跟着变。
 
 ## 说明
 
