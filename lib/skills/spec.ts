@@ -95,6 +95,20 @@ export function normalizeCameraMove(value: unknown): string {
   return (CAMERA_MOVES as readonly string[]).includes(move) ? move : DEFAULT_CAMERA_MOVE;
 }
 
+/** 景别在 SHOT_SIZES 里的档位；未知值按中景算，避免一个错值把跨度算成 5 */
+export function shotSizeRank(size: string): number {
+  const index = (SHOT_SIZES as readonly string[]).indexOf(size);
+  return index >= 0 ? index : 3;
+}
+
+/** 两镜的景别跨度（档数）。0 = 同景别，1 = 相邻，≥2 = 跳变 */
+export function shotSizeGap(
+  a: { shotSize: string },
+  b: { shotSize: string },
+): number {
+  return Math.abs(shotSizeRank(a.shotSize) - shotSizeRank(b.shotSize));
+}
+
 /** 按 name 去重，保留第一次出现的顺序（模型经常把同一角色 / 场景写两遍） */
 export function dedupeByName<T extends { name: string }>(items: T[]): T[] {
   const seen = new Set<string>();

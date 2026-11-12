@@ -23,8 +23,9 @@
       "shotSize": "中景",
       "cameraMove": "缓慢推近",
       "transition": "hard-cut",
-      "transitionReason": "换机位，仍在同一次拍摄",
+      "transitionReason": "停机换了机位，同一场戏、同一景别",
       "referencePrevFrame": true,
+      "hiddenCut": false,
       "entryState": "本镜第一帧的画面事实",
       "exitState": "本镜最后一帧的画面事实",
       "beatSheet": [{ "from": 0, "to": 2, "action": "抬眼看向塔顶" }],
@@ -41,7 +42,8 @@
 ```
 
 - `id`、`media`、`lastFrameCast` 由系统写入，手写脚本可以省略。
-- 首镜没有 `transition` / `referencePrevFrame` / `transitionReason`。
+- 首镜没有 `transition` / `referencePrevFrame` / `transitionReason` / `hiddenCut`。
+- `referencePrevFrame` 只表达「要不要用上一镜末帧」，怎么用由景别跨度决定：同景别 → 当首帧；跨 1 档或 `hiddenCut` → 只当 `reference_image`；跨 2 档以上 → 不用。代码见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`。
 - 镜头的角色 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`）；名字必须逐字来自顶层清单。
 
 ## 二、数值约束
@@ -59,7 +61,8 @@
 | 台词长度 | `min(60, max(16, duration × 4))` 字 | `narrationLimit` |
 | `beatSheet` | 首段 from=0、末段 to=duration、不断档不重叠、最多 8 段 | `normalizeBeatSheet` |
 | `beatSheet` 段数 | duration ≥4 时至少 2 段；2~4 秒 2 段，5~10 秒 2~3 段，10~20 秒 3~5 段 | `TIMELINE_RULES` |
-| same-take | 单镜 ≤8 秒、全片连续 ≤2 次、景别跨度 ≤1 档、同场景 | `storyboard.ts` |
+| same-take | 单镜 ≤8 秒、全片连续 ≤2 次、景别跨度必须为 0（摄影机没停机）、同场景 | `storyboard.ts` |
+| 首帧接帧 | 同景别（跨度 0）才当首帧；跨 1 档或 `hiddenCut` 降级为参考图；跨 ≥2 档不接 | `prevFrameUsage` |
 | 状态链断开阈值 | bigram 重合度 <0.15 视为断开（显式跳转词除外） | `stateOverlap` |
 
 ## 三、枚举值
@@ -67,6 +70,7 @@
 - `shotSize`：`大远景 / 远景 / 全景 / 中景 / 近景 / 特写`，缺省 `中景`。
 - `cameraMove`：`固定机位 / 缓慢推近 / 缓慢拉远 / 横向移动 / 环绕 / 跟随 / 手持晃动 / 升格慢动作`，缺省 `固定机位`。
 - `transition`：`same-take / hard-cut / time-jump`。没写时系统按状态链重合度推断，拿不准一律写 `hard-cut`。
+- `hiddenCut`：布尔。这次换机位靠遮挡 / 甩镜 / 暗部完成时写 `true`——长镜头里换景别的唯一做法，此时景别可随便跨。
 - `narrationType`：`dialogue / voiceover / none`，缺省 `voiceover`。写了台词却标 `none` 会被降级成 `voiceover`。
 
 ## 四、禁用词（`videoPrompt` 内）
@@ -91,6 +95,7 @@
 | `prompt-camera-mismatch` | warn | 英文无对应运镜 | 补标准运镜词 |
 | `prompt-shot-size-mismatch` | warn | 英文无对应景别 | 补标准景别词 |
 | `prompt-drift` | warn | 未复用固定 `promptEn`（命中 <50%） | 原文粘贴角色/场景短语 |
+| `size-gap-carry` | warn | 景别跨 2 档以上还想接上一镜末帧 | 改走卡片，或用 `hiddenCut` 声明遮挡转场 |
 | `timeline-missing` | warn | 长镜没有秒级节拍 | 补 `beatSheet` |
 | `narration-long` | warn | 台词超出时长容量 | 删到一句一意 |
 | `dialogue-empty` | warn | 标了台词却没内容 | 补台词或改 `voiceover`/`none` |

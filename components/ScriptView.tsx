@@ -590,6 +590,7 @@ export default function ScriptView({
                   .reduce((sum, prev) => sum + prev.duration, 0)}
                 carryMuted={carryMuted}
                 prevSceneName={shots[activeIndex - 1]?.sceneNames?.[0] ?? ''}
+                prevShotSize={shots[activeIndex - 1]?.shotSize ?? ''}
                 prevCast={prevFrameCast(shots[activeIndex - 1] ?? null)}
                 prevExitState={shots[activeIndex - 1]?.exitState ?? ''}
                 prevFrameRefEnabled={prevFrameRefEnabled}

@@ -42,12 +42,13 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 
 ### 3. 展开分镜（shots）
 
-逐镜写 `title / duration / shotSize / cameraMove / transition / referencePrevFrame / entryState / exitState / beatSheet / description / videoPrompt / narration*`。
+逐镜写 `title / duration / shotSize / cameraMove / transition / referencePrevFrame / hiddenCut / entryState / exitState / beatSheet / description / videoPrompt / narration*`。
 
 - 景别按「建立 → 逼近 → 细节 → 释放」推进：开场用大远景/全景交代空间关系，情绪高点用近景/特写，结尾释放回环境或留白。
 - 相邻两镜不要同景别 + 同运镜。景别一次最多跨 1 档（特写直接接大远景等于换了个世界）。
-- `transition` 只按「摄影机有没有停机」判断：同一次拍摄里切两刀 = `same-take`（单镜 ≤8 秒、全片连续不超过 2 次）；停机换机位 = `hard-cut`（绝大多数镜头）；时间或地点跳转 = `time-jump`。
-- `referencePrevFrame`：同场景的 `hard-cut` 写 `true`（下一镜第一帧就是本镜最后一帧，接缝不跳）；`time-jump`、换场景一律 `false`。拿不准写 `false`。
+- `transition` 只按「摄影机有没有停机」判断：同一次拍摄里切两刀 = `same-take`（单镜 ≤8 秒、全片连续不超过 2 次；景别与机位都不许变）；停机换机位 = `hard-cut`（绝大多数镜头）；时间或地点跳转 = `time-jump`。
+- `referencePrevFrame`：只有「同场景 + 同景别的 `hard-cut`」写 `true`（下一镜第一帧就是本镜最后一帧，接缝不跳）；景别变了还写 `true` 只会换来一次突兀的推拉，改走卡片；`time-jump`、换场景一律 `false`。拿不准写 `false`。
+- 一镜到底优先在单个镜头内用运镜 + `beatSheet` 完成景别变化，不要拆成多镜再靠 `same-take` 粘。必须在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位并写 `hiddenCut: true`——此时景别可随便跨，末帧只当风格参考图。
 - `beatSheet` 把 duration 切成 2~4 段（10~20 秒切 3~5 段）：首段 `from=0`、末段 `to=duration`，不断档不重叠，每段只写一个可见动作。没有这一层，20 秒的镜头只会得到一段半死不活的慢动作。
 - `description` 用中文写清「景别 + 谁 + 在做什么 + 环境 + 光线」，`videoPrompt` 只做忠实英译（见下）。
 
@@ -89,7 +90,7 @@ node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 
 1. 第 1 镜 3 秒内是否让人看懂「谁、在哪、发生了什么异常」？
 2. 第 1 镜到最后一镜连读，每处跳跃是否都在上一镜的 `transition` 里声明过？
-3. 相邻两镜是否同景别 + 同运镜？same-take 是否连续超过 2 次？
+3. 相邻两镜是否同景别 + 同运镜？same-take 的景别是否完全没变、是否连续超过 2 次？跨了景别的长镜头是否都标了 `hiddenCut`？
 4. 每镜是否只有一个可见动作，且这个动作在 duration 内做得完？
 5. 全片光比、色温、颗粒是否同一套语言（同一场景内不许一会儿日光一会儿霓虹）？
 6. 是否每镜都在解释剧情，而没有一镜只靠画面推进？

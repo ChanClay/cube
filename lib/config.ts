@@ -51,11 +51,11 @@ export const config = {
      */
     audioOnCarry: bool(process.env.VIDEO_AUDIO_ON_CARRY, false),
     /**
-     * 硬切镜头是否把上一镜末帧当 reference_image 一起传（默认开）。
+     * 硬切镜头是否用上一镜末帧（默认开）。
      *
-     * 硬切不能传首帧（那是承接的动作），但「同一场戏」的光线、色调、场景材质
-     * 需要延续，否则接缝看起来像换了片场。末帧作为参考图只借这些视觉属性，
-     * 不会变成底图，所以不会把上一镜的构图或人数带进来。
+     * 同景别时当首帧接住（接缝完全连续，但这一镜就传不了卡片）；景别变了则降级成
+     * reference_image，只借光线 / 色调 / 场景材质，构图按本镜重新来。判定见
+     * lib/skills/shot-media.ts 的 prevFrameUsage。
      * 拿去 A/B 的那次关掉即可（改 .env.local 后重启）。
      */
     referencePrevFrame: bool(process.env.VIDEO_REFERENCE_PREV_FRAME, true),

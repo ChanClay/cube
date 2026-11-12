@@ -28,7 +28,7 @@ import {
   PROMPT_MAX_WORDS,
   PROMPT_MIN_WORDS,
   SHOT_LANGUAGE_RULES,
-  SHOT_SIZES,
+  shotSizeGap,
   stateOverlap,
   str,
   stripForbiddenPromptPhrases,
@@ -82,12 +82,15 @@ function buildSystemPrompt(): string {
 【二、跨镜连贯性（整份剧本最重要的部分）】
 6. ${CONTINUITY_RULES}
    每一镜还必须写 transition（这一镜怎么交到下一镜），分镜据此决定下一镜的机位是否接着这一镜，只能取三个值：
-   - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续（景别、机位、人物姿势都不变），这一镜不超过 8 秒。全片连续使用不得超过 2 次。
-   - hard-cut：换景别 / 换角度 / 正反打。下一镜是新机位；同一场戏里画面仍会从这一镜的最后一帧接住（接缝不跳），换场景才不接帧。绝大多数镜头应该是这个。
+   - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续（景别、机位、人物姿势都不许变），这一镜不超过 8 秒。全片连续使用不得超过 2 次。景别一变就不是 same-take，不要用它把特写和中景粘起来。
+   - hard-cut：停机换了机位——换景别 / 换角度 / 正反打。绝大多数镜头应该是这个。
    - time-jump：时间或地点跳转。
    判断标准：摄影机有没有停机。还在同一次拍摄里才是 same-take，停机换机位就是 hard-cut。
    transition 只是判断，不要为了「看起来连贯」把整条链都写成 same-take。
-   同时给出 referencePrevFrame（这一镜要不要接住上一镜的最后一帧）：同一场戏的 hard-cut 写 true——本镜第一帧与上一镜最后一帧完全相同，接缝不会跳，代价是本镜传不了角色卡 / 场景卡；time-jump、换场景一律写 false，改走卡片参考图。拿不准时写 false。
+   同时给出 referencePrevFrame（这一镜要不要用上一镜的最后一帧）：只有「同场景 + 同景别的 hard-cut」写 true——本镜第一帧与上一镜最后一帧完全相同，接缝不跳，代价是本镜传不了卡片。景别变了就别写 true：画面要重新构图，上一镜的构图接不住，交给角色卡 / 场景卡。time-jump、换场景一律写 false。拿不准时写 false。
+   一镜到底优先用一个镜头承载，不要拆：镜头内的景别变化靠 cameraMove（缓慢推近 / 缓慢拉远 / 跟随）+ beatSheet 表达。只有时长超过 8 秒、必须分段生成时才拆成多镜，且拆点两侧的景别、机位、人物姿势必须完全一致。
+   确实要在长镜头里换景别时，用遮挡 / 甩镜 / 暗部换机位：人物走过柱子、门框、走廊，镜头甩进暗处，雨幕或前景物件盖住画面。这时写 hiddenCut: true，景别可以随便跨，系统会把上一镜末帧降级成风格参考图而不会把它当首帧。
+
 
 【三、镜头语言】
 7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜；每个镜头只承担一个视觉动作，画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
@@ -133,7 +136,8 @@ JSON 结构：
       "cameraMove": "缓慢推近",
       "transition": "same-take | hard-cut | time-jump",
       "transitionReason": "一句话说明为什么这样衔接到下一镜",
-      "referencePrevFrame": "true / false：本镜是否从上一镜最后一帧接住（同场景 hard-cut 写 true）",
+      "referencePrevFrame": "true / false：本镜是否用上一镜最后一帧（只有同场景 + 同景别的 hard-cut 写 true）",
+      "hiddenCut": "true / false：这次换机位是否靠遮挡 / 甩镜 / 暗部完成（长镜头里换景别时写 true，景别可随便跨）",
       "entryState": "本镜第一帧的画面事实，与上一镜 exitState 一致",
       "exitState": "本镜最后一帧的画面事实，供下一镜接住",
       "beatSheet": [
@@ -183,7 +187,7 @@ ${req.idea}
   const selfCheck = `输出前自检（不通过就改，不要把自检写进 JSON）：
 1) shots 是否正好 ${expectedShots} 个？
 2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线是否仍然与上一镜一致？
-3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame=true 是否只出现在「同场景的 hard-cut」上？
+3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame=true 是否只出现在「同场景 + 同景别」的 hard-cut 上？跨了景别的长镜头是不是都写了 hiddenCut=true？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作？
 5) 角色名 / 场景名是否逐字来自上方清单？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
@@ -337,6 +341,8 @@ function normalizeShot(raw: Record<string, unknown>, index: number): Shot {
         : str(raw.transitionReason ?? raw.transitionNote) || undefined,
     referencePrevFrame:
       index === 1 ? undefined : parseBool(raw.referencePrevFrame ?? raw.usePrevFrame),
+    hiddenCut:
+      index === 1 ? undefined : parseBool(raw.hiddenCut ?? raw.hiddenTransition),
     entryState: str(raw.entryState ?? raw.entry ?? raw.stateIn) || undefined,
     exitState: str(raw.exitState ?? raw.exit ?? raw.stateOut) || undefined,
     beatSheet: normalizeBeatSheet(raw.beatSheet ?? raw.beats ?? raw.timeline, duration),
@@ -676,13 +682,13 @@ const MAX_SAME_TAKE_SECONDS = 8;
 /** 连续接帧的最大次数：每接一次画面都会掉一点细节，接多了人物就漂了 */
 const MAX_SAME_TAKE_CHAIN = 2;
 
-/** 景别跨度允许的档数：特写接全景，接帧只会把上一镜的构图压在人物脸上 */
-const MAX_SHOT_SIZE_GAP = 1;
-
-const shotSizeRank = (size: string): number => {
-  const index = (SHOT_SIZES as readonly string[]).indexOf(size);
-  return index >= 0 ? index : 3;
-};
+/**
+ * same-take 的景别跨度必须是 0：摄影机没停机，景别不可能在切点跳变。
+ *
+ * 以前允许跨 1 档，等于默许「特写接中景也算同一次拍摄」；接帧之后这一镜
+ * 只能从上一镜的构图里拉远，分镜写的剪辑点就消失了。
+ */
+const MAX_SHOT_SIZE_GAP = 0;
 
 /**
  * 分镜没写衔接方式时，状态链要重合到这个程度才算「明显接得上」。
@@ -698,7 +704,7 @@ function sameTakeBlockers(shot: Shot, prev: Shot, chain: number): string[] {
   const scene = (shot.sceneNames ?? []).join('|');
   if (prevScene && scene && prevScene !== scene) reasons.push('换了场景');
 
-  const gap = Math.abs(shotSizeRank(shot.shotSize) - shotSizeRank(prev.shotSize));
+  const gap = shotSizeGap(shot, prev);
   if (gap > MAX_SHOT_SIZE_GAP) reasons.push(`景别从${prev.shotSize}跳到${shot.shotSize}`);
 
   const exit = prev.exitState?.trim() ?? '';
@@ -783,15 +789,18 @@ function resolveTransitions(script: Script): void {
 /**
  * 接帧开关的定稿层（在 transition 定稿之后跑）。
  *
- * 同一场戏的镜头都用上一镜的真末帧当首帧：本镜第一帧与上一镜最后一帧完全
- * 相同，接缝处不会跳。时间跳转和换场景不接——上一镜的光线本来就不属于新场景，
- * 接过去只会把画面拉回旧色调。分镜可以显式写 false 表示这一镜要纯硬切，
- * 写 true 只在同场景里被采纳。
+ * 这里只做否决，不预设 true：时间跳转、换场景一律关掉（上一镜的光线本来就不属于
+ * 新场景，接过去只会把画面拉回旧色调）；同场硬切留「自动」，真正当首帧还是当
+ * 参考图由景别跨度决定（见 lib/skills/shot-media 的 prevFrameUsage）。
+ *
+ * 以前这里无条件置 true，等于把「换了景别的剪辑点」也当首帧接住，生成时模型只能
+ * 从上一镜的构图里一路拉远，分镜写的剪辑节奏整个消失，还白白丢掉角色卡。
  */
 function resolveReferenceFrames(script: Script): void {
   script.shots.forEach((shot, i) => {
     if (i === 0) {
       shot.referencePrevFrame = undefined;
+      shot.hiddenCut = undefined;
       return;
     }
 
@@ -802,11 +811,9 @@ function resolveReferenceFrames(script: Script): void {
 
     if (shot.transition !== 'hard-cut' || !sameScene) {
       shot.referencePrevFrame = false;
-      return;
+      // 遮挡转场只在同场景的硬切里有意义，其余情况一律清掉，避免 UI 与提示词自相矛盾
+      shot.hiddenCut = undefined;
     }
-
-    // 同场硬切：分镜显式关掉就尊重，没写就默认带上
-    if (shot.referencePrevFrame === undefined) shot.referencePrevFrame = true;
   });
 }
 
@@ -907,6 +914,10 @@ function mergeRepairedShots(
       // 末帧参考图同理：校准结果与用户的手动开关都要保留
       if (prev.referencePrevFrame !== undefined) {
         shot.referencePrevFrame = prev.referencePrevFrame;
+      }
+      // 遮挡转场是叙事判断，修复稿漏写时按原稿
+      if (shot.hiddenCut === undefined && prev.hiddenCut !== undefined) {
+        shot.hiddenCut = prev.hiddenCut;
       }
       // 修复稿漏写状态链 / 时间轴时继承原稿，别让一次修复把整条链清空
       if (!shot.entryState && prev.entryState) shot.entryState = prev.entryState;

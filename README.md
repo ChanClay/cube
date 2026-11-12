@@ -73,7 +73,7 @@ make distclean    # 连 node_modules 一起清理
 | `VIDEO_DURATION` | 兜底时长（秒），wan3.0 支持 2~30，实际以每个镜头的 duration 为准 |
 | `VIDEO_AUDIO` | 是否输出原生有声视频（台词 / BGM / 音效），默认 `true` |
 | `VIDEO_AUDIO_ON_CARRY` | 承接上一镜末帧的镜头是否也生成音频，默认 `false`：画面接着上一镜、声音却重新生成会断档，这类镜头直接静音 |
-| `VIDEO_REFERENCE_PREV_FRAME` | 「同场景硬切带上一镜末帧当 `reference_image`」的全局总开关，默认 `true`。逐镜的默认值由分镜阶段写进剧本（`Shot.referencePrevFrame`），这里置 `0` 可以一次性全关，适合 A/B 对比 |
+| `VIDEO_REFERENCE_PREV_FRAME` | 「硬切镜头用上一镜末帧」的全局总开关，默认 `true`。同景别当首帧、跨景别当参考图，逐镜的默认值由分镜阶段写进剧本（`Shot.referencePrevFrame`），这里置 `0` 可以一次性全关，适合 A/B 对比 |
 | `VIDEO_PROMPT_EXTEND` | 提示词智能扩写，默认 `false`。本项目逐镜提示词已经对齐过（固定英文外貌 / 空间短语 + 标准景别运镜），交给服务端二次改写会换掉景别与运镜，人物和镜头语言都会漂移；只有提示词很短时才建议打开 |
 
 ```env
@@ -121,10 +121,14 @@ VIDEO_AUDIO=true
    - 场景图排在角色图前：首帧是一整帧画面，场景空镜比「纯色背景的单人设定图」更接近真实构图，模型不容易被带成棚拍。
    - **成片本地化**：通义万相返回的 `video_url` 只保留 24 小时。任务一成功就立刻把视频下载到 `.data/videos/`，`videoUrl` 换成站内地址 `/api/videos/{file}`（支持 Range，Safari 可拖进度条）。历史任务若仍挂着临时地址且未超过 24 小时，轮询时会自动补转存；超过 24 小时的链接已被云端删除，无法恢复。
    - 抽帧图（`.png`，旧数据仍有 `.jpg`）存在 `.data/frames/`，通过 `/api/frames/{file}` 对外提供；云端模型必须能下载到它，所以要配置 `PUBLIC_BASE_URL`。未配置（或地址是 localhost / 局域网 IP）时会退回配图兜底并给出提示。
-   - 该镜头带参考图 / 参考视频 / 文档 / 网页（与首帧互斥）时，不注入任何首帧；判定为 `hard-cut` 的镜头即便抽到了末帧也不会用。
-   - **同场硬切的风格锚点（每镜 `referencePrevFrame`）**：`hard-cut` 且与上一镜同场景时，上一镜末帧会作为 `reference_image` 追加在卡片之后（槽位不够时先丢它），并在提交的提示词末尾追一句限定——只匹配参考图的光线与场景材质，景别 / 机位 / 构图按本镜描述执行。它不会变成底图，所以不会把上一镜的人数或构图带进来。
-     - 默认值在生成分镜时写进剧本：同场硬切 = `true`，承接动作 / `time-jump` / 换场景 = `false`（见 `storyboard.ts` 的 `resolveReferenceFrames`）。模型写 `true` 只在同场硬切里被采纳，写 `false` 一律尊重。
-     - 镜头卡片上可以直接改（「末帧参考」勾选框）；换场景或选成「承接上一镜」时该选项自动不可用。
+   - 该镜头带参考图 / 参考视频 / 文档 / 网页（与首帧互斥）时，不注入任何首帧。
+   - **上一镜末帧怎么用（每镜 `referencePrevFrame`）**：按「同场景 + 景别跨度」分档，见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`：
+     - 同景别（跨度 0）的 `same-take` / `hard-cut`：末帧作为真 `first_frame`，本镜第一帧与上一镜最后一帧完全相同，接缝不会跳；代价是本镜传不了卡片。
+     - 跨 1 档，或标了 `hiddenCut`（遮挡 / 甩镜 / 暗部转场）：末帧降级为 `reference_image`，追加在卡片之后只借光线与材质，景别 / 机位 / 构图按本镜描述重新构图。
+     - 跨 2 档以上、`time-jump`、换场景：不接帧，走角色卡 / 场景卡。
+     - 首帧只用在同景别：景别一变，硬把上一镜构图当首帧，这一镜就只能从旧构图里拉远 / 推近，分镜写的剪辑点变成一次突兀的运镜。
+     - 默认值在生成分镜时写进剧本（见 `storyboard.ts` 的 `resolveReferenceFrames`）。它只做否决，不预设 `true`；同场硬切留「自动」，由景别跨度决定当首帧还是当参考图。模型写 `false` 一律尊重。
+     - 镜头卡片上可以直接改（同景别是「末帧接住」，跨景别是「末帧参考」）；景别跨 2 档以上时该选项不可用，旁边会多出「遮挡转场」开关。
      - `VIDEO_REFERENCE_PREV_FRAME` 是全局总开关，置 `0` 后所有镜头都不带。
      - **参考图里是谁必须点名**：末帧是像素，模型不知道图里站的是谁，只写「匹配光线」的话它只会把参考图当调色板。所以提交时会追加 `The reference image is the last frame of the previous shot and shows 老陈 — the same person described above, not an additional character. Keep only their faces and wardrobe consistent; do not duplicate them.`，后面才是「只借光线 / 材质、构图按本镜描述」的限定。名字来自 `prevFrameCast(prev)`：优先用 `Shot.lastFrameCast`（留给视觉识别 / 人工确认写入），没有时退回上一镜的 `characterNames`——那只是分镜时的意图，精度有限。
      - **不许说「保持位置」**：换机位时位置必然变，`keep positions` 会和 `keep the camera angle described above` 直接冲突，模型会把参考图里的人留在原位、再按文字画一个，于是同一个人出现两次。只锁脸和服装，并显式 `do not duplicate`。

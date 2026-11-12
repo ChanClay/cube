@@ -30,7 +30,7 @@ export interface HealthInfo {
     audio: boolean;
     /** 承接上一镜末帧的镜头是否保留音轨 */
     audioOnCarry: boolean;
-    /** 硬切镜头是否带上一镜末帧作为风格参考图 */
+    /** 硬切镜头是否用上一镜末帧（同景别当首帧，跨景别当风格参考图） */
     referencePrevFrame: boolean;
     promptExtend: boolean;
   };

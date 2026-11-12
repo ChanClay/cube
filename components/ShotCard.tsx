@@ -16,6 +16,7 @@ import {
   TRANSITION_LABEL,
   isSameTakeShot,
 } from '@/lib/skills/shot-media';
+import { shotSizeGap } from '@/lib/skills/spec';
 import type {
   Character,
   MediaInput,
@@ -46,6 +47,8 @@ interface Props {
   carryMuted?: boolean;
   /** 上一镜的场景名：判断能不能把上一镜末帧当同场景的风格参考 */
   prevSceneName?: string;
+  /** 上一镜的景别：同景别才谈得上「首帧接住」，景别变了只能当参考图 */
+  prevShotSize?: string;
   /** 上一镜末帧里实际在场的人物：重算提示词时按这份名单点名，避免凭空多出人 */
   prevCast?: string[];
   /** 上一镜的结尾状态，用于对齐动作与位置 */
@@ -103,6 +106,7 @@ export default function ShotCard({
   startAt,
   carryMuted = true,
   prevSceneName = '',
+  prevShotSize = '',
   prevCast = [],
   prevExitState = '',
   prevFrameRefEnabled = true,
@@ -150,21 +154,25 @@ export default function ShotCard({
   const transition: ShotTransition =
     shot.transition ?? (shot.continueFromPrev ? 'same-take' : 'hard-cut');
   /**
-   * 上一镜末帧当参考图，只在「同一场戏、换了机位」时成立：
+   * 上一镜末帧怎么用，只在「同一场戏、换了机位」时成立：
    * 承接动作的镜头已经在用首帧（互斥），跨场景参考过去会把新场景拉回旧色调。
    */
   const sameSceneAsPrev =
     !!prevSceneName && (shot.sceneNames ?? []).includes(prevSceneName);
-  const canReferencePrevFrame =
-    !isFirst &&
-    prevFrameRefEnabled &&
-    transition === 'hard-cut' &&
-    sameSceneAsPrev;
+  /** 景别跨度：0 = 同景别，1 = 相邻，≥2 = 跳变；不知道上一镜景别时按同景别算 */
+  const gapToPrev = prevShotSize ? shotSizeGap(shot, { shotSize: prevShotSize }) : 0;
+  const sameScopeCut =
+    !isFirst && prevFrameRefEnabled && transition === 'hard-cut' && sameSceneAsPrev;
+  /** 真正能把末帧当首帧的只有同景别（+ 遮挡转场也不算，遮挡转场是重新构图） */
+  const exactCarry = sameScopeCut && gapToPrev === 0 && !shot.hiddenCut;
+  /** 勾选框的可用范围：同景别能接住，跨 1 档或遮挡转场只能当风格参考图 */
+  const canReferencePrevFrame = sameScopeCut && (gapToPrev <= 1 || !!shot.hiddenCut);
   const referencePrevFrame =
     canReferencePrevFrame && (shot.referencePrevFrame ?? true);
   const silentForCarry =
     carryMuted &&
-    (hasCarryFrame(media) || (!isFirst && isSameTakeShot(shot) && !hasManualFirstFrame));
+    (hasCarryFrame(media) ||
+      (!isFirst && isSameTakeShot(shot) && gapToPrev === 0 && !hasManualFirstFrame));
 
   useEffect(() => {
     setDurationText(String(shot.duration));
@@ -684,7 +692,11 @@ export default function ShotCard({
                   ? '已由 VIDEO_REFERENCE_PREV_FRAME=0 全局关闭'
                   : !sameSceneAsPrev
                     ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
-                    : '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（wan3.0 首尾帧与参考图互斥）。关掉就是纯硬切'
+                    : exactCarry
+                      ? '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（wan3.0 首尾帧与参考图互斥）。关掉就是纯硬切'
+                      : gapToPrev > 1 && !shot.hiddenCut
+                        ? `景别从${prevShotSize}跳到${shot.shotSize}，上一镜末帧接不住：这一镜走角色卡 / 场景卡重新构图`
+                        : '景别变了，末帧不能当首帧（那会变成一次推拉），只作风格参考图借光线与色调，角色卡照常传'
               }
             >
               <input
@@ -693,7 +705,21 @@ export default function ShotCard({
                 disabled={!canReferencePrevFrame}
                 onChange={(e) => onChange({ referencePrevFrame: e.target.checked })}
               />
-              <span>末帧接住</span>
+              <span>{exactCarry ? '末帧接住' : '末帧参考'}</span>
+            </label>
+          )}
+
+          {sameScopeCut && gapToPrev > 1 && (
+            <label
+              className="shot-ref-frame"
+              title="这次换机位靠人物走过前景 / 甩镜 / 暗部完成：观众看不出接缝，所以景别可以跨，但末帧只能当风格参考图"
+            >
+              <input
+                type="checkbox"
+                checked={!!shot.hiddenCut}
+                onChange={(e) => onChange({ hiddenCut: e.target.checked || undefined })}
+              />
+              <span>遮挡转场</span>
             </label>
           )}
         </div>

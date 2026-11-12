@@ -1,24 +1,23 @@
 import { MAX_MEDIA_TOTAL, isCarryFrameUrl } from './media';
+import { shotSizeGap } from './spec';
 import type { MediaInput, Script, Shot, ShotTransition } from '@/lib/types';
 
 /**
  * 镜头级的自动素材关联。
  *
- * 四条硬规则：
+ * 五条硬规则：
  * 1. 角色卡 / 场景卡是「设计参考」，一律作为 reference_image，
  *    不再当首帧——单人设定图当首帧会把整段视频压成同样的背景。
  * 2. 万相 wan3.0 不允许首尾帧与 reference_* 混用，
  *    所以每一镜只能在「接帧」和「参考图」之间二选一。
- * 3. 选哪一边由分镜给出的 transition 决定，不由「上一镜恰好有成品」临时决定：
- *    同一场戏（same-take 和 hard-cut 都算）一律用真末帧当首帧接住；
- *    只有换场景 / 时间跳转才退回参考图。
- * 4. 硬切镜头以前把末帧当 reference_image 传，只借光线 / 色调 / 场景材质。
- *    但模型拿到参考图会重新构图，机位、姿态、曝光都会偏一点，接缝处画面直接跳；
- *    改成首帧接住后，本镜第一帧与上一镜最后一帧完全相同，接缝不再跳变。
- *    代价是这一镜传不了角色卡 / 场景卡（wan3.0 首尾帧与 reference_* 互斥）。
+ * 3. 首帧的物理含义是本镜第 0 帧 = 上一镜最后一帧，只有摄影机没停机才成立，
+ *    因此「当首帧」严格限定在同景别：same-take，或同场景同景别的 hard-cut。
+ * 4. 景别一变，画面必须重新构图：末帧最多降级成 reference_image（只借光线 / 色调）。
+ *    硬把特写的末帧当首帧，这一镜就变成一次拉镜头，分镜写的剪辑节奏整个消失，
+ *    而且首帧与卡片互斥，景别跨度越大越需要角色卡的时候反而把卡全丢掉。
  * 5. 接帧的镜头卡片让位（首帧互斥），身份只能靠首帧里已经有的人物和提示词约束
- *    （只锁脸和服装、禁止 duplicate、单人镜头给人数上限）；只有走参考图的
- *    跨场景镜头才会把卡片和末帧一起传，且不做身份去重。
+ *    （只锁脸和服装、禁止 duplicate、单人镜头给人数上限）；走参考图的镜头才会把
+ *    卡片和末帧一起传，且不做身份去重。
  */
 
 export const TRANSITION_LABEL: Record<ShotTransition, string> = {
@@ -31,7 +30,7 @@ export const TRANSITION_HINT: Record<ShotTransition, string> = {
   'same-take':
     '同一动作被切成两镜：抽上一镜末帧当首帧，本镜不能再传参考图（wan3.0 首帧与参考图互斥）',
   'hard-cut':
-    '换景别 / 换角度：仍抽上一镜末帧当首帧接住画面（接缝不跳），但本镜传不了参考图',
+    '换角度 / 换景别：同景别才抽上一镜末帧当首帧；景别变了只当风格参考图，角色卡照常传',
   'time-jump': '时间或地点跳转：不接帧，走角色卡 / 场景卡参考图',
 };
 
@@ -66,26 +65,37 @@ export function prevFrameCast(prev: Shot | null): string[] {
 
 export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   if (!prev) return null;
-  if (isSameTakeShot(shot)) return 'first_frame';
+
+  const gap = shotSizeGap(shot, prev);
+
+  /**
+   * same-take 的物理前提是「摄影机没停机」，所以景别必须完全一致。
+   * 分镜把景别写跳了还标 same-take 属于误判，这时宁可什么都不接：
+   * 硬接的结果是本镜从上一镜的构图里拉远 / 推近，等于凭空多了一次运镜。
+   */
+  if (isSameTakeShot(shot)) return gap === 0 ? 'first_frame' : null;
+
   // 分镜 / 用户关掉了就完全不抽
   if (shot.referencePrevFrame === false) return null;
   if (shot.transition === 'time-jump') return null;
 
-  /**
-   * 同一场戏一律接首帧，硬切也不例外。
-   *
-   * 硬切原本只把末帧当 reference_image：模型拿到参考图会重新构图，机位、人物
-   * 姿态、曝光都偏一点点，接缝处画面就「跳」一下。换成真末帧当首帧后，本镜
-   * 第一帧与上一镜最后一帧完全相同，接缝是连续的，代价是本镜不能再传卡片。
-   *
-   * 换场景时不接：上一镜的光线本来就不属于新场景。
-   */
   const prevScene = (prev.sceneNames ?? []).join('|');
   const scene = (shot.sceneNames ?? []).join('|');
-  if (prevScene && scene && prevScene === scene) return 'first_frame';
+  const sameScene = !!prevScene && !!scene && prevScene === scene;
 
   // 跨场景只有手动打开才带末帧，此时只借光线 / 色调，不让旧构图跟过来
-  return shot.referencePrevFrame === true ? 'reference_image' : null;
+  if (!sameScene) return shot.referencePrevFrame === true ? 'reference_image' : null;
+
+  /**
+   * 同场硬切按景别跨度分档：
+   * - 同景别换角度：构图几乎一样，末帧当首帧接缝完全连续；
+   * - 跨 1 档 / 遮挡转场：交接点画面本来就在变，真接住会把剪辑点变成推拉镜头，
+   *   改成参考图，既重新构图又保住角色卡与场景卡；
+   * - 跨 2 档以上：接不住也不该接，走卡片保人物一致。
+   */
+  if (gap === 0) return 'first_frame';
+  if (gap === 1 || shot.hiddenCut) return 'reference_image';
+  return null;
 }
 
 /** 单次最多 10 张参考图（与 lib/skills/media.ts 的 reference_image 上限一致） */
@@ -190,8 +200,8 @@ const sameMedia = (a: MediaInput[], b: MediaInput[]): boolean =>
  * 重新计算这一镜的自动素材：
  * - 先摘掉上一轮自动挂的抽帧 / 卡片图，避免旧素材挡住新决策；
  * - 用户手选首尾帧时完全尊重，不再自动注入；
- * - 同一场戏（same-take / 硬切）用衔接帧当首帧，接缝才不会跳；
- * - 只有换场景、时间跳转才走卡片参考图；
+ * - 同景别（same-take / 硬切）才用衔接帧当首帧，接缝才不会跳；跨景别降级为参考图；
+ * - 换场景、时间跳转、景别跨度大的镜头走卡片参考图；
  * - 衔接帧拿不到时降级为参考图，不让这一镜裸奔。
  */
 export function resolveShotMedia(
@@ -205,7 +215,7 @@ export function resolveShotMedia(
   const cardUrls = autoCardUrls(script);
   /**
    * 抽到的末帧怎么用，由上一镜与本镜的关系决定（见 prevFrameUsage）：
-   * 同一场戏一律当首帧，跨场景手动打开才当参考图，其余情况不用。
+   * 同景别当首帧；跨 1 档 / 遮挡转场 / 跨场景手动打开时当参考图；其余情况不用。
    * 没有 shot 的老调用方保持原行为：末帧当首帧。
    */
   const usage: PrevFrameUsage = shot ? prevFrameUsage(shot, prev) : 'first_frame';
