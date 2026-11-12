@@ -360,6 +360,42 @@ export const MOTION_BASELINE_RULES = `动势基线（决定这一镜在成片里
 - 整镜用 "constant subtle motion, no frozen frame" 守住这条基线，不要用 "steady framing" 这类词暗示画面可以停住。`;
 
 /**
+ * 全片运动基调的作用域。
+ *
+ * motionEn 会被逐镜追加到**每一条**视频提示词的末尾，所以它只允许描述
+ * 「任何一镜都成立的运动介质」。一旦写成剧情动作（战马冲入、提头掷地、斟酒），
+ * 这些主体就会出现在每一镜里——帐内对话特写也会凭空冒出一匹马。
+ * 这是「每个分镜结尾都有人策马」的唯一成因。
+ */
+export const MOTION_SCOPE_RULES = `全片运动基调的作用域（写错就会污染每一镜）：
+- motion / motionEn 会被逐镜追加到每一条视频提示词的末尾，所以它只能写「任何一镜都成立的运动介质」：呼吸、衣料与发丝、尘土、火光、雨丝、蒸汽、风、车厢振动、地面掠过、光斑游走。它约束的是「动感从哪来」，不是「这一镜演什么」；
+- 严禁把它写成剧情动作或具体主体：战马冲入 / 策马 / 提刀上马 / 斩 / 掷头 / 斟酒 / 跪拜 / 人群，都不许进 motionEn——它们只属于某几镜，被追加到每一镜就会让帐内特写里也出现一匹马、一具头、一壶酒；
+- 反例（错）："Continuous motion: hand gestures, turning bodies, wine pouring, horse charge, ringing bells, head thrown to ground."——一条提示词同时塞了四个人物动作，每一镜都会被拍到这四个动作；
+- 正例（对）："constant drifting dust, flickering firelight, swaying fabric, faint breath"——任何一镜都成立，它只负责让画面不死；
+- 这一镜自己的动作写在 description 与 beatSheet 里，不要指望运动基调替你交代；全片确实全程都在骑马 / 追车时，把主体写进每一镜自己的 description，而不是塞进运动基调。`;
+
+/**
+ * 只属于某几镜的剧情动作与主体：出现在 motionEn 里就会被追加到每一镜。
+ * 这里做一道确定性兜底，命中就把该分句剔掉（人物动作由每镜自己的描述负责）。
+ */
+const SCOPED_MOTION =
+  /\b(horses?|hooves|hoofbeats?|gallop\w*|canter\w*|trot\w*|riders?|riding|mounted|swords?|blades?|spears?|halberds?|slay\w*|slain|behead\w*|decapitat\w*|severed|corpses?|blood\w*|wine|goblets?|kneel\w*|bowing|fists?|bows?)\b/i;
+
+/** motionEn 被清空时的兜底：只写介质，不写任何主体 */
+export const DEFAULT_MOTION_EN =
+  'constant ambient motion, drifting dust, flickering light, fabric tremble';
+
+export function stripScopedMotion(text: string): string {
+  const value = str(text);
+  if (!value) return '';
+  const clauses = value.split(/\s*[,;，；]\s*/).filter(Boolean);
+  const kept = clauses.filter((clause) => !SCOPED_MOTION.test(clause));
+  if (kept.length === clauses.length) return value;
+  const result = kept.join(', ').replace(/[.\s]+$/, '').trim();
+  return result || DEFAULT_MOTION_EN;
+}
+
+/**
  * 空间坐标锚定。
  *
  * 「前 / 后 / 左 / 右」本身没有参照系：同一个 left 在模型那里可能指画面左侧、

@@ -70,7 +70,7 @@
 | `duration` 模式镜数 | 只给区间 `ceil(总时长/单镜上限)` ~ `min(12, 总时长/单镜下限)`，由 AI 按剧情决定 | `splitByDuration(total, limits)` |
 | 主体卡 | 2~5 张（最多 8）：人物 + 每一辆载具 + 关键道具，`promptEn` 20~35 词，必须带 `subjectType` | `continuity.ts` |
 | 主体卡 `desc` | 只写恒定外观；出现姿势 / 场景 / 动作（坐在车里、握着方向盘）报 `scene-in-character-desc`，配图层会再剥一次 | `APPEARANCE_ONLY_RULES` / `SITUATION_HINT` |
-| 运动基调 | 蓝图给 `motion` / `motionEn`；分镜每镜都要体现，运行时再逐镜追加一次 `motionEn` | `StoryPlan.motion` / `buildVideoPrompt` |
+| 运动基调 | 蓝图给 `motion` / `motionEn`；运行时逐镜追加 `motionEn`，所以它只能写「任何一镜都成立的运动介质」，写剧情动作会污染每一镜（`stripScopedMotion` 会剔掉战马 / 刀剑 / 斟酒这类分句） | `StoryPlan.motion` / `MOTION_SCOPE_RULES` / `buildVideoPrompt` |
 | 载具卡缺口 | 追逐 / 竞速且有驾驶主体时至少 2 张载具卡（被追的与追的各一张） | `requiredVehicleCards` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
 | `videoPrompt` | 英文，40~125 词（<30 或 >170 判不合格） | `PROMPT_*_WORDS` |

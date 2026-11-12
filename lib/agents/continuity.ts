@@ -12,11 +12,13 @@ import {
   clamp,
   CUT_POINT_RULES,
   dedupeByName,
+  MOTION_SCOPE_RULES,
   normalizeCameraMove,
   normalizeShotSize,
   normalizeTransition,
   SITUATION_HINT,
   str,
+  stripScopedMotion,
   SUBJECT_CARD_RULES,
 } from '@/lib/skills/spec';
 import { callChatJson } from './llm';
@@ -152,6 +154,7 @@ export interface PlanProblem {
     | 'missing-prompt-en'
     | 'scene-in-character-desc'
     | 'missing-motion'
+    | 'motion-scoped'
     | 'missing-dialogue'
     | 'dialogue-without-card'
     | 'dialogue-repeat';
@@ -244,7 +247,8 @@ export function buildBlueprintSystemPrompt(
 1. logline：一句话，必须包含「谁 + 想要什么 + 被什么阻碍 + 可能付出什么代价」，40 字以内。
 2. theme：一句可以被画面证明的判断（例：「承认失去，才是活下去的开始」），不要写「关于爱」这类名词短语。
 3. tone：情绪基调与节奏（例：「压抑克制，前半慢，后半急促」），用来约束后面所有镜头。
-   motion：全片运动基调，一句话说清「观众在任何一镜里都该感到画面在动，还是可以静止」，以及运动来自哪里。例：「高速追车，车始终在动——车厢振动、窗外景物横掠、风压与雨刷，任何近景 / 特写都要保留速度感」。只有全片确实是安静对话、没有任何运动主体时才写「静止」。这一条会被逐镜带进视频提示词，写「动态」却说不清动源，等于没写。
+   motion / motionEn：全片运动基调。motion 一句话说清「观众在任何一镜里都该感到画面在动，还是可以静止」，以及动感来自哪里；motionEn 是它的英文短句（≤18 词），运行时会被逐镜追加到每一条视频提示词的末尾。这两条是全片属性，不是某一镜的动作清单——规则见下。
+   ${MOTION_SCOPE_RULES}
 4. 结构：用经典节拍组织，每个 beat 标注 beat 字段，只能取：开场钩子 / 铺垫 / 激励事件 / 升级 / 中点转折 / 低谷 / 高潮 / 余韵。镜数少时可以省略部分节拍，但开场钩子、高潮、余韵不能缺。
 5. 主体卡 2~5 张（最多 8 张，放在 characters 数组里）：role 写叙事功能。
    写卡之前先列一遍「本片有哪些需要在两个以上镜头里被认出来的视觉主体」，再逐个判断主体类型。不判断类型就套人类模板，会把机甲、巨兽、载具写成「三十岁男人」；漏掉一个主体，就会在成片里每镜重新设计一遍。
@@ -318,8 +322,8 @@ JSON 结构：
   "logline": "一句话故事梗概",
   "theme": "一句可被画面证明的判断",
   "tone": "情绪基调与节奏",
-  "motion": "全片运动基调：整片是持续运动还是静止，运动来自哪里（会被逐镜带进视频提示词）",
-  "motionEn": "≤18 words English motion baseline submitted with every shot",${extraRules ? '\n  "treatment": "300~500 字连贯梗概，按成片顺序写",' : ''}
+  "motion": "全片运动基调：整片是持续运动还是静止，动感来自哪里（只写任何一镜都成立的运动介质，不写剧情动作）",
+  "motionEn": "≤18 words English motion baseline appended to every shot: only ambient medium (dust, firelight, fabric, breath), never story actions or specific subjects",${extraRules ? '\n  "treatment": "300~500 字连贯梗概，按成片顺序写",' : ''}
   "characters": [
     {
       "name": "人类角色名",
@@ -756,8 +760,27 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
     problems.push({
       code: 'missing-motion',
       message:
-        '蓝图没有给出全片运动基调（motion）；一句「高速追车，车始终在动：车厢振动、窗外景物横掠」就能让' +
-        '后面每一镜的特写都保留速度感，缺失时只能逐镜祈祷模型别把画面拍成静止',
+        '蓝图没有给出全片运动基调（motion）；一句「持续的风、火光晃动与飘浮的尘粒，任何特写都不静止」就能让' +
+        '后面每一镜都保持动感，缺失时只能逐镜祈祷模型别把画面拍成静止',
+      blocking: false,
+    });
+  }
+
+  /**
+   * 运动基调被写成了剧情动作（战马冲入 / 提头掷地 / 斟酒）：
+   * 它会被追加到每一镜，于是每一镜都会长出这些主体。这里先确定性剔掉这些分句，
+   * 再提醒模型重写成「任何一镜都成立的运动介质」。
+   */
+  const rawMotionEn = str(obj.motionEn);
+  const motionEn = rawMotionEn ? stripScopedMotion(rawMotionEn) : '';
+  if (rawMotionEn && motionEn !== rawMotionEn) {
+    problems.push({
+      code: 'motion-scoped',
+      message:
+        `motionEn 里写了只属于个别镜头的剧情动作（原文「${rawMotionEn}」，已剔除为「${motionEn}」）。` +
+        'motionEn 会被逐镜追加，写成战马 / 刀剑 / 斟酒 / 掷头这类主体，帐内对话特写里也会凭空出现它们；' +
+        '改成任何一镜都成立的运动介质：飘浮的尘粒、晃动的火光、起伏的呼吸、被风掀动的衣料',
+      // 已经确定性剔过，不阻塞重试
       blocking: false,
     });
   }
@@ -782,7 +805,7 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
       theme: str(obj.theme),
       tone: str(obj.tone),
       motion: str(obj.motion),
-      motionEn: str(obj.motionEn) || undefined,
+      motionEn: motionEn || undefined,
       characters,
       scenes,
       beats,

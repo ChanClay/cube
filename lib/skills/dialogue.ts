@@ -1,4 +1,5 @@
 import { hasPrevFrameReference } from './media';
+import { stripScopedMotion } from './spec';
 import type { MediaInput, Shot, ShotBeat } from '@/lib/types';
 
 type PromptShot = Pick<Shot, 'narration' | 'narrationType' | 'speaker'> &
@@ -106,8 +107,15 @@ export function buildVideoPrompt(
   const base = (prompt ?? '').trim();
   const line = (shot.narration ?? '').trim();
   const timeline = timelineClause(shot.beatSheet);
-  const motion = motionEn?.trim()
-    ? ` Overall motion (must hold for the whole shot, including close-ups): ${motionEn.trim()}.`
+  /**
+   * 运动基调是逐镜追加的，必须只当「动感」用：
+   * 一是剔掉剧情动作与具体主体（战马冲入 / 提头掷地），否则每一镜都会长出它们，
+   * 帐内特写也会跑出一匹马——库里已有的旧剧本也在这里被兜住；
+   * 二是显式禁止它引入本镜没写的主体，模型对否定句式的服从度比默默忽略高。
+   */
+  const safeMotion = motionEn?.trim() ? stripScopedMotion(motionEn) : '';
+  const motion = safeMotion
+    ? ` Overall motion (motion quality only, never add a person, animal or object not described above): ${safeMotion}.`
     : '';
   /** 画面描述 + 秒级时间轴 + 全片运动基调：旧剧本没有这些字段时不会多出任何内容 */
   const extras = `${timeline}${motion}`;

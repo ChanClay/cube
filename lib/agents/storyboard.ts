@@ -29,6 +29,7 @@ import {
   screenDirection,
   hasTransitionHint,
   mergeCards,
+  MOTION_SCOPE_RULES,
   normalizeBeatSheet,
   normalizeCameraMove,
   normalizeShotSize,
@@ -42,6 +43,7 @@ import {
   stateOverlap,
   str,
   stripForbiddenPromptPhrases,
+  stripScopedMotion,
   SUBJECT_CARD_RULES,
   TIMELINE_RULES,
   trimNarration,
@@ -113,7 +115,8 @@ function buildSystemPrompt(): string {
    ${APPEARANCE_ONLY_RULES}
    本镜出现载具（主角座驾、追车、警车…）时，必须把它当成出镜主体写进本镜的 characters 数组并复用它的 promptEn；漏写就等于这一镜没有那辆车的参考图，车型与涂装每镜都会变。
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
-11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。没有蓝图时自己给出 motionProfile（全片运动基调，中文一句话）+ motionEn（≤18 词英文），它约束的是**每一镜**：这场戏在追车，任何特写也必须能看出车还在动。写进 JSON 顶层，并且每一镜的 videoPrompt 都要体现它。
+11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。没有蓝图时自己给出 motionProfile（全片运动基调，中文一句话）+ motionEn（≤18 词英文），写进 JSON 顶层。它是全片属性：只写「任何一镜都成立的运动介质」，不许写成剧情动作清单。
+    ${MOTION_SCOPE_RULES}
 
 【四、videoPrompt】
 12. ${VIDEO_PROMPT_RULES}
@@ -290,7 +293,7 @@ ${selfCheck}`;
 梗概：${plan.logline}
 主题：${plan.theme || '（未给出）'}
 基调与节奏：${plan.tone || '（未给出）'}
-全片运动基调：${plan.motion || '（未给出）'}（每一镜的 videoPrompt 都必须体现它——特写与近景也要保留这场戏的速度感，它属于全片，不属于某一镜）
+全片运动基调：${plan.motion || '（未给出）'}（只用来保证每一镜都有动感：特写与近景也要保留这场戏的运动感。括号里点到的人物动作 / 载具 / 动物只属于个别镜头，不许复制到每一镜——它们会被追加到全片，帐内对话也会跑出一匹马）
 
 主体卡（人物 / 载具 / 关键道具，外形必须全片一致）：
 ${characters || '（无）'}
@@ -475,7 +478,8 @@ function normalizeScript(
     style: userStyle?.trim() || str(obj.style, fallbackStyle),
     // 有蓝图时下面两条会被 applyPlanFoundation 覆盖成蓝图给的（蓝图是全片唯一事实来源）
     motionProfile: str(obj.motionProfile ?? obj.motion) || undefined,
-    motionEn: str(obj.motionEn) || undefined,
+    // 运动基调会被逐镜追加：写成剧情动作就会让每一镜都长出那些主体，先剔一遍
+    motionEn: stripScopedMotion(str(obj.motionEn)) || undefined,
     characters,
     scenes,
     shots,
