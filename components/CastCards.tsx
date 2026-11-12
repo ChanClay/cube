@@ -43,8 +43,12 @@ interface Props {
   /** 整体视觉风格，生成配图时拼进提示词 */
   style?: string;
   disabled?: boolean;
-  onCharactersChange: (next: Character[]) => void;
-  onScenesChange: (next: Scene[]) => void;
+  /**
+   * 用函数式更新而不是「传新数组」：多张卡同时生成配图时，各请求回来的时间不确定，
+   * 如果都拿点击那一刻的数组 map 一遍再整体写回，后到的会把先到的结果抹掉。
+   */
+  onCharactersChange: (updater: (prev: Character[]) => Character[]) => void;
+  onScenesChange: (updater: (prev: Scene[]) => Scene[]) => void;
   /** 传入后才显示「整体画风」编辑框 */
   onStyleChange?: (style: string) => void;
 }
@@ -76,8 +80,11 @@ export default function CastCards({
    * 旧剧本 / 手改过的长描述都会落到「自定义」，文本原样保留。
    */
   const presetLabel = STYLE_LABELS.find((label) => label === styleDraft.trim()) ?? null;
-  /** 正在生成 / 上传的卡片 key */
-  const [busy, setBusy] = useState<string | null>(null);
+  /**
+   * 正在生成 / 上传的卡片 key 集合。
+   * 用集合而不是单个值：两张卡可以同时生成，先完成的那张不该把另一张的 loading 清掉。
+   */
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   /** 每种卡各自展开一张（手风琴） */
   const [openKey, setOpenKey] = useState<Record<Kind, string | null>>({
@@ -109,16 +116,38 @@ export default function CastCards({
 
   const listOf = (kind: Kind): Card[] => (kind === 'character' ? characters : scenes);
 
-  const commit = (kind: Kind, next: Card[]) => {
-    if (kind === 'character') onCharactersChange(next as Character[]);
-    else onScenesChange(next as Scene[]);
+  const markBusy = (key: string, on: boolean) => {
+    setBusy((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  /**
+   * 更新单张卡：把「怎么改」交给父级的函数式更新，而不是在这里读 props 快照再整体覆盖。
+   *
+   * 优先按 id 定位，旧剧本没有 id 时才退回位置——生成配图期间如果加了场景卡，
+   * 位置会整体后移，按位置回写就会把图写到别的卡上。
+   */
+  const patchById = (
+    kind: Kind,
+    id: string | undefined,
+    index: number,
+    patch: Partial<Character & Scene>,
+  ) => {
+    const update = <T extends Card>(prev: T[]): T[] =>
+      prev.map((item, i) => {
+        const hit = id ? item.id === id : i === index;
+        return hit ? ({ ...item, ...patch } as T) : item;
+      });
+    if (kind === 'character') onCharactersChange(update);
+    else onScenesChange(update);
   };
 
   const patchAt = (kind: Kind, index: number, patch: Partial<Character & Scene>) => {
-    commit(
-      kind,
-      listOf(kind).map((item, i) => (i === index ? { ...item, ...patch } : item)),
-    );
+    patchById(kind, listOf(kind)[index]?.id, index, patch);
   };
 
   const toggle = (kind: Kind, key: string) => {
@@ -127,17 +156,18 @@ export default function CastCards({
 
   const addScene = () => {
     const next: Scene = { id: crypto.randomUUID(), name: '', desc: '' };
-    onScenesChange([...scenes, next]);
+    onScenesChange((prev) => [...prev, next]);
     // 新建的场景卡直接展开，省得再点一下
     setOpenKey((prev) => ({ ...prev, scene: next.id ?? null }));
   };
 
   const removeAt = (kind: Kind, index: number) => {
     const removed = listOf(kind)[index];
-    commit(
-      kind,
-      listOf(kind).filter((_, i) => i !== index),
-    );
+    const id = removed?.id;
+    const drop = <T extends Card>(prev: T[]): T[] =>
+      prev.filter((item, i) => (id ? item.id !== id : i !== index));
+    if (kind === 'character') onCharactersChange(drop);
+    else onScenesChange(drop);
     if (removed && openKey[kind] === keyOf(kind, removed, index)) {
       setOpenKey((prev) => ({ ...prev, [kind]: null }));
     }
@@ -149,16 +179,19 @@ export default function CastCards({
    */
   const uploadImage = async (kind: Kind, index: number, file: File | null) => {
     if (!file) return;
-    const key = keyOf(kind, listOf(kind)[index], index);
-    setBusy(key);
+    // await 之前先钉住 id：上传期间列表可能被增删，回来时位置就不一定还是这一张了
+    const item = listOf(kind)[index];
+    const id = item?.id;
+    const key = keyOf(kind, item, index);
+    markBusy(key, true);
     setError(null);
     try {
       const { media } = await api.uploadMedia(file);
-      patchAt(kind, index, { imageUrl: media.url });
+      patchById(kind, id, index, { imageUrl: media.url });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(null);
+      markBusy(key, false);
     }
   };
 
@@ -170,17 +203,18 @@ export default function CastCards({
       return;
     }
 
+    const id = item?.id;
     const key = keyOf(kind, item, index);
-    setBusy(key);
+    markBusy(key, true);
     setError(null);
     try {
       // 带上蓝图锁定的固定英文短语，卡片才会和逐镜视频里的长相 / 空间一致
       const { media } = await api.generateImage({ prompt, promptEn: item?.promptEn, kind, style });
-      patchAt(kind, index, { imageUrl: media.url });
+      patchById(kind, id, index, { imageUrl: media.url });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(null);
+      markBusy(key, false);
     }
   };
 
@@ -260,7 +294,7 @@ export default function CastCards({
           // 手风琴：只渲染当前展开的那一张
           if (current !== key) return null;
 
-          const working = busy === key;
+          const working = busy.has(key);
           const hasImage = !!item.imageUrl;
           return (
             <div className="cast-panel" key={`panel-${key}`}>

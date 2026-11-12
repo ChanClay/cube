@@ -266,8 +266,16 @@ function ProjectPageInner() {
   useEffect(() => {
     if (pendingIds.length === 0) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const timer = setTimeout(async () => {
+    /**
+     * 自驱轮询：每次拿到结果都排下一轮，不靠「状态有没有变化」续命。
+     *
+     * 早先是一发 setTimeout，指望 setJobs 换新对象触发 effect 重跑；但 wan 的 progress
+     * 恒为 null，任务 running 期间前后字段完全一致，setJobs 会返回原引用 → effect 不重跑
+     * → 单镜生成只轮询一次就断了（整片队列有自己的 waitForJob 循环，所以那边没事）。
+     */
+    const tick = async () => {
       const results = await Promise.all(
         pendingIds.map((id) =>
           api
@@ -298,11 +306,16 @@ function ProjectPageInner() {
         }
         return changed ? next : prev;
       });
-    }, pollMs);
+
+      // 状态真的变了会让 effect 重启（pendingIds 换新引用），旧 timer 在 cleanup 里被清掉
+      timer = setTimeout(tick, pollMs);
+    };
+
+    timer = setTimeout(tick, pollMs);
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [pendingIds, pollMs]);
 
@@ -410,40 +423,52 @@ function ProjectPageInner() {
   /**
    * 角色卡编辑：改名时同步更新各镜头的 characterNames，
    * 否则角色与素材的绑定会断掉。
+   *
+   * 入参是「基于上一份数据的更新函数」而不是新数组：多张卡同时生成配图时，
+   * 各自的请求返回顺序不确定，用旧快照整体覆盖会把先到的结果抹掉。
    */
-  const handleCharactersChange = useCallback((next: Character[]) => {
-    setScript((prev) => {
-      if (!prev) return prev;
+  const handleCharactersChange = useCallback(
+    (updater: (prev: Character[]) => Character[]) => {
+      setScript((prev) => {
+        if (!prev) return prev;
 
-      const renames = new Map<string, string>();
-      prev.characters.forEach((character, index) => {
-        const updated = next[index];
-        if (updated && updated.name && updated.name !== character.name) {
-          renames.set(character.name, updated.name);
-        }
+        const next = updater(prev.characters);
+
+        // 角色卡只会改名、不会增删，数组顺序稳定，按位置对比足够
+        const renames = new Map<string, string>();
+        prev.characters.forEach((character, index) => {
+          const updated = next[index];
+          if (updated && updated.name && updated.name !== character.name) {
+            renames.set(character.name, updated.name);
+          }
+        });
+
+        const shots =
+          renames.size === 0
+            ? prev.shots
+            : prev.shots.map((shot) => {
+                if (!shot.characterNames?.length) return shot;
+                return {
+                  ...shot,
+                  characterNames: [
+                    ...new Set(shot.characterNames.map((name) => renames.get(name) ?? name)),
+                  ],
+                };
+              });
+
+        return { ...prev, characters: next, shots };
       });
-
-      const shots =
-        renames.size === 0
-          ? prev.shots
-          : prev.shots.map((shot) => {
-              if (!shot.characterNames?.length) return shot;
-              return {
-                ...shot,
-                characterNames: [
-                  ...new Set(shot.characterNames.map((name) => renames.get(name) ?? name)),
-                ],
-              };
-            });
-
-      return { ...prev, characters: next, shots };
-    });
-  }, []);
+    },
+    [],
+  );
 
   /** 场景卡：只影响剧本数据，不参与视频生成 */
-  const handleScenesChange = useCallback((next: Scene[]) => {
-    setScript((prev) => (prev ? { ...prev, scenes: next } : prev));
-  }, []);
+  const handleScenesChange = useCallback(
+    (updater: (prev: Scene[]) => Scene[]) => {
+      setScript((prev) => (prev ? { ...prev, scenes: updater(prev.scenes ?? []) } : prev));
+    },
+    [],
+  );
 
   const generateShot = useCallback(
     async (

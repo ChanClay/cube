@@ -39,10 +39,10 @@ interface Props {
   currentScriptId?: string | null;
   onSelectScript?: (id: string) => void;
   switching?: boolean;
-  /** 角色卡编辑（改名 / 改外形 / 换配图） */
-  onCharactersChange?: (next: Character[]) => void;
+  /** 角色卡编辑（改名 / 改外形 / 换配图）；用函数式更新，避免并发回写互相覆盖 */
+  onCharactersChange?: (updater: (prev: Character[]) => Character[]) => void;
   /** 场景卡编辑（新增 / 删除 / 改描述 / 换配图） */
-  onScenesChange?: (next: Scene[]) => void;
+  onScenesChange?: (updater: (prev: Scene[]) => Scene[]) => void;
   /** 修改整体画风：角色卡 / 场景卡配图与分镜提示词都用它 */
   onStyleChange?: (style: string) => void;
   /** 新建一份空白剧本（只有这里会新增剧本记录） */
