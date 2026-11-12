@@ -142,6 +142,7 @@ VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
 - 分镜输出 `narration`（这一镜要说的话）和 `narrationType`：`dialogue` 是角色开口、会驱动口型；`voiceover` 是画外旁白、人物闭嘴
 - `dialogue` 还会输出 `speaker`（谁在说，必须是本镜 `characters` 里的名字）。多人物镜头会把说话人写进提示词，避免模型挑错人开口
 - **一镜只有一个说话人**：`speaker` 是单值，`narration` 里也只能有这一个人说的话。两个人的对白必须拆成两镜（A 的镜头 → `hard-cut` 反打 B 的镜头）；一镜塞两句会被审片判 `multi-speaker` 并拆镜，台词也会在成片里只剩一句
+- **开场旁白**：第一镜是空镜 / 大远景时，用一句 `voiceover` 交代前情（谁 / 在哪 / 为什么打），第二镜再进人物台词——背景由旁白交代，人物的第一句话就不必自我解释。全片一句旁白都没有、开场又无口播时，审片报 `no-opening-voiceover`
 - 提交生成时由 `lib/skills/dialogue.ts` 拼接到画面描述末尾，画面描述保持纯英文，台词保留原文
 - 镜头卡片上的台词框可直接编辑，类型下拉逐个切换；切成角色台词时可指定说话人。旧剧本没有 `speaker` 时保持原行为，一律按 `voiceover` 处理，避免旁白变成人物开口
 - 台词要短：一句 10~20 字，5 秒左右的镜头最多一句；同一句台词只表达一个意思

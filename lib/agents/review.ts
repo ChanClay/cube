@@ -415,6 +415,36 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
     });
   }
 
+  /**
+   * 开场前情没人交代：全片一句旁白都没有，而第一镜又停在空镜 / 无口播上，
+   * 观众只能靠人物的第一句台词猜「谁、在哪、为什么打」。
+   * 只在对白戏里提示（纯默片式创意不强制），修法是把第 1 镜改成空镜 + 一句前情旁白。
+   */
+  const hasDialogue = script.shots.some(
+    (shot) => shot.narrationType === 'dialogue' && shot.narration.trim(),
+  );
+  const hasVoiceover = script.shots.some(
+    (shot) => shot.narrationType === 'voiceover' && shot.narration.trim(),
+  );
+  const opening = script.shots[0];
+  if (
+    hasDialogue &&
+    !hasVoiceover &&
+    script.shots.length >= 4 &&
+    opening &&
+    opening.narrationType !== 'dialogue'
+  ) {
+    issues.push({
+      level: 'warn',
+      code: 'no-opening-voiceover',
+      shotIndex: 1,
+      message:
+        '全片没有一句旁白，开场的前情只能由人物的第一句台词自己解释；' +
+        '把第 1 镜改成空镜 / 大远景 + 一句 voiceover 交代谁、在哪、为什么打（例：「董卓乱政，十八路诸侯会于酸枣」），' +
+        '第 2 镜再进人物台词。创意本来就从动作中段切入、不需要交代背景时可忽略',
+    });
+  }
+
   return issues;
 }
 
@@ -451,6 +481,7 @@ const REPAIRABLE = new Set([
   'speaker-not-on-screen',
   'multi-speaker',
   'dialogue-flat',
+  'no-opening-voiceover',
 ]);
 
 export function needsRepair(issues: ScriptIssue[]): boolean {
@@ -484,6 +515,8 @@ ${CUT_POINT_RULES}
 8.1 一人一镜（修多说话人的唯一正确做法）：一镜里出现两个人的台词时，把这一镜拆成相邻两镜——A 的镜头（带听者的肩 / 侧脸）→ B 的反打镜头（带说话人的肩 / 后脑），每镜只留一个人的台词与 speaker，transition 写 hard-cut 并说明「反打承接 A 的话尾」；听者如果要单独给反应，就再占一镜。拆出来的镜头沿用原来的动作与状态链，不新增剧情。
 8.2 ${DIALOGUE_RULES}
 8.3 ${SPEAKER_SHOT_RULES}
+8.4 旁白不是错误：开场空镜交代前情、跨时空转场、收尾点题的 voiceover 必须保留，不要因为它「交代了背景」就改成 none 或塞成人物台词。只有当旁白在描述画面里已经拍到的东西（与本镜 description 说同一件事）时，才改写成画面给不出的信息。
+8.5 补开场旁白（修 no-opening-voiceover）：把第 1 镜改成建立镜头（空镜 / 大远景），description 与 videoPrompt 写景与氛围，narration 写一句交代前情的 voiceover（谁 / 在哪 / 为什么打，10~20 字，不许描述画面里的动作），narrationType=voiceover、speaker 留空；后面镜头的内容与镜数一律不动（原来第 1 镜要交代的信息，能并进这句旁白就并，并不了的交给第 2 镜的画面）。
 9. 每镜 duration 保持原值（除非镜数变化需要重新分配），所有 duration 之和等于原总时长。
 10. characters / scenes 里的名字必须逐字来自主体卡 / 场景表。
 11. 每个镜头都要输出 entryState 与 exitState；原本没写的要补上，原本写了的不要改坏。首尾状态要写清主体在画面里的位置、运动方向与背景锚点。

@@ -125,6 +125,7 @@
 | `speaker-not-on-screen` | warn | 说话人不在本镜 | 把 `speaker` 加进本镜 `characters`，或换人 |
 | `multi-speaker` | warn | 一镜里出现两个人的台词（两人对白连写 / 一问一答 / 两行「名字：」） | 拆成相邻两镜：A 的镜头 → `hard-cut` 反打 B 的镜头，每镜只留一个 `speaker`；拆镜后镜数会覆盖原目标镜数 |
 | `dialogue-flat` | warn | 台词在复述画面（与 `description` 词面高度重合） | 改成说画面说不出的事（目的 / 潜台词 / 关系变化），或让这一镜 `narrationType: "none"` |
+| `no-opening-voiceover` | warn | 全片没有旁白，开场前情只能由人物的第一句台词解释 | 第 1 镜改成空镜 / 大远景 + 一句 `voiceover` 交代谁、在哪、为什么打；从动作中段切入的创意可忽略 |
 | `unknown-character` / `unknown-scene` | warn | 引用了清单外的名字 | 逐字对齐顶层清单 |
 | `state-missing` | warn | 缺 `entryState` / `exitState` | 补上可拍摄的画面事实；hard-cut 的首尾状态同样是下一处剪辑点的依据 |
 | `continuity-gap` | warn | 上镜出口与本镜入口对不上 | 对齐状态，或在上一镜写 `hard-cut`/`time-jump` |
