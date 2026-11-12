@@ -75,8 +75,11 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 
 - 景别、运镜只用 `lib/skills/spec.ts` 的标准表内写法，且必须与本镜的 `shotSize` / `cameraMove` 一致。
 - 主体短语逐字复用蓝图 `promptEn`：人物、载具、机甲、道具都一样。本镜出现的每一辆车都要在英文里出现，并与本镜 `characters` 里的载具卡对得上——漏掉一辆，这辆车在这一镜里就换了一辆。
-- 只写一个运镜；动作可以有多段，但必须是**一条**动作链，结尾用 `smooth continuous motion, steady pacing, stable framing` 收口。
+- 只写一个运镜；动作可以有多段，但必须是**一条**动作链，结尾用 `constant subtle motion, no frozen frame` 收口。
 - **`beatSheet` 的每一段都要在英文里有对应**，按时间顺序用并列的现在分词短语串起来，不写 `first` / `then` / `after that` / `finally`——这类时间副词会让模型把画面切成两段，接缝处就是抽帧般的抖动。例：`0~2s 抬眼看向塔顶 / 2~4s 伸手拧开灯罩 / 4~5s 火苗窜起` → `his eyes lifting to the tower top, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass`。
+- 每段节拍同时给 `actionEn`（8~14 词）：运行时会按 `from` / `to` 把它拼成 `0-2s: ...; 2-5s: ...` 的英文时间轴提交给视频模型，没有它这一段动作进不了成片。
+- **动势基线**：每一镜至少要有一个贯穿全镜的运动源（主体动 / 介质动 / 相对动）。特写不是删动作，是用局部写更大的动作——手在抖是因为车在颠、瞳孔在缩是因为后视镜里的车灯逼近。只写「神情凝重」而没有运动源，成片就是主角静止坐着、镜头给个特写。
+- **全片运动基调**（`motionProfile` / `motionEn`）由蓝图给出，是全片属性，不是某一镜的：追逐戏里每个特写都必须能看出车还在动。生成视频时 `motionEn` 会逐镜追加一次兜底，所以它必须是英文短句（≤18 词）。
 - 禁止字幕/文字/水印/logo/分屏/转场词/镜头编号；除「升格慢动作」外不写 `slow motion`，也不写 `time-lapse` / `speed ramp` / `jump cut` / `flicker` / `morphing`。
 - 不要用 `beautiful` / `sad` 单独代替画面；写可拍摄的名词与动词。
 

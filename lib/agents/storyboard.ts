@@ -13,11 +13,12 @@ import { normalizeVideoModel, type VideoModelId } from '@/lib/video-models';
 import { expandStyle } from '@/lib/skills/style-presets';
 import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
 import { adaptStory } from './adaptation';
-import { planStory, type Beat, type StoryPlan } from './continuity';
+import { planStory, normalizeSubjectType, type Beat, type StoryPlan } from './continuity';
 import { callChatJson } from './llm';
 import { localizePrompts } from './localize';
 import { auditScript, needsRepair, requestRepair, type ScriptIssue } from './review';
 import {
+  APPEARANCE_ONLY_RULES,
   clamp,
   CONTINUITY_RULES,
   CUT_POINT_RULES,
@@ -103,11 +104,12 @@ function buildSystemPrompt(): string {
 【三、镜头语言】
 7. 景别按「建立 → 逼近 → 细节 → 释放」推进；相邻镜头不要同景别 + 同运镜。每个镜头承担的是一条连续的动作链（同一个主体在同一空间里连着做的一串事），不是一堆互不相干的动作；画面必须有可见变化（位置 / 姿态 / 光线 / 物件）。
 8. ${SHOT_LANGUAGE_RULES}
-9. 主体一致性：同一主体（人 / 载具 / 机甲 / 关键道具）全片复用蓝图给出的英文短语（promptEn），服装、发型、车漆与涂装、改装件、机械部件与道具不得变化。没有蓝图时自拟主体卡：先判断主体类型——人类写年龄感、发色、服装；载具写车型与体量、车身轮廓、车漆与涂装、玻璃、轮毂与轮胎、灯具、改装件与标识；机甲 / 机器人 / 巨兽只写机型与体量、装甲材质与涂装、头部传感器、关节液压、武器与配色。不要给非人主体写年龄、发型、上衣与鞋。
+9. 主体一致性：同一主体（人 / 载具 / 机甲 / 关键道具）全片复用蓝图给出的英文短语（promptEn），服装、发型、车漆与涂装、改装件、机械部件与道具不得变化。没有蓝图时自拟主体卡：先判断主体类型——人类写年龄感、发色、服装；载具写车型与体量、车身轮廓、车漆与涂装、玻璃、轮毂与轮胎、灯具、改装件与标识；机甲 / 机器人 / 巨兽只写机型与体量、装甲材质与涂装、头部传感器、关节液压、武器与配色。不要给非人主体写年龄、发型、上衣与鞋。每张卡都要写 subjectType，只能取 human / vehicle / mech。
    ${SUBJECT_CARD_RULES}
+   ${APPEARANCE_ONLY_RULES}
    本镜出现载具（主角座驾、追车、警车…）时，必须把它当成出镜主体写进本镜的 characters 数组并复用它的 promptEn；漏写就等于这一镜没有那辆车的参考图，车型与涂装每镜都会变。
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
-11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。
+11. 有蓝图时，shotSize / cameraMove 优先采用蓝图指定的值。没有蓝图时自己给出 motionProfile（全片运动基调，中文一句话）+ motionEn（≤18 词英文），它约束的是**每一镜**：这场戏在追车，任何特写也必须能看出车还在动。写进 JSON 顶层，并且每一镜的 videoPrompt 都要体现它。
 
 【四、videoPrompt】
 12. ${VIDEO_PROMPT_RULES}
@@ -136,7 +138,9 @@ JSON 结构：
   "title": "片名",
   "logline": "一句话故事梗概",
   "style": "整体视觉风格",
-  "characters": [{ "name": "角色名 / 载具名 / 道具备名", "desc": "主体描述：人类写年龄 / 头部 / 服装 / 道具，载具写车型体量 / 车身轮廓 / 车漆与涂装 / 玻璃 / 轮毂与轮胎 / 灯具 / 改装件 / 标识，机甲等非人主体写机型体量 / 装甲材质与涂装 / 传感器 / 关节 / 武器 / 编号", "promptEn": "fixed English phrase for this subject" }],
+  "motionProfile": "全片运动基调（中文，一句话说清整片在动还是静止、动来自哪里）",
+  "motionEn": "≤18 words English motion baseline submitted with every shot",
+  "characters": [{ "name": "角色名 / 载具名 / 道具名", "subjectType": "human | vehicle | mech", "desc": "主体描述：只写全片恒定的外观（不写这一镜的姿势 / 场景 / 动作）。人类写年龄 / 头部 / 服装 / 道具，载具写车型体量 / 车身轮廓 / 车漆与涂装 / 玻璃 / 轮毂与轮胎 / 灯具 / 改装件 / 标识，机甲等非人主体写机型体量 / 装甲材质与涂装 / 传感器 / 关节 / 武器 / 编号", "promptEn": "fixed English phrase for this subject" }],
   "scenes": [{ "name": "场景名", "desc": "空间描述：地点 / 时间 / 光线 / 主要陈设", "promptEn": "fixed English location phrase" }],
   "shots": [
     {
@@ -151,8 +155,8 @@ JSON 结构：
       "entryState": "本镜第一帧的画面事实（谁 / 在哪 / 姿势 / 朝向 / 运动方向 / 背景锚点），与上一镜 exitState 一致",
       "exitState": "本镜最后一帧的画面事实（画面位置 / 运动方向 / 背景锚点），必须是可切帧，供下一镜接住",
       "beatSheet": [
-        { "from": 0, "to": 2, "action": "抬眼看向塔顶" },
-        { "from": 2, "to": 5, "action": "伸手拧开灯罩" }
+        { "from": 0, "to": 2, "action": "抬眼看向塔顶", "actionEn": "his eyes lifting toward the top of the tower" },
+        { "from": 2, "to": 5, "action": "伸手拧开灯罩", "actionEn": "his hand rising to twist the lamp shade open" }
       ],
       "description": "中文画面描述",
       "videoPrompt": "这一镜 description 的忠实英文翻译",
@@ -199,10 +203,10 @@ ${req.idea}
 1) shots 是否正好 ${expectedShots} 个？
 2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝哪边运动），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线、运动方向与背景锚点是否仍然与上一镜一致？
 3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame=true 是否只出现在「同场景 + 同景别」的 hard-cut 上？跨了景别的长镜头是不是都写了 hiddenCut=true？
-4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作？
+4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作，并且每段都给了 8~14 词的 actionEn？
 5) 主体名 / 场景名是否逐字来自上方清单？本镜出现的每一辆车（主角座驾、追车、警车…）是否都写进了 characters 并复用它的 promptEn？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？
-7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？
+7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？这一镜是否有至少一个贯穿全镜的持续运动源（特写 / 近景最容易漏，只写表情就是一张静止的肖像）？
 8) 台词是否在该镜时长能说完的范围内，dialogue 是否都填了 speaker 且 speaker 在本镜 characters 里？
 9) 所有 duration 之和是否等于 ${totalDuration} 秒？
 10) 每镜的最后一个 beat 是不是落点（动作到达可辨认相位），exitState 是不是主体还在画面内、写清了画面位置 / 运动方向 / 背景锚点？有没有以「冲出画外 / 消失在雨幕 / 完全虚化」收尾？
@@ -256,6 +260,7 @@ ${selfCheck}`;
 梗概：${plan.logline}
 主题：${plan.theme || '（未给出）'}
 基调与节奏：${plan.tone || '（未给出）'}
+全片运动基调：${plan.motion || '（未给出）'}（每一镜的 videoPrompt 都必须体现它——特写与近景也要保留这场戏的速度感，它属于全片，不属于某一镜）
 
 主体卡（人物 / 载具 / 关键道具，外形必须全片一致）：
 ${characters || '（无）'}
@@ -403,12 +408,17 @@ function normalizeScript(
     charactersRaw
       .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
       .slice(0, 8)
-      .map((c) => ({
-        id: crypto.randomUUID(),
-        name: str(c.name, '角色'),
-        desc: str(c.desc),
-        promptEn: str(c.promptEn) || undefined,
-      })),
+      .map((c) => {
+        const name = str(c.name, '角色');
+        const desc = str(c.desc);
+        return {
+          id: crypto.randomUUID(),
+          name,
+          desc,
+          subjectType: normalizeSubjectType(c.subjectType, name, desc),
+          promptEn: str(c.promptEn) || undefined,
+        };
+      }),
   );
 
   const scenesRaw = Array.isArray(obj.scenes) ? obj.scenes : [];
@@ -433,6 +443,9 @@ function normalizeScript(
      * 结果角色卡 / 场景卡的画风和用户要的对不上。
      */
     style: userStyle?.trim() || str(obj.style, fallbackStyle),
+    // 有蓝图时下面两条会被 applyPlanFoundation 覆盖成蓝图给的（蓝图是全片唯一事实来源）
+    motionProfile: str(obj.motionProfile ?? obj.motion) || undefined,
+    motionEn: str(obj.motionEn) || undefined,
     characters,
     scenes,
     shots,
@@ -453,6 +466,7 @@ function applyPlanFoundation(script: Script, plan: StoryPlan | null): void {
       id: crypto.randomUUID(),
       name: c.name,
       desc: c.desc,
+      subjectType: c.subjectType,
       promptEn: c.promptEn,
     }));
   }
@@ -465,6 +479,9 @@ function applyPlanFoundation(script: Script, plan: StoryPlan | null): void {
     }));
   }
   if (!script.logline) script.logline = plan.logline;
+  // 运动基调是全片级的：蓝图是唯一事实来源，分镜阶段自己写的那份不采信
+  if (plan.motion) script.motionProfile = plan.motion;
+  if (plan.motionEn) script.motionEn = plan.motionEn;
 
   // 蓝图的状态链是确定性锚点：分镜稿缺首尾状态时以蓝图补上
   const first = script.shots[0];

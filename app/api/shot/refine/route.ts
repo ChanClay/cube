@@ -42,7 +42,7 @@ JSON 结构：
   "videoPrompt": "English prompt for the text-to-video model",
   "narration": "旁白或台词",
   "speaker": "说话的角色名，旁白留空",
-  "beatSheet": [{ "from": 0, "to": 2, "action": "这一段里发生的可见动作" }]
+  "beatSheet": [{ "from": 0, "to": 2, "action": "这一段里发生的可见动作", "actionEn": "8-14 words of the same action in English" }]
 }`;
 }
 
@@ -50,6 +50,7 @@ function buildUserPrompt(input: {
   description: string;
   title: string;
   style: string;
+  motionProfile: string;
   duration: number;
   before: string;
   after: string;
@@ -62,6 +63,11 @@ function buildUserPrompt(input: {
     `镜头时长：${input.duration} 秒`,
     `当前小标题：${input.title || '（未命名）'}`,
   ];
+
+  // 全片运动基调：这一镜只是其中一帧，特写也必须保留整场戏的速度感
+  if (input.motionProfile) {
+    lines.push(`全片运动基调（本镜的 videoPrompt 必须体现，特写也不例外）：${input.motionProfile}`);
+  }
 
   if (input.characters.length > 0) {
     lines.push('', '主体卡（出镜人物 / 载具外形必须与此一致）：');
@@ -136,6 +142,7 @@ export async function POST(request: Request) {
     description,
     title: str(payload.title),
     style: str(payload.style, '电影感写实'),
+    motionProfile: str(payload.motionProfile),
     duration: Number.isFinite(durationRaw) && durationRaw > 0 ? durationRaw : 5,
     before: str(payload.before),
     after: str(payload.after),

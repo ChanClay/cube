@@ -13,6 +13,8 @@
  * 冲突的否定词会把风格压回模型默认值。
  */
 
+import type { CharacterSubject } from '@/lib/types';
+import { sanitizeAppearance } from './spec';
 import { expandStyle } from './style-presets';
 
 export type CardKind = 'character' | 'scene';
@@ -30,13 +32,32 @@ export const CARD_IMAGE_SIZE: Record<CardKind, string> = {
 const VEHICLE_HINT =
   /(跑车|轿跑|轿车|超跑|赛车|越野车|皮卡|卡车|货车|面包车|商务车|出租车|警车|救护车|消防车|摩托|机车|重机|飞船|战机|直升机|快艇|游艇|坦克|装甲车|列车|房车|载具|座驾|车型|车身|车漆|轮毂|轮胎|尾翼|挡风玻璃|车灯)/;
 
-export function isVehicleCard(text: string): boolean {
+/**
+ * 人类外观特征词。旧剧本没有 subjectType，只能靠关键词判断，
+ * 但一张人卡里必然出现这些词——命中两个以上就不是载具卡，
+ * 哪怕描述里写着「坐在驾驶座上」。
+ */
+const HUMAN_APPEARANCE_HINT =
+  /(岁|男性|女性|男人|女人|短发|长发|马尾|白发|黑发|发色|胡须|肤色|脸型|眉眼|衬衫|夹克|外套|雨衣|牛仔|工装裤|短靴|皮鞋|连衣裙|身高)/g;
+
+/**
+ * 是否是载具卡。
+ *
+ * 蓝图给了 subjectType 就以它为准：人类角色的 desc 里必然出现「车内 / 车身」
+ * 这类词（追车戏尤其如此），靠关键词猜会把人卡判成载具卡，生成出一张
+ * 「只出现一辆车与车内剪影、不出现站立的行人」的横图。
+ * 没有 subjectType 的旧剧本才退回关键词，并且先排除满篇人像特征的卡。
+ */
+export function isVehicleCard(text: string, subjectType?: CharacterSubject): boolean {
+  if (subjectType === 'vehicle') return true;
+  if (subjectType === 'human' || subjectType === 'mech') return false;
+  if ((text.match(HUMAN_APPEARANCE_HINT) ?? []).length >= 2) return false;
   return VEHICLE_HINT.test(text);
 }
 
 /** 卡片配图的画幅：载具走横图，人物走竖图 */
-export function cardImageSize(kind: CardKind, text: string): string {
-  if (kind === 'character' && isVehicleCard(text)) return CARD_IMAGE_SIZE.scene;
+export function cardImageSize(kind: CardKind, text: string, subjectType?: CharacterSubject): string {
+  if (kind === 'character' && isVehicleCard(text, subjectType)) return CARD_IMAGE_SIZE.scene;
   return CARD_IMAGE_SIZE[kind];
 }
 
@@ -114,6 +135,11 @@ export interface CardPromptInput {
   /** 角色外形 / 场景空间描述（名称 + desc） */
   prompt: string;
   /**
+   * 主体类型（来自蓝图）。载具卡走横图与专门的 3/4 前侧构图；
+   * 人类 / 机甲卡不允许因为 desc 里出现「车内」被判成载具。
+   */
+  subjectType?: CharacterSubject;
+  /**
    * 蓝图锁定的固定英文外貌 / 空间短语。
    * 角色卡和逐镜视频提示词用的是同一段英文，带上它卡片才会和成片长得一样。
    */
@@ -123,17 +149,26 @@ export interface CardPromptInput {
 }
 
 /** 拼一条完整的文生图提示词 */
-export function buildCardPrompt({ kind, prompt, promptEn, style }: CardPromptInput): string {
+export function buildCardPrompt({
+  kind,
+  prompt,
+  subjectType,
+  promptEn,
+  style,
+}: CardPromptInput): string {
   // 预设风格展开成明细描述，自定义风格原样使用
   const styleText = expandStyle(style);
   const head = styleText
     ? `画面风格（严格遵循，不要自行更换画风）：${styleText}`
     : '画面风格：电影感写实风格，35mm 胶片质感，自然光，浅景深';
 
-  const subjectText = `${prompt} ${promptEn ?? ''}`;
-  const tech = hasTechDetail(subjectText);
   // 载具卡走自己的构图与质感层：按人物全身站姿生成的车，没有一辆能认出来
-  const vehicle = kind === 'character' && isVehicleCard(subjectText);
+  const vehicle = kind === 'character' && isVehicleCard(`${prompt} ${promptEn ?? ''}`, subjectType);
+  // 人卡 / 机甲卡的 desc 混进「坐在车里」这类剧照信息时先剥掉，否则会和全身站姿互相打架
+  const appearance =
+    kind === 'character' && !vehicle ? sanitizeAppearance(prompt, subjectType) : prompt;
+  const subjectText = `${appearance} ${promptEn ?? ''}`;
+  const tech = hasTechDetail(subjectText);
   const tail = [
     vehicle ? VEHICLE_FRAMING : FRAMING[kind],
     vehicle ? VEHICLE_TEXTURE : TEXTURE[kind],
@@ -146,8 +181,10 @@ export function buildCardPrompt({ kind, prompt, promptEn, style }: CardPromptInp
   // 主体描述超长时先截主体，风格与质感（含科技细节层）必须完整保留
   const budget = MAX_PROMPT_LENGTH - head.length - tail.length - 2;
   const subjectBody = promptEn?.trim()
-    ? `${prompt.trim()}。固定外观（英文，必须逐字体现）：${promptEn.trim()}`
-    : prompt.trim();
+    ? [appearance.trim(), `固定外观（英文，必须逐字体现）：${promptEn.trim()}`]
+        .filter(Boolean)
+        .join('。')
+    : appearance.trim();
   const subject = truncate(subjectBody, Math.max(120, budget));
 
   return [head, subject, tail].filter(Boolean).join('。');

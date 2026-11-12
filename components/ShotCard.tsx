@@ -32,6 +32,8 @@ interface Props {
   characters?: Character[];
   /** 整体视觉风格，重新生成分镜信息时使用 */
   style?: string;
+  /** 全片运动基调：重算这一镜的提示词时也要体现（特写不许把整场戏的速度丢掉） */
+  motionProfile?: string;
   /** 上一镜 / 下一镜的画面描述，用于动作承接 */
   beforeDescription?: string;
   afterDescription?: string;
@@ -96,6 +98,7 @@ export default function ShotCard({
   onGenerate,
   characters = [],
   style = '',
+  motionProfile = '',
   beforeDescription = '',
   afterDescription = '',
   isFirst = false,
@@ -190,6 +193,7 @@ export default function ShotCard({
         description,
         title: shot.title,
         style,
+        motionProfile,
         duration: shot.duration,
         before: beforeDescription,
         after: afterDescription,

@@ -494,7 +494,14 @@ function ProjectPageInner() {
        * 台词拼在画面描述后面：两个模型都要靠 prompt 里的台词才会真的开口说话。
        * 带上一镜末帧当参考图时再追一句限定：点名图里的人物 + 只借光线 / 色调，不改构图。
        */
-      const prompt = buildVideoPrompt(basePrompt, live, media, refCast);
+      // 全片运动基调逐镜兜底：某个特写镜头也不许把整场戏的速度丢掉
+      const prompt = buildVideoPrompt(
+        basePrompt,
+        live,
+        media,
+        refCast,
+        scriptRef.current?.motionEn,
+      );
 
       const mediaError = validateMedia(media);
       if (mediaError) {

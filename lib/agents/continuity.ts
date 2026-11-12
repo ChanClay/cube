@@ -6,14 +6,16 @@ import {
 } from '@/lib/skills/shot-plan';
 import { logAgentWarn } from '@/lib/services/logger';
 import { expandStyle } from '@/lib/skills/style-presets';
-import type { ShotTransition } from '@/lib/types';
+import type { CharacterSubject, ShotTransition } from '@/lib/types';
 import {
+  APPEARANCE_ONLY_RULES,
   clamp,
   CUT_POINT_RULES,
   dedupeByName,
   normalizeCameraMove,
   normalizeShotSize,
   normalizeTransition,
+  SITUATION_HINT,
   str,
   SUBJECT_CARD_RULES,
 } from '@/lib/skills/spec';
@@ -36,8 +38,10 @@ export interface PlanCharacter {
   name: string;
   /** 叙事功能：主角 / 对手 / 帮手 / 象征物 */
   role?: string;
-  /** 可拍摄的中文外形描述 */
+  /** 可拍摄的中文外形描述：只写恒定外观，不写这一镜的姿势 / 场景 */
   desc: string;
+  /** 主体类型：决定角色卡的构图画幅，不能靠 desc 里的关键词猜 */
+  subjectType?: CharacterSubject;
   /** 全片固定的英文外貌短语，分镜提示词直接复用 */
   promptEn?: string;
 }
@@ -86,6 +90,10 @@ export interface StoryPlan {
   theme: string;
   /** 情绪基调与节奏 */
   tone: string;
+  /** 全片运动基调：整片是持续运动还是静止，运动来自哪里 */
+  motion: string;
+  /** 运动基调的英文短句（≤18 词），运行时逐镜提交 */
+  motionEn?: string;
   characters: PlanCharacter[];
   scenes: PlanScene[];
   beats: Beat[];
@@ -119,7 +127,9 @@ export interface PlanProblem {
     | 'no-scene'
     | 'off-model-character'
     | 'missing-subject-card'
-    | 'missing-prompt-en';
+    | 'missing-prompt-en'
+    | 'scene-in-character-desc'
+    | 'missing-motion';
   message: string;
   blocking: boolean;
 }
@@ -209,10 +219,13 @@ export function buildBlueprintSystemPrompt(
 1. logline：一句话，必须包含「谁 + 想要什么 + 被什么阻碍 + 可能付出什么代价」，40 字以内。
 2. theme：一句可以被画面证明的判断（例：「承认失去，才是活下去的开始」），不要写「关于爱」这类名词短语。
 3. tone：情绪基调与节奏（例：「压抑克制，前半慢，后半急促」），用来约束后面所有镜头。
+   motion：全片运动基调，一句话说清「观众在任何一镜里都该感到画面在动，还是可以静止」，以及运动来自哪里。例：「高速追车，车始终在动——车厢振动、窗外景物横掠、风压与雨刷，任何近景 / 特写都要保留速度感」。只有全片确实是安静对话、没有任何运动主体时才写「静止」。这一条会被逐镜带进视频提示词，写「动态」却说不清动源，等于没写。
 4. 结构：用经典节拍组织，每个 beat 标注 beat 字段，只能取：开场钩子 / 铺垫 / 激励事件 / 升级 / 中点转折 / 低谷 / 高潮 / 余韵。镜数少时可以省略部分节拍，但开场钩子、高潮、余韵不能缺。
 5. 主体卡 2~5 张（最多 8 张，放在 characters 数组里）：role 写叙事功能。
    写卡之前先列一遍「本片有哪些需要在两个以上镜头里被认出来的视觉主体」，再逐个判断主体类型。不判断类型就套人类模板，会把机甲、巨兽、载具写成「三十岁男人」；漏掉一个主体，就会在成片里每镜重新设计一遍。
    ${SUBJECT_CARD_RULES}
+   每张卡都必须带 subjectType，只能取 human / vehicle / mech（人类与类人写 human，载具写 vehicle，机甲 / 机器人 / 机械巨兽写 mech）。
+   ${APPEARANCE_ONLY_RULES}
    每项都要具体到「能照着画出来」，不许用「高科技感」「未来感的衣服」这类空话。
    【A 人类 / 类人】按 8 项顺序写全：
    ① 廓形：性别、年龄感、身高体型、体态；
@@ -269,23 +282,28 @@ JSON 结构：
   "title": "片名",
   "logline": "一句话故事梗概",
   "theme": "一句可被画面证明的判断",
-  "tone": "情绪基调与节奏",${extraRules ? '\n  "treatment": "300~500 字连贯梗概，按成片顺序写",' : ''}
+  "tone": "情绪基调与节奏",
+  "motion": "全片运动基调：整片是持续运动还是静止，运动来自哪里（会被逐镜带进视频提示词）",
+  "motionEn": "≤18 words English motion baseline submitted with every shot",${extraRules ? '\n  "treatment": "300~500 字连贯梗概，按成片顺序写",' : ''}
   "characters": [
     {
       "name": "人类角色名",
       "role": "叙事功能",
+      "subjectType": "human | vehicle | mech",
       "desc": "【A 人类】① 廓形：三十岁男性，高瘦，肩背微驼；② 头部：窄长脸，苍白偏青的肤色，短发剃到耳上，发根有接驳插口；③ 上装：哑光碳纤维高领外套，胸口有陶瓷装甲分件，肘部织物磨白；④ 下装与鞋：灰黑工装裤，磁吸扣短靴；⑤ 装备 / 义体：左前臂拉丝钛义体，接缝处冷蓝发光细线，指关节可见液压结构；⑥ 配色：主色石墨灰，辅色氧化橙，发光色冷蓝，色温偏冷；⑦ 道具：腕部全息终端；⑧ 气质：站姿笔直，说话前习惯用拇指摩挲义体接缝",
       "promptEn": "30-words fixed English appearance phrase in the same order as desc"
     },
     {
       "name": "机体代号",
       "role": "对手",
+      "subjectType": "mech",
       "desc": "【B 机械体】① 机型与体量：代号「熔核」，人形重装机体，全高 42 米，肩宽接近身高一半；② 头部：楔形面罩后一枚广角单眼传感器，头顶两根短天线；③ 装甲：轧制钢板外套陶瓷复合装甲，板缝露出黄黑警示条，胸甲有熔穿战损；④ 关节与肢体：外露的液压缸与粗线缆，三指机械手，足部为爪式支撑；⑤ 武器 / 装备：右臂 30 毫米转管炮，背部双推进器喷口有余温红光；⑥ 配色：主色锈红，辅色黑铁，发光色熔橙，色温偏暖；⑦ 标识：左肩喷白色编号 K-09；⑧ 动作：站姿前倾，开炮前右肩先下沉",
       "promptEn": "35-words fixed English appearance phrase in the same order as desc, no age or clothing words"
     },
     {
       "name": "主角座驾（载具代号）",
       "role": "主角的延伸",
+      "subjectType": "vehicle",
       "desc": "【C 载具】① 车型与体量：双门宽体跑车，低趴长头短尾，长 4.5 米；② 车身与车漆：哑光枪灰金属漆，轮拱与保险杠有碎石划痕和泥点；③ 玻璃与车窗：深色贴膜，隐约可见防滚架与驾驶者剪影；④ 车轮：深灰六辐锻造轮毂，半热熔胎，胎肩有明显磨损；⑤ 灯具：细长 LED 前灯冷白光，贯穿式尾灯暗红；⑥ 改装件：固定式碳纤维尾翼、前铲、侧出排气；⑦ 标识：车门喷白色编号 07，后窗贴一道褪色拉力条纹；⑧ 动态：过弯时车身侧倾很小，压水洼溅起扇形水花",
       "promptEn": "30-words fixed English vehicle phrase: body type and proportions, paint and weathering, glass, wheels and tires, lights, aero parts, markings — no age or clothing words"
     }
@@ -355,13 +373,68 @@ ${totalLine}
 ${tail}${correctionBlock}`;
 }
 
+/** 主体类型的各种写法：模型可能给英文枚举，也可能直接写「人类 / 载具 / 机甲」 */
+const SUBJECT_TYPE_ALIASES: Record<string, CharacterSubject> = {
+  human: 'human',
+  person: 'human',
+  character: 'human',
+  a: 'human',
+  人: 'human',
+  人类: 'human',
+  人物: 'human',
+  角色: 'human',
+  vehicle: 'vehicle',
+  car: 'vehicle',
+  c: 'vehicle',
+  车: 'vehicle',
+  载具: 'vehicle',
+  车辆: 'vehicle',
+  mech: 'mech',
+  machine: 'mech',
+  robot: 'mech',
+  b: 'mech',
+  机甲: 'mech',
+  机械: 'mech',
+  机械体: 'mech',
+  机器人: 'mech',
+};
+
+function parseSubjectType(raw: unknown): CharacterSubject | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const key = raw.trim().toLowerCase().replace(/[【】[\]]/g, '').replace(/\s+/g, '');
+  return SUBJECT_TYPE_ALIASES[key];
+}
+
+/**
+ * 模型没给 subjectType 时的兜底推断，只在高置信度时下结论：
+ * 名字就是载具名，或 desc 里有两个以上载具特征词且没有任何人类专属特征。
+ * 拿不准就返回 undefined，交给配图层继续按关键词判断——那里有全身站姿的构图层兜底。
+ */
+function inferSubjectType(name: string, desc: string): CharacterSubject | undefined {
+  if (VEHICLE_TERM.test(name)) return 'vehicle';
+  const vehicleHits = desc.match(VEHICLE_DESC) ?? [];
+  if (vehicleHits.length >= 2 && !HUMAN_ONLY_DESC.test(desc)) return 'vehicle';
+  return undefined;
+}
+
+/** 主体类型的统一入口：模型给了就用模型的，没给才按名字 / 描述兜底推断 */
+export function normalizeSubjectType(
+  rawType: unknown,
+  name: string,
+  desc: string,
+): CharacterSubject | undefined {
+  return parseSubjectType(rawType) ?? inferSubjectType(name, desc);
+}
+
 function normalizeCharacter(raw: Record<string, unknown>): PlanCharacter | null {
   const name = str(raw.name);
   if (!name) return null;
+  const desc = str(raw.desc);
   return {
     name,
     role: str(raw.role) || undefined,
-    desc: str(raw.desc),
+    desc,
+    subjectType: normalizeSubjectType(raw.subjectType, name, desc),
     promptEn: str(raw.promptEn) || undefined,
   };
 }
@@ -538,6 +611,35 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
     });
   }
 
+  // 主体卡写进了「这一镜才成立」的姿势 / 场景：卡片会被画成一张剧照，
+  // 之后每一镜都跟着往那个场景漂。载具卡的 ⑧ 动态特征本来就写运行姿态，豁免。
+  const situationCards = characters.filter(
+    (c) => c.subjectType !== 'vehicle' && SITUATION_HINT.test(c.desc),
+  );
+  if (situationCards.length > 0) {
+    problems.push({
+      code: 'scene-in-character-desc',
+      message:
+        `主体卡 ${situationCards.map((c) => `「${c.name}」`).join('、')} 的 desc 写进了只在一镜成立的姿势 / 场景 / 动作。` +
+        'desc 只写全片恒定的可见外观：不许写「坐在车里 / 站在门口 / 握着方向盘 / 正在做什么」这类剧照信息，' +
+        '否则角色卡会被画成那一镜的截图，成片里每一镜都会往那个场景漂；' +
+        '体态只写默认的站立或行走基线，道具写随身携带、可独立辨认的物件，不写手里正拿着什么',
+      // 配图层还会再剥一次，少量命中不阻塞；大面积命中说明模型没理解「外观 ≠ 剧照」
+      blocking: situationCards.length * 2 > characters.length,
+    });
+  }
+
+  // 运动基调是全片级的兜底：没有它，某一镜的特写就只能靠自己那句描述撑住速度感
+  if (!str(obj.motion)) {
+    problems.push({
+      code: 'missing-motion',
+      message:
+        '蓝图没有给出全片运动基调（motion）；一句「高速追车，车始终在动：车厢振动、窗外景物横掠」就能让' +
+        '后面每一镜的特写都保留速度感，缺失时只能逐镜祈祷模型别把画面拍成静止',
+      blocking: false,
+    });
+  }
+
   const scenesRaw = Array.isArray(obj.scenes) ? obj.scenes : [];
   const scenes = dedupeByName(
     scenesRaw
@@ -557,6 +659,8 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
       logline: str(obj.logline),
       theme: str(obj.theme),
       tone: str(obj.tone),
+      motion: str(obj.motion),
+      motionEn: str(obj.motionEn) || undefined,
       characters,
       scenes,
       beats,

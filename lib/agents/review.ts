@@ -208,6 +208,21 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
       });
     }
 
+    // 秒级节拍的英文短语：缺了它，时间轴提交不到视频模型，这一镜只能靠一句画面描述撑时长
+    if (beatCount >= 2) {
+      const covered = (shot.beatSheet ?? []).filter((beat) => beat.actionEn?.trim()).length;
+      if (covered / beatCount < 0.5) {
+        issues.push({
+          level: 'warn',
+          code: 'beat-en-missing',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜的 beatSheet 有 ${beatCount - covered}/${beatCount} 段缺英文 actionEn，` +
+            '秒级时间轴提交不到视频模型（英文提示词里只剩一句动作描述）；给每段补 8~14 词的英文动作短语',
+        });
+      }
+    }
+
     const limit = narrationLimit(shot.duration);
     if (shot.narration.length > limit) {
       issues.push({
@@ -426,7 +441,7 @@ ${CUT_POINT_RULES}
 9. 每镜 duration 保持原值（除非镜数变化需要重新分配），所有 duration 之和等于原总时长。
 10. characters / scenes 里的名字必须逐字来自主体卡 / 场景表。
 11. 每个镜头都要输出 entryState 与 exitState；原本没写的要补上，原本写了的不要改坏。首尾状态要写清主体在画面里的位置、运动方向与背景锚点。
-12. 每个镜头都要输出 beatSheet（秒级节奏）；改了动作或时长时同步改时间轴，时间轴必须覆盖 0~duration；最后一拍必须落在可辨认的动作相位上。
+12. 每个镜头都要输出 beatSheet（秒级节奏）；改了动作或时长时同步改时间轴，时间轴必须覆盖 0~duration；最后一拍必须落在可辨认的动作相位上；每段同时给 actionEn（8~14 个英文单词的同一动作），秒级时间轴要靠它提交给视频模型。
 13. 硬切镜头要写 transitionReason（切点承接的是哪个动作相位或背景锚点），需要遮挡交接时写 hiddenCut。
 14. 输出完整的 shots 数组（不是补丁），只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
 
@@ -485,6 +500,7 @@ function buildUserPrompt(input: RepairInput): string {
 梗概：${plan.logline}
 主题：${plan.theme || '（未给出）'}
 基调：${plan.tone || '（未给出）'}
+全片运动基调：${plan.motion || '（未给出）'}（修复时每一镜的 videoPrompt 都要体现它，特写也不例外）
 
 节拍（用于修复时对齐剧情与状态链，不要改动顺序）：
 ${plan.beats

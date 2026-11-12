@@ -9,8 +9,15 @@
   "title": "片名",
   "logline": "一句话故事梗概（谁 + 想要什么 + 阻碍 + 代价）",
   "style": "整体视觉风格（预设短标签或完整风格描述）",
+  "motionProfile": "全片运动基调（蓝图中文产出）：整片在动还是静止、动来自哪里",
+  "motionEn": "≤18 words English motion baseline，运行时逐镜追加到视频提示词",
   "characters": [
-    { "name": "角色名", "desc": "可拍摄的中文外形", "promptEn": "fixed English appearance phrase" }
+    {
+      "name": "角色名",
+      "subjectType": "human | vehicle | mech",
+      "desc": "可拍摄的中文外形（只写恒定外观，不写这一镜的姿势 / 场景）",
+      "promptEn": "fixed English appearance phrase"
+    }
   ],
   "scenes": [
     { "name": "场景名", "desc": "地点/时间/光源方向与色温/主要陈设", "promptEn": "fixed English location phrase" }
@@ -28,7 +35,14 @@
       "hiddenCut": false,
       "entryState": "本镜第一帧的画面事实",
       "exitState": "本镜最后一帧的画面事实",
-      "beatSheet": [{ "from": 0, "to": 2, "action": "抬眼看向塔顶" }],
+      "beatSheet": [
+        {
+          "from": 0,
+          "to": 2,
+          "action": "抬眼看向塔顶",
+          "actionEn": "his eyes lifting toward the top of the tower"
+        }
+      ],
       "description": "中文画面描述",
       "videoPrompt": "faithful English translation of description",
       "narration": "台词或旁白，可为空字符串",
@@ -54,13 +68,16 @@
 | 单镜时长 | 随剧本视频模型：HappyHorse 3~15 秒 / wan3.0 2~30 秒，整数，优先 ≤10 | `lib/video-models.ts` + `shotLimits(videoModel)` |
 | 总时长 | 单镜下限 ~ 单镜上限 × 12；镜头 duration 之和必须等于目标总时长 | `shotLimits(videoModel).minTotal/maxTotal` |
 | `duration` 模式镜数 | 只给区间 `ceil(总时长/单镜上限)` ~ `min(12, 总时长/单镜下限)`，由 AI 按剧情决定 | `splitByDuration(total, limits)` |
-| 主体卡 | 2~5 张（最多 8）：人物 + 每一辆载具 + 关键道具，`promptEn` 20~35 词 | `continuity.ts` |
+| 主体卡 | 2~5 张（最多 8）：人物 + 每一辆载具 + 关键道具，`promptEn` 20~35 词，必须带 `subjectType` | `continuity.ts` |
+| 主体卡 `desc` | 只写恒定外观；出现姿势 / 场景 / 动作（坐在车里、握着方向盘）报 `scene-in-character-desc`，配图层会再剥一次 | `APPEARANCE_ONLY_RULES` / `SITUATION_HINT` |
+| 运动基调 | 蓝图给 `motion` / `motionEn`；分镜每镜都要体现，运行时再逐镜追加一次 `motionEn` | `StoryPlan.motion` / `buildVideoPrompt` |
 | 载具卡缺口 | 追逐 / 竞速且有驾驶主体时至少 2 张载具卡（被追的与追的各一张） | `requiredVehicleCards` |
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
 | `videoPrompt` | 英文，40~110 词（<30 或 >150 判不合格） | `PROMPT_*_WORDS` |
 | `videoPrompt` 中文占比 | 汉字 / (字母 + 汉字) ≤ 12% | `isEnglishPrompt` |
 | 台词长度 | `min(60, max(16, duration × 4))` 字 | `narrationLimit` |
 | `beatSheet` | 首段 from=0、末段 to=duration、不断档不重叠、最多 8 段 | `normalizeBeatSheet` |
+| `beatSheet[].actionEn` | 每段 8~14 词英文动作短语；运行时拼成英文时间轴与 videoPrompt 一起提交 | `TIMELINE_RULES` / `timelineClause` |
 | `beatSheet` 段数 | duration ≥4 时至少 2 段；2~4 秒 2 段，5~10 秒 2~3 段，10~20 秒 3~5 段 | `TIMELINE_RULES` |
 | same-take | 单镜 ≤8 秒、全片连续 ≤2 次、景别跨度必须为 0（摄影机没停机）、同场景 | `storyboard.ts` |
 | 首帧接帧 | 同景别（跨度 0）才当首帧；跨 1 档或 `hiddenCut` 降级为参考图；跨 ≥2 档不接 | `prevFrameUsage` |
@@ -99,6 +116,7 @@
 | `prompt-temporal-adverb` | warn | 英文提示词用了 then / after that / finally | 改成并列的现在分词，把 `beatSheet` 各段串成一条链 |
 | `size-gap-carry` | warn | 景别跨 2 档以上还想接上一镜末帧 | 改走卡片，或用 `hiddenCut` 声明遮挡转场 |
 | `timeline-missing` | warn | 长镜没有秒级节拍 | 补 `beatSheet` |
+| `beat-en-missing` | warn | 过半节拍缺英文 `actionEn`，时间轴提交不到视频模型 | 每段补 8~14 词英文动作短语 |
 | `narration-long` | warn | 台词超出时长容量 | 删到一句一意 |
 | `dialogue-empty` | warn | 标了台词却没内容 | 补台词或改 `voiceover`/`none` |
 | `dialogue-no-speaker` | warn | 没指定说话人 | 补 `speaker` |

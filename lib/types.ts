@@ -43,11 +43,20 @@ export interface MediaInput {
   name?: string;
 }
 
+/**
+ * 主体类型：决定角色卡的构图与画幅。
+ * 以前靠 desc 里的关键词猜（写了「车内」的人卡被判成载具卡），
+ * 现在由蓝图显式给出，关键词只作为旧剧本的兜底。
+ */
+export type CharacterSubject = 'human' | 'vehicle' | 'mech';
+
 export interface Character {
   /** 列表渲染用的稳定 id（旧剧本可能没有） */
   id?: string;
   name: string;
   desc: string;
+  /** 主体类型（来自蓝图）；缺省时按关键词兜底推断，兼容旧剧本 */
+  subjectType?: CharacterSubject;
   /** 全片固定的英文外貌短语（来自蓝图，逐镜提示词逐字复用） */
   promptEn?: string;
   /** 形象参考图（/api/uploads/xxx 或公网 URL）；上一镜末帧不可用时作为 reference_image 提交 */
@@ -85,6 +94,12 @@ export interface ShotBeat {
   to: number;
   /** 这一段里唯一一个可见动作，如「抬眼看向塔顶」 */
   action: string;
+  /**
+   * 这一段动作的英文短语（8~14 词）。
+   * 只有中文 action 进不了英文提示词，秒级时间轴也就提交不到视频模型；
+   * 有 actionEn 才能在运行时拼出「0-2s: ... / 2-5s: ...」的英文时间轴。
+   */
+  actionEn?: string;
 }
 
 /**
@@ -182,6 +197,17 @@ export interface Script {
   title: string;
   logline: string;
   style: string;
+  /**
+   * 全片运动基调（蓝图中文产出）：这场戏是持续运动还是静止，速度感从哪来。
+   * 例：「高速追车，车始终在动：车厢振动、窗外景物横掠，任何近景 / 特写都要保留速度感」。
+   * 它约束的是每一镜的 videoPrompt，不是某一镜的画面。
+   */
+  motionProfile?: string;
+  /**
+   * 运动基调的英文短句（≤18 词）。运行时追加到每条视频提示词，
+   * 防止模型在某个特写镜头上把整场戏的速度忘掉。
+   */
+  motionEn?: string;
   characters: Character[];
   /** 场景卡（旧剧本没有这个字段） */
   scenes?: Scene[];

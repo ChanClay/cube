@@ -8,7 +8,7 @@ import {
 } from '@/lib/skills/image-prompt';
 import { generateImage } from '@/lib/providers/image/wan-image';
 import { UPLOAD_DIR } from '@/lib/services/uploads';
-import type { ProjectMedia } from '@/lib/types';
+import type { CharacterSubject, ProjectMedia } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,6 +49,12 @@ export async function POST(request: Request) {
   const promptEn = typeof payload.promptEn === 'string' ? payload.promptEn.trim() : '';
   const style = typeof payload.style === 'string' ? payload.style.trim() : '';
   const kind = payload.kind === 'scene' ? 'scene' : 'character';
+  /** 主体类型（来自蓝图）：人类卡的 desc 里出现「车内」也不会被当成载具卡 */
+  const subjectTypeRaw = typeof payload.subjectType === 'string' ? payload.subjectType.trim() : '';
+  const subjectType: CharacterSubject | undefined =
+    subjectTypeRaw === 'human' || subjectTypeRaw === 'vehicle' || subjectTypeRaw === 'mech'
+      ? subjectTypeRaw
+      : undefined;
 
   if (prompt.length < 2) {
     return NextResponse.json({ error: '请先填写名称或描述，再生成配图' }, { status: 400 });
@@ -57,9 +63,9 @@ export async function POST(request: Request) {
   try {
     const remoteUrl = await generateImage({
       // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/skills/image-prompt
-      prompt: buildCardPrompt({ kind, prompt, promptEn, style }),
+      prompt: buildCardPrompt({ kind, prompt, subjectType, promptEn, style }),
       // 载具卡是横图、人物卡是竖图，见 lib/skills/image-prompt 的 cardImageSize
-      size: cardImageSize(kind, `${prompt} ${promptEn}`),
+      size: cardImageSize(kind, `${prompt} ${promptEn}`, subjectType),
       negativePrompt: CARD_NEGATIVE_PROMPT,
     });
 

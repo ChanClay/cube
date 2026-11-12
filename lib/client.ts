@@ -157,6 +157,8 @@ export interface CreateProjectBody {
 /** 角色卡 / 场景卡的一键配图 */
 export interface ImageBody {
   prompt: string;
+  /** 主体类型（来自蓝图）：载具卡走横图，人类卡不会被 desc 里的「车内」带偏 */
+  subjectType?: 'human' | 'vehicle' | 'mech';
   /** 蓝图锁定的固定英文外貌 / 空间短语，保证卡片与逐镜视频一致 */
   promptEn?: string;
   /** 决定出图比例：角色用竖图，场景用横图 */
@@ -170,6 +172,8 @@ export interface RefineShotBody {
   description: string;
   title?: string;
   style?: string;
+  /** 全片运动基调：重算单镜时也要体现，特写不许把整场戏的速度丢掉 */
+  motionProfile?: string;
   duration?: number;
   /** 上一镜 / 下一镜的画面描述，用于承接与衔接 */
   before?: string;

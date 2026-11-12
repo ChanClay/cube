@@ -41,7 +41,13 @@
 - 40~110 个单词（低于 30 或高于 150 会被审片判为不合格）。
 - 一段话，用逗号连接，不分点、不重复同一信息。
 - 只出现一个运镜、一个动作主体、一条匀速动作链。
-- 结尾固定收口：`smooth continuous motion, steady pacing, stable framing`。
+- 结尾固定收口：`constant subtle motion, no frozen frame`。
+
+### 画面必须在动
+
+每一镜至少要有一个贯穿全镜的持续运动源，三选一或叠加：主体动（呼吸、眨眼、发丝与衣料被气流带动）、介质动（雨丝、尘粒、烟雾、水花、玻璃上的水痕）、相对动（背景横掠的车流与灯光、地面后退、光斑移动、车身振动）。
+
+特写最容易踩：只写「眼神凝重」而没有任何运动源，成片就是主角静止坐着、镜头给个特写。特写要用局部写更大的动作——手在抖是因为车在颠、瞳孔在缩是因为后视镜里的车灯逼近、窗外景物横成一道线。收口词 `no frozen frame` 只是兜底，不能代替真正的运动源。
 
 ### 秒级节拍怎么进英文
 
@@ -56,7 +62,7 @@
 拼进模板后：
 
 ```
-Close-up of an old lighthouse keeper ..., his eyes lifting toward the top of the tower, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass, warm oil lamp light from below, slow push-in, shallow depth of field, 35mm film grain, smooth continuous motion, steady pacing, stable framing
+Close-up of an old lighthouse keeper ..., his eyes lifting toward the top of the tower, his hand rising to twist the lamp shade open, a small flame flaring up inside the glass, warm oil lamp light from below, slow push-in, shallow depth of field, 35mm film grain, constant subtle motion, no frozen frame
 ```
 
 三条硬规则：
@@ -64,6 +70,7 @@ Close-up of an old lighthouse keeper ..., his eyes lifting toward the top of the
 - **顺序不能改**：英文动作的出现顺序必须与秒级节拍一致，否则观众看到的是另一条动作线。
 - **不许丢段**：3 段节拍至少要有 3 个动作短语。丢一段等于把这一镜的叙事砍掉一截，长镜头会退化成一段慢动作。
 - **不许用时间副词**：`first` / `then` / `after that` / `finally` / `next` 会让模型把画面切成两段，接缝处就是抽帧般的抖动。用并列分词，让动作自己连起来。
+- **每段都要有 `actionEn`**：8~14 个英文单词，与中文 `action` 一一对应。运行时会按 `from` / `to` 把它拼成 `0-2s: ...; 2-5s: ...` 的英文时间轴一并提交给视频模型；缺了它，这一段动作只剩英文提示词里那一句概括（审片报 `beat-en-missing`）。
 
 节拍之间本来就不连贯（前一段在室内、后一段已经在街上）时，说明切点选错了：那是两个镜头，不是一镜的两段。
 
@@ -76,7 +83,7 @@ Close-up of an old lighthouse keeper ..., his eyes lifting toward the top of the
 videoPrompt：
 
 ```
-Medium shot of an old lighthouse keeper with grey hair and a weathered face standing on a spiral iron staircase, looking up toward the top of the tower, warm oil lamp light flickering across his deep wrinkles, dust particles floating in the air, cold blue ambient light from the storm outside, slow push-in, shallow depth of field, 35mm film grain, photorealistic, smooth continuous motion, steady pacing, stable framing
+Medium shot of an old lighthouse keeper with grey hair and a weathered face standing on a spiral iron staircase, looking up toward the top of the tower, warm oil lamp light flickering across his deep wrinkles, dust particles floating in the air, cold blue ambient light from the storm outside, slow push-in, shallow depth of field, 35mm film grain, photorealistic, constant subtle motion, no frozen frame
 ```
 
 为什么合格：景别与运镜对得上；主体用了角色固定短语；动作只有一个（抬头）；光有方向（油灯为暖主光、窗外冷光为辅）；没有中文没写的元素。

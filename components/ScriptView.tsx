@@ -465,6 +465,16 @@ export default function ScriptView({
                     </div>
                   )}
 
+                  {/* 全片运动基调：约束每一镜的提示词，特写也不例外 */}
+                  {script.motionProfile && (
+                    <div className="script-idea" title={script.motionProfile}>
+                      <div className="script-idea-main">
+                        <span className="characters-title">运动基调</span>
+                        <p className="script-idea-text">{script.motionProfile}</p>
+                      </div>
+                    </div>
+                  )}
+
                   <CastCards
                     characters={script.characters}
                     scenes={script.scenes ?? []}
@@ -591,6 +601,7 @@ export default function ScriptView({
                 onGenerate={() => onGenerate(activeShot)}
                 characters={script.characters}
                 style={script.style}
+                motionProfile={script.motionProfile}
                 beforeDescription={shots[activeIndex - 1]?.description ?? ''}
                 afterDescription={shots[activeIndex + 1]?.description ?? ''}
                 isFirst={activeIndex === 0}

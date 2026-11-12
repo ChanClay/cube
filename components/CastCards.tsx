@@ -209,8 +209,14 @@ export default function CastCards({
     markBusy(key, true);
     setError(null);
     try {
-      // 带上蓝图锁定的固定英文短语，卡片才会和逐镜视频里的长相 / 空间一致
-      const { media } = await api.generateImage({ prompt, promptEn: item?.promptEn, kind, style });
+      // 带上蓝图的固定英文短语与主体类型，卡片才会和逐镜视频里的长相 / 构图一致
+      const { media } = await api.generateImage({
+        prompt,
+        promptEn: item?.promptEn,
+        subjectType: kind === 'character' ? (item as Character | undefined)?.subjectType : undefined,
+        kind,
+        style,
+      });
       patchById(kind, id, index, { imageUrl: media.url });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

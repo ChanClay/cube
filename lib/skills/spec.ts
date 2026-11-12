@@ -6,7 +6,7 @@
  * 同时提供确定性的规范化与检查函数，供三个 agent 共用。
  */
 
-import type { ShotBeat, ShotTransition } from '@/lib/types';
+import type { CharacterSubject, ShotBeat, ShotTransition } from '@/lib/types';
 
 /** 从远到近；也是提示词里推荐的情绪推进顺序 */
 export const SHOT_SIZES = ['大远景', '远景', '全景', '中景', '近景', '特写'] as const;
@@ -203,6 +203,62 @@ export const SUBJECT_CARD_RULES = `主体卡不是「人物卡」：凡是需要
 
 
 /**
+ * 「只在某一镜成立」的信息：姿势、动作、所在场景。
+ * 主体卡是全片复用的长相锚点，一旦写进这些，卡片就会被画成那一镜的剧照
+ * （追逐戏里最常见的一例：主角卡写成「坐在驾驶座上，手握方向盘」）。
+ */
+export const SITUATION_HINT =
+  /(坐在|坐进|坐回|靠在车|靠在门|躺在|蹲在|跪在|趴在|车里|车内|车厢|驾驶座|副驾驶|副驾|后排|方向盘|挡位|中控台|车窗外|窗外|门口|床边|桌边)/;
+
+/** 主体卡 desc 的写法约束：只写恒定外观，不写这一镜的剧照 */
+export const APPEARANCE_ONLY_RULES = `desc 只写「全片恒定不变的外观」，它不是这一镜的剧照：
+- 禁止写任何只在一镜成立的信息：姿势（坐在 / 站在 / 靠在 / 蹲在）、动作（正在 / 握着 / 回头 / 望向）、所在场景（车内 / 驾驶座 / 副驾驶 / 车窗外 / 门口）、乘坐或驾驶的载具、与其它主体的相对位置、台词与情绪；
+- 角色卡是全片每个镜头复用的长相锚点：desc 里写进「坐在车里」，卡片就会被画成一张车内剧照，之后每一镜也会跟着往那个场景漂；
+- 体态只写默认的站立 / 行走基线（例：「肩背微驼，说话前习惯低头」），不写此刻正在做的动作；
+- 道具写「随身携带、可独立辨认」的物件（腕部全息终端、挂在腰侧的钥匙），不写「手里拿着某物」这种瞬时状态；
+- 载具卡的动态特征写物理特性（过弯侧倾小、加速时车头微抬），不写「正在漂移 / 停在路边」。`;
+
+/** 配图提示词开头的「名称：」前缀：名称不是外观，清洗时要先摘出来 */
+const NAME_PREFIX = /^([^：①②③④⑤⑥⑦⑧⑨⑩]{1,24})：/;
+
+/**
+ * 从主体描述里剥掉「这一镜才成立」的分句，兜底防止剧照信息进到配图提示词。
+ * 按句号 / 分号切段：整段都在写场景与动作时直接丢弃。
+ * 全被剥掉时只留名称——交给 promptEn 与构图层（全身站姿 / 单人居中）主导，
+ * 总好过把一张「车内剧照」当成全片的长相锚点。
+ */
+export function sanitizeAppearance(text: string, subjectType?: CharacterSubject): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  // 载具本来就该写车身、座舱、车窗，不能按「场景 / 动作」剥
+  if (subjectType === 'vehicle') return trimmed;
+  const prefixed = NAME_PREFIX.exec(trimmed);
+  const head = prefixed ? prefixed[0] : '';
+  const body = head ? trimmed.slice(head.length) : trimmed;
+  const kept = body
+    .split(/(?<=[；;。\n])/)
+    .filter((part) => !SITUATION_HINT.test(part))
+    .join('')
+    .trim();
+  return kept ? `${head}${kept}` : head;
+}
+
+/**
+ * 动势基线。
+ *
+ * 文生视频模型只会把「写到的」拍出来：镜头描述里没有任何持续运动源时，
+ * 它会交出一张近似静止的图（人物坐着不动，只是镜头在推）。
+ * 景别越小越容易踩：特写如果只写「瞳孔收缩」「神情凝重」，
+ * 成片就是主角静态坐在那里、镜头给个特写。
+ * 所以每一镜都必须显式写出一个贯穿全镜的运动源。
+ */
+export const MOTION_BASELINE_RULES = `动势基线（决定这一镜在成片里是「活的」还是「一张会呼吸的照片」）：
+- 每一镜至少要有一个贯穿全镜的持续运动源，不许出现完全静止的画面。三选一或叠加：主体动（呼吸起伏、眨眼、发丝与衣料被气流带动、肌肉或机械关节的细微运动）／介质动（雨丝斜落、尘粒翻卷、烟雾、水花、玻璃上的水痕、蒸汽）／相对动（背景横向掠过的车流与灯光、地面飞速后退、光斑在脸上移动、车身振动）；
+- 特写不是「把动作删掉」，而是「用局部写更大的动作」：手指因车身颠簸在方向盘上发抖、瞳孔随窗外掠过的灯光收缩、发丝被风压压向一侧、后视镜里逼近的车灯越来越大。禁止只写形容词与状态（「他神情凝重」「车里很安静」）而没有任何运动源；
+- 环境动势必须跟着戏走：这场戏在追车，特写里也要能看出车还在动——车厢振动、窗外景物横掠、风压与雨刷；这场戏在暴雨里，近景也必须看见雨丝斜穿画面；
+- 整镜用 "constant subtle motion, no frozen frame" 守住这条基线，不要用 "steady framing" 这类词暗示画面可以停住。`;
+
+/**
  * 视频提示词的写法约束。storyboard 与单镜重算共用同一份，
  * 避免两处对「多少词、写什么顺序」给出不同要求。
  */
@@ -210,11 +266,12 @@ export const VIDEO_PROMPT_RULES = `videoPrompt 是同一镜中文 description �
 - 必须是英文，一段话，${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个单词，按这个顺序写：景别 + 主体（固定英文外貌短语）+ 具体动作 + 环境细节 + 光线 / 时间 / 色调 + 运镜 + 画面质感 +（可选）一句声音；
 - 景别只用标准英文写法：${SHOT_SIZES.map((s) => `${SHOT_SIZE_EN[s]}（${s}）`).join(' / ')}，必须与 shotSize 一致；
 - 只写一个运镜，用标准英文运镜词，且必须与 cameraMove 的中文含义一致（${CAMERA_MOVES.map((m) => `${m}=${CAMERA_MOVE_EN[m][0]}`).join('，')}）；
-- 运动必须是一条连续、匀速、符合真实时间的动作链，用 "smooth continuous motion, steady pacing, stable framing" 收尾。一镜可以有多个连续动作，但必须是同一个主体在同一空间里顺着做下来的：beatSheet 的每一段都要在英文里有对应，按时间顺序用并列的现在分词短语串起来。不要写 first / then / after that / finally 这类时间副词，也不要让多个人物同时各做各的——模型会把画面切成两段，接缝处就是抽帧般的抖动；
+- 运动必须是一条连续、匀速、符合真实时间的动作链，用 "constant subtle motion, no frozen frame" 收尾。一镜可以有多个连续动作，但必须是同一个主体在同一空间里顺着做下来的：beatSheet 的每一段都要在英文里有对应，按时间顺序用并列的现在分词短语串起来。不要写 first / then / after that / finally 这类时间副词，也不要让多个人物同时各做各的——模型会把画面切成两段，接缝处就是抽帧般的抖动；
 - 不要写 "slow motion"（除非 cameraMove=升格慢动作）、"time-lapse"、"speed ramp"、"jump cut"、"flicker"、"morphing" 这类会让速度忽快忽慢或画面跳变的词；
 - 禁止字幕、文字、水印、logo、分屏、转场词、镜头编号（如 "shot 1" / "scene 2"）；
 - 只写可拍摄的名词与动词，不要用 "beautiful" / "sad" 单独代替画面；
-- 同一角色在全片复用同一段英文外貌短语，不要逐镜改写年龄、发型、服装、装甲与涂装、道具。`;
+- 同一角色在全片复用同一段英文外貌短语，不要逐镜改写年龄、发型、服装、装甲与涂装、道具。
+${MOTION_BASELINE_RULES}`;
 
 /**
  * 跨镜连贯性的写法约束。分镜写作与审片共用：
@@ -223,7 +280,7 @@ export const VIDEO_PROMPT_RULES = `videoPrompt 是同一镜中文 description �
 export const CONTINUITY_RULES = `每个镜头都要显式写出 entryState 与 exitState，它们是状态链上唯一可靠的锚点：
 - entryState：本镜第一帧能拍到的画面事实——谁、在哪、什么姿势、朝向哪里、手里拿着什么、画面里还有什么道具；非第一镜必须与上一镜的 exitState 是同一个状态（可以换措辞，但人物、位置、姿势、道具不能变）；
 - exitState：本镜最后一帧的画面事实，必须能被下一镜直接接住；不许写情绪、心理或抽象判断；
-- 画面里有运动主体（人、载具、飞行器、巨兽）时，首尾状态还要写清三件事：主体在画面里的位置与大小（画面左 / 中 / 右、占画多少）、运动方向与速度（朝画右加速、迎面逼近）、一个贯穿场景的背景锚点（同一条路、同一盏灯、同一个弯道）；
+- 只要这场戏本身在运动（追车、奔跑、飞行、坠落、打斗），首尾状态就必须写清三件事——特写与近景也不例外（那时画面里只有一张脸、一只手，最容易把整场戏的运动丢掉）：主体在画面里的位置与大小（画面左 / 中 / 右、占画多少）、运动方向与速度（朝画右加速、迎面逼近）、一个贯穿场景的背景锚点（同一条路、同一盏灯、同一个弯道）。特写里没有完整运动主体时，改写成背景与介质的速度——窗外景物横掠、地面飞速后退、雨丝斜向划痕；
 - 换机位不换世界：hard-cut / time-jump 可以换构图，但下一镜的 entryState 仍要重复上一镜的运动方向与背景锚点——方向翻转、锚点消失，观众看到的就是另一场戏；
 - 出口必须是可切帧：最后一拍结束时主体仍在画面内，动作到达一个可辨认的相位（车头咬住前车、车身摆正、轮子落回地面）。禁止用「冲出画外 / 消失在黑暗或雨幕 / 完全虚化」收尾——这类结尾没有落点，下一镜怎么切都接不上；确实要以遮挡 / 甩镜交出去时，本镜写 hiddenCut: true；
 - 上一镜没做完的动作，本镜接着做完；人物位置、道具、服装、光线不许在两镜之间凭空改变；
@@ -257,7 +314,8 @@ export const TIMELINE_RULES = `每一镜都要写 beatSheet：把这一镜的 du
 - 节拍之间必须连着：后一段的起点就是前一段的终点状态（人物位置、朝向、手里拿的东西），不许在节拍之间瞬移或凭空换姿势；
 - 不许写「情绪渐强」「气氛变得紧张」「内心开始动摇」这类拍不出来的描述；
 - 所有段落连起来读，必须正好是这个镜头完整的动作过程，不多不少；
-- 动作要能对上这一镜的景别与运镜：特写只写手、眼、道具的细微变化；大远景里的"动作"是空间与光线的变化。`;
+- 动作要能对上这一镜的景别与运镜：特写的动作是「更大动作的局部」——手在抖是因为车在颠、瞳孔在缩是因为后视镜里的车灯逼近、发丝被风压压向一侧，不许写成一张静止的肖像；大远景里的"动作"是空间与光线的变化；
+- 每段除了中文 action，还要给 actionEn：8~14 个英文单词的同一个动作，与 action 一一对应（运行时会按 from / to 把它拼成英文时间轴交给视频模型，没有它这一段动作就进不了成片）。`;
 
 /** 表示时间 / 空间发生跳转的词；出现时允许 entryState 与上一镜 exitState 不一致 */
 const TRANSITION_HINT =
@@ -433,12 +491,14 @@ export function normalizeBeatSheet(raw: unknown, duration: number): ShotBeat[] |
     const record = item as Record<string, unknown>;
     const action = str(record.action ?? record.desc ?? record.content);
     if (!action) continue;
+    // 秒级节拍的英文短语：运行时靠它把时间轴拼进视频提示词
+    const actionEn = str(record.actionEn ?? record.action_en ?? record.en);
 
     const from = Number(record.from ?? record.start ?? record.at);
     const to = Number(record.to ?? record.end);
     if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
 
-    items.push({ from: round1(from), to: round1(to), action });
+    items.push({ from: round1(from), to: round1(to), action, ...(actionEn ? { actionEn } : {}) });
   }
   if (items.length === 0) return undefined;
 
@@ -454,7 +514,12 @@ export function normalizeBeatSheet(raw: unknown, duration: number): ShotBeat[] |
     // 每段都从上一段的结束处开始：时间轴不允许留白，有空洞就由这一段吞掉
     const from = cursor;
     const to = clamp(Math.max(item.to, from + 0.5), from, total);
-    result.push({ from: round1(from), to: round1(to), action: item.action });
+    result.push({
+      from: round1(from),
+      to: round1(to),
+      action: item.action,
+      ...(item.actionEn ? { actionEn: item.actionEn } : {}),
+    });
     cursor = to;
     if (result.length >= MAX_BEAT_SEGMENTS) break;
   }
