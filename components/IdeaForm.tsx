@@ -325,22 +325,22 @@ export default function IdeaForm({
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={mode === 'shots'}
-                    className={`seg-btn${mode === 'shots' ? ' is-active' : ''}`}
-                    onClick={() => setMode('shots')}
-                    disabled={loading}
-                  >
-                    按镜头数量
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
                     aria-selected={mode === 'duration'}
                     className={`seg-btn${mode === 'duration' ? ' is-active' : ''}`}
                     onClick={() => setMode('duration')}
                     disabled={loading}
                   >
                     按总时长
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'shots'}
+                    className={`seg-btn${mode === 'shots' ? ' is-active' : ''}`}
+                    onClick={() => setMode('shots')}
+                    disabled={loading}
+                  >
+                    按镜头数量
                   </button>
                 </div>
               </div>
