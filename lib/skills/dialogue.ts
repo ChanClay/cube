@@ -89,10 +89,11 @@ function frameReferenceClause(cast: string[], characterCount = 0, crowd: string[
    *
    * 没有卡的人不在名单里，模型会把「一群人」当成背景噪声重画：
    * 上一镜结尾站着一群人，本镜就只剩角色卡上的那一个主角。
+   * 人群短语已经在正文里出现过（crowdClause），这里只做指代，避免同一段提示词把人写两遍。
    */
   const crowdLine =
     crowd.length > 0
-      ? ` The reference image also contains ${joinNames(crowd)}; keep that crowd in frame with the same headcount and wardrobe.`
+      ? ' The reference image also contains the same background crowd described above; keep its headcount and wardrobe unchanged.'
       : '';
 
   // 单人镜头多出一个人是最常见的错误，直接给个人数上限；本镜有人群时这条会把人删光
@@ -114,9 +115,10 @@ function carryFrameClause(cast: string[], characterCount = 0, crowd: string[] = 
     .slice(0, 4);
 
   const people = names.length > 0 ? ` and shows ${joinNames(names)}` : '';
+  // 人群短语已在正文 crowdClause 里写过一次，这里只指代，避免重复描述导致人数被画两倍
   const crowdLine =
     crowd.length > 0
-      ? ` The frame also contains ${joinNames(crowd)}; keep the same headcount and wardrobe.`
+      ? ' The frame also contains the same background crowd described above; keep its headcount and wardrobe unchanged.'
       : '';
   const count = characterCount === 1 && crowd.length === 0 ? ' Only one person appears in frame.' : '';
 

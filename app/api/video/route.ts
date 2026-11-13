@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { absolutizeMediaUrl, isPublicOrigin, sanitizeMedia, validateMedia } from '@/lib/skills/media';
-import { listJobs } from '@/lib/services/store';
+import { currentUserId } from '@/lib/services/auth';
+import { findActiveJob, listJobs } from '@/lib/services/store';
+import { withSubmitLock } from '@/lib/services/submit-lock';
 import { syncAllJobs, startVideoJob } from '@/lib/services/video-service';
 import { normalizeRatio, normalizeResolution } from '@/lib/video-options';
 import type { MediaInput } from '@/lib/types';
@@ -92,15 +94,40 @@ export async function POST(request: Request) {
   // 剧本选定的视频模型：决定走哪个 provider，以及时长落在哪个区间
   const videoModel = typeof payload.videoModel === 'string' ? payload.videoModel.trim() : '';
 
-  const job = await startVideoJob({
-    shotId,
-    prompt,
-    duration: Number.isFinite(duration) ? duration : undefined,
-    resolution,
-    ratio,
-    media: dedupeMedia(media),
-    videoModel: videoModel || undefined,
-  });
+  /**
+   * 幂等闸一：同一镜已经有活动任务（queued / running）就直接复用，不再提交 provider。
+   * 双击、两个标签页同时点、刷新后重试都走这里——视频按秒计费，重复提交就是重复扣费。
+   */
+  const active = await findActiveJob(shotId);
+  if (active) {
+    return NextResponse.json({ job: active, reused: true });
+  }
 
-  return NextResponse.json({ job }, { status: job.status === 'failed' ? 200 : 201 });
+  /**
+   * 幂等闸二：进程内锁，堵住「查完没有活动任务 → 两个请求同时提交」的竞态。
+   * 拿不到锁说明另一个请求正在提交，短暂回读一次活动任务再决定。
+   */
+  const userId = await currentUserId();
+  const job = await withSubmitLock(`video:${userId}:${shotId}`, () =>
+    startVideoJob({
+      shotId,
+      prompt,
+      duration: Number.isFinite(duration) ? duration : undefined,
+      resolution,
+      ratio,
+      media: dedupeMedia(media),
+      videoModel: videoModel || undefined,
+    }),
+  );
+
+  if (!job) {
+    const running = await findActiveJob(shotId);
+    if (running) return NextResponse.json({ job: running, reused: true });
+    return NextResponse.json(
+      { error: '这一镜正在提交生成任务，请稍候再试（重复点击不会重复计费）' },
+      { status: 409 },
+    );
+  }
+
+  return NextResponse.json({ job }, { status: job?.status === 'failed' ? 200 : 201 });
 }

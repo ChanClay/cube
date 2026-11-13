@@ -117,13 +117,30 @@ export default function CastCards({
 
   const listOf = (kind: Kind): Card[] => (kind === 'character' ? characters : scenes);
 
+  /**
+   * 繁忙集合的同步副本。
+   *
+   * `busy` 是 state，要等下一次渲染才为 true；双击「生成配图」时第二次点击
+   * 读到的仍是 false，会再发一次文生图请求（一次请求一张图，都是钱）。
+   */
+  const busyRef = useRef<Set<string>>(new Set());
+
   const markBusy = (key: string, on: boolean) => {
+    if (on) busyRef.current.add(key);
+    else busyRef.current.delete(key);
     setBusy((prev) => {
       const next = new Set(prev);
       if (on) next.add(key);
       else next.delete(key);
       return next;
     });
+  };
+
+  /** 原子占位：false 表示这张卡已经有请求在飞，调用方直接放弃这一次 */
+  const claimBusy = (key: string): boolean => {
+    if (busyRef.current.has(key)) return false;
+    markBusy(key, true);
+    return true;
   };
 
   /**
@@ -301,7 +318,8 @@ export default function CastCards({
 
     const id = item?.id;
     const key = keyOf(kind, item, index);
-    markBusy(key, true);
+    // 同步占位：同一张卡同时只允许一个文生图请求
+    if (!claimBusy(key)) return;
     setError(null);
     try {
       // 带上蓝图的固定英文短语与主体类型，卡片才会和逐镜视频里的长相 / 构图一致

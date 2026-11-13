@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   MEDIA_HINT,
   MEDIA_LABEL,
@@ -130,6 +130,11 @@ export default function ShotCard({
   const [durationText, setDurationText] = useState(String(shot.duration));
   /** 按当前画面描述重算分镜信息的进行中状态 */
   const [refining, setRefining] = useState(false);
+  /**
+   * 重算的同步锁：state 要等下一次渲染才为 true，
+   * 双击按钮时第二次点击仍会读到 refining=false，于是发出两个模型请求。
+   */
+  const refiningRef = useRef(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   /** 正在预览的素材：点缩略图打开，点遮罩 / 按 ESC 关闭 */
   const [previewing, setPreviewing] = useState<MediaInput | null>(null);
@@ -218,10 +223,14 @@ export default function ShotCard({
       return;
     }
 
+    // 同步锁：双击时第二次点击读到的 refining 仍是 false，这里直接拦掉
+    if (refiningRef.current) return;
+    refiningRef.current = true;
     setRefining(true);
     setRefineError(null);
     try {
       const { shot: next } = await api.refineShot({
+        shotId: shot.id,
         description,
         title: shot.title,
         style,
@@ -288,6 +297,7 @@ export default function ShotCard({
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : String(err));
     } finally {
+      refiningRef.current = false;
       setRefining(false);
     }
   };

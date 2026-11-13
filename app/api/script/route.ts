@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { generateScript } from '@/lib/agents/storyboard';
+import { currentUserId } from '@/lib/services/auth';
+import { submitLockKey, withSubmitLock } from '@/lib/services/submit-lock';
 import { MAX_NOVEL_CHARS, MIN_NOVEL_CHARS } from '@/lib/skills/shot-plan';
 import { normalizeVideoModel } from '@/lib/video-models';
 
@@ -47,15 +49,42 @@ export async function POST(request: Request) {
   const videoModel = normalizeVideoModel(payload.videoModel);
 
   try {
-    const result = await generateScript({
-      idea,
+    /**
+     * 提交锁：同一份创意 + 同一套参数同时只允许一个生成请求。
+     * 双击、两个标签页、浏览器重试都会打到这个接口，剧本生成是 token 计费，
+     * 重复进入等于把整条链路（规划 / 分镜 / 翻译 / 审片）跑两遍。
+     * 上一次结束之后再提交仍然放行，不挡主动重试。
+     */
+    const userId = await currentUserId();
+    const lockKey = submitLockKey('script', [
+      userId,
       source,
+      idea,
       style,
       mode,
-      shotCount: Number.isFinite(shotCount) ? shotCount : undefined,
-      duration: Number.isFinite(duration) ? duration : undefined,
+      Number.isFinite(shotCount) ? shotCount : '',
+      Number.isFinite(duration) ? duration : '',
       videoModel,
-    });
+    ]);
+    const result = await withSubmitLock(lockKey, () =>
+      generateScript({
+        idea,
+        source,
+        style,
+        mode,
+        shotCount: Number.isFinite(shotCount) ? shotCount : undefined,
+        duration: Number.isFinite(duration) ? duration : undefined,
+        videoModel,
+      }),
+    );
+
+    if (!result) {
+      return NextResponse.json(
+        { error: '同一份创意正在生成中，请稍候（重复提交不会重复扣费）' },
+        { status: 409 },
+      );
+    }
+
     return NextResponse.json({
       script: result.script,
       meta: { model: config.llm.model, adaptedIdea: result.adaptedIdea },

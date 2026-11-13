@@ -171,6 +171,8 @@ export interface ImageBody {
 
 /** 修改画面描述后，只重算这一镜的分镜信息（不改 description） */
 export interface RefineShotBody {
+  /** 镜头 id：服务端用它做重复提交锁（同一镜同时只允许一个重算请求） */
+  shotId?: string;
   description: string;
   title?: string;
   style?: string;

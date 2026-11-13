@@ -7,6 +7,8 @@ import {
   cardImageSize,
 } from '@/lib/skills/image-prompt';
 import { generateImage } from '@/lib/providers/image/wan-image';
+import { currentUserId } from '@/lib/services/auth';
+import { acquireSubmitLock, releaseSubmitLock, submitLockKey } from '@/lib/services/submit-lock';
 import { UPLOAD_DIR } from '@/lib/services/uploads';
 import type { CharacterSubject, ProjectMedia } from '@/lib/types';
 
@@ -60,6 +62,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '请先填写名称或描述，再生成配图' }, { status: 400 });
   }
 
+  /**
+   * 提交锁：同一张卡、同一份提示词同时只允许一个文生图请求。
+   * 双击「生成配图」或是两个标签页同时点，都会各自生成一张图、各算一次钱。
+   * 上一次结束后再点仍然放行（用户主动换图不受影响）。
+   */
+  const userId = await currentUserId();
+  const lockKey = submitLockKey('image', [userId, kind, prompt, promptEn, style, subjectType]);
+  if (!acquireSubmitLock(lockKey)) {
+    return NextResponse.json(
+      { error: '这张卡的配图正在生成中，请稍候（重复点击不会重复计费）' },
+      { status: 409 },
+    );
+  }
+
   try {
     const remoteUrl = await generateImage({
       // 画风（script.style）+ 主体 + 构图 + 画面质感，顺序见 lib/skills/image-prompt
@@ -98,5 +114,8 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 502 });
+  } finally {
+    // 成功、失败、下载早退都要放锁，否则这张卡会一直被判成「生成中」
+    releaseSubmitLock(lockKey);
   }
 }

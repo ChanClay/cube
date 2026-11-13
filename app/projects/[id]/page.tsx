@@ -57,8 +57,17 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * 本地乐观任务（local- 前缀 / 没有 providerJobId）永远等不到终态，
  * 用它去 waitForJob 只会白等到超时，进而卡死整个队列。
  */
+/**
+ * 活动任务的判定窗口，与服务端 `ACTIVE_JOB_WINDOW_MS` 保持一致：
+ * 超过两小时还在 running 的是卡住的僵尸任务，不该继续挡住重新生成。
+ */
+const ACTIVE_JOB_WINDOW_MS = 2 * 60 * 60 * 1000;
+
 const isServerJob = (job: VideoJob | undefined): job is VideoJob =>
-  !!job && !!job.providerJobId && (job.status === 'queued' || job.status === 'running');
+  !!job &&
+  !!job.providerJobId &&
+  (job.status === 'queued' || job.status === 'running') &&
+  Date.now() - job.createdAt < ACTIVE_JOB_WINDOW_MS;
 
 function ProjectPageInner() {
   const params = useParams<{ id: string }>();
@@ -105,6 +114,18 @@ function ProjectPageInner() {
   const scriptRef = useRef<Script | null>(null);
   /** 串行队列的停止信号：点「停止」置 true，队列在每个检查点自己退出 */
   const stopRequestedRef = useRef(false);
+  /**
+   * 每镜的提交锁：同一镜在请求返回前不允许再提交一次。
+   *
+   * 必须用 ref：乐观任务在 setJobs 之后要等下一次渲染才进 jobsRef，
+   * 双击按钮时第二次点击读到的还是「没有任务」，于是向 provider 提交两次。
+   */
+  const submitLocksRef = useRef<Set<string>>(new Set());
+  /**
+   * 「全部生成」的同步锁：generatingAll 是 state，两次极快的点击都能读到 false，
+   * 结果跑出两条队列、每个镜头各提交两次。
+   */
+  const queueLockRef = useRef(false);
 
   useEffect(() => {
     jobsRef.current = jobs;
@@ -519,6 +540,20 @@ function ProjectPageInner() {
       // 队列运行中镜头可能被编辑，按 id 取最新的一份
       const live = scriptRef.current?.shots.find((item) => item.id === shot.id) ?? shot;
 
+      /**
+       * 幂等闸：同一镜正在提交、或服务端已有任务在跑时，不再重复打到 provider。
+       * 这里的两个判断都必须读 ref：jobsRef 要等下一次渲染才更新。
+       */
+      if (submitLocksRef.current.has(shot.id)) {
+        showToast('这一镜正在提交生成任务，请稍候');
+        return { job: null, retryable: true };
+      }
+      const runningJob = jobsRef.current[shot.id];
+      if (isServerJob(runningJob)) {
+        showToast('这一镜已有任务在跑，已复用该任务');
+        return { job: runningJob, retryable: true };
+      }
+
       const basePrompt = live.videoPrompt.trim();
       if (basePrompt.length < 5) {
         showToast('这个镜头的视频提示词太短了', 'error');
@@ -569,6 +604,7 @@ function ProjectPageInner() {
         updatedAt: now,
       };
       setJobs((prev) => ({ ...prev, [shot.id]: optimistic }));
+      submitLocksRef.current.add(shot.id);
 
       try {
         const { job } = await api.createJob({
@@ -595,6 +631,9 @@ function ProjectPageInner() {
         showToast(message, 'error');
         // 网络 / 服务端临时错误，值得重试
         return { job: null, retryable: true };
+      } finally {
+        // 成功、失败、早退都要放锁，否则这一镜会一直被判定为「提交中」
+        submitLocksRef.current.delete(shot.id);
       }
     },
     [health, project, projectId, showToast],
@@ -670,6 +709,15 @@ function ProjectPageInner() {
    */
   const handleGenerateOne = useCallback(
     async (shot: Shot) => {
+      /**
+       * 先拦一次再抽帧：抽上一镜末帧要下载整段视频 + 跑 ffmpeg，
+       * 重复点击时不该为了一个注定被拒的请求再付一次这项开销。
+       */
+      if (submitLocksRef.current.has(shot.id) || isServerJob(jobsRef.current[shot.id])) {
+        showToast('这一镜正在生成中，请稍候');
+        return;
+      }
+
       const current = scriptRef.current;
       const list = current?.shots ?? [];
       const index = list.findIndex((item) => item.id === shot.id);
@@ -729,7 +777,9 @@ function ProjectPageInner() {
    * 上一镜末帧怎么用由下一镜自己的 transition 决定（same-take 当首帧、同场硬切当参考图）。
    */
   const handleGenerateAll = useCallback(async () => {
-    if (!script || generatingAll) return;
+    // 同步锁：连点两次「全部生成」会跑出两条队列，每个镜头各提交一次
+    if (!script || generatingAll || queueLockRef.current) return;
+    queueLockRef.current = true;
 
     const shots = script.shots;
     // 用当前渲染出的任务状态作为队列起点，避免读到迟滞的 ref
@@ -963,6 +1013,7 @@ function ProjectPageInner() {
     } finally {
       // 队列已经结束（跑完 / 停下 / 用户点了停止）：撤掉标记，刷新后不再自动续跑
       if (queueScriptId) clearQueueMark(queueScriptId);
+      queueLockRef.current = false;
       setQueueInfo(null);
       setGeneratingAll(false);
       setStopping(false);

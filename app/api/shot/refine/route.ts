@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/services/logger';
 import { callChatJson } from '@/lib/agents/llm';
+import { currentUserId } from '@/lib/services/auth';
+import { acquireSubmitLock, releaseSubmitLock, submitLockKey } from '@/lib/services/submit-lock';
 import type { BackgroundCast, NarrationType } from '@/lib/types';
 import {
   BACKGROUND_CAST_RULES,
@@ -340,6 +342,26 @@ export async function POST(request: Request) {
     prevSceneName: str(payload.prevSceneName),
   };
 
+  /**
+   * 提交锁：同一镜同时只允许一个重算请求。
+   *
+   * 按钮双击、两个标签页同时点都会各打一次模型；重算要重新翻提示词 + 过一遍台词规则，
+   * 重复提交就是重复扣费。上一次结束后再点仍然放行。
+   */
+  const userId = await currentUserId();
+  const lockKey = submitLockKey('refine', [
+    userId,
+    str(payload.shotId) || input.title,
+    input.description,
+    input.narration,
+  ]);
+  if (!acquireSubmitLock(lockKey)) {
+    return NextResponse.json(
+      { error: '这一镜正在重新生成分镜信息，请稍候（重复点击不会重复扣费）' },
+      { status: 409 },
+    );
+  }
+
   try {
     const raw = await callChatJson({
       system: buildSystemPrompt(),
@@ -411,5 +433,8 @@ export async function POST(request: Request) {
       error: message,
     });
     return NextResponse.json({ error: message }, { status: 502 });
+  } finally {
+    // 成功、失败、早退都必须放锁，否则这一镜在进程存活期间会被永久判定为「正在生成」
+    releaseSubmitLock(lockKey);
   }
 }

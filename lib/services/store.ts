@@ -66,6 +66,33 @@ export async function listJobs(): Promise<VideoJob[]> {
   return (rows as JobRow[]).map(toJob);
 }
 
+/**
+ * 活动任务的判定窗口。
+ *
+ * provider 正常几分钟就出结果；超过这个时间还在 running 的，只可能是轮询一直失败
+ * 卡住的僵尸任务。不能让它永久挡住重新生成，所以窗口外不再算「活动」。
+ */
+export const ACTIVE_JOB_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * 同一镜正在跑的任务（queued / running）。
+ *
+ * 提交前的幂等检查：同一镜已经有活动任务时，不要再向 provider 发一条新的，
+ * 否则双击就是两份账单。跨标签页 / 跨进程都靠它兜底。
+ */
+export async function findActiveJob(shotId: string): Promise<VideoJob | null> {
+  const pool = await getDb();
+  const userId = await currentUserId();
+  const [rows] = await pool.query(
+    `SELECT * FROM video_jobs
+     WHERE shot_id = ? AND user_id = ? AND status IN ('queued', 'running') AND created_at > ?
+     ORDER BY created_at DESC LIMIT 1`,
+    [shotId, userId, Date.now() - ACTIVE_JOB_WINDOW_MS],
+  );
+  const row = (rows as JobRow[])[0];
+  return row ? toJob(row) : null;
+}
+
 export async function getJob(id: string): Promise<VideoJob | null> {
   const pool = await getDb();
   const userId = await currentUserId();

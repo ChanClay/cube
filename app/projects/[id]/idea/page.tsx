@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import IdeaForm, { type ScriptParams } from '@/components/IdeaForm';
 import TopBar from '@/components/TopBar';
 import { NEW_SCRIPT_TITLE } from '@/lib/skills/blank-script';
@@ -56,6 +56,11 @@ function IdeaPageInner() {
   const [source, setSource] = useState<StoredScript | null>(null);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * 提交的同步锁：submitting 是 state，双击时第二次点击读到的仍是 false，
+   * 会再打一次「生成剧本」接口——那条链路要跑规划 / 分镜 / 翻译 / 审片，按 token 计费。
+   */
+  const submittingRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
   const [scriptCount, setScriptCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +136,8 @@ function IdeaPageInner() {
 
   const handleGenerate = useCallback(
     async (formParams: ScriptParams) => {
-      if (submitting) return;
+      if (submitting || submittingRef.current) return;
+      submittingRef.current = true;
       setSubmitting(true);
       setError(null);
       try {
@@ -171,13 +177,16 @@ function IdeaPageInner() {
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setSubmitting(false);
+      } finally {
+        // 成功时页面会跳走，失败时把锁放掉让用户能重试
+        submittingRef.current = false;
       }
     },
     [backToProject, editId, mode, projectId, source, submitting],
   );
 
   const handleLoadDemo = useCallback(async () => {
-    if (submitting) return;
+    if (submitting || submittingRef.current) return;
 
     // 编辑模式下示例会覆盖现有分镜，先确认一次
     if (mode === 'edit' && (source?.script.shots.length ?? 0) > 0) {
@@ -185,6 +194,12 @@ function IdeaPageInner() {
       if (!ok) return;
     }
 
+    /**
+     * 确认之后再上锁：用户点「取消」不能把锁留在手里。
+     * 再判一次 ref，挡住确认框弹着时另一个入口已经开始的情况。
+     */
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -207,6 +222,8 @@ function IdeaPageInner() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
+    } finally {
+      submittingRef.current = false;
     }
   }, [backToProject, editId, mode, projectId, source, submitting]);
 
