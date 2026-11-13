@@ -173,6 +173,10 @@
 | `exit-offscreen` | warn | 上一镜以「冲出画外 / 消失在雨幕 / 完全虚化」收尾 | 出口改到主体仍在画面内、动作可辨认的相位；或本镜写 `hiddenCut` 遮挡交接 |
 | `direction-flip` | warn | 相邻两镜运动方向相反（左→右 接 右→左） | 方向保持一致；要越轴先垫中性机位（迎面 / 背面 / 空镜），或让主体在画面内转向 |
 | `cut-undeclared` | warn | hard-cut 没写 `transitionReason` | 写清切点承接的是同一瞬间的动作相位，还是同一个背景锚点（同一条路 / 同一盏灯 / 同一个弯） |
+| `camera-position-missing` | warn | `entryState` 没写机位段（轴线侧 / 高度 / 距离） | 补成相对上一镜的写法：沿轴线转 30°、抬到胸口高度、退到一臂；缺了机位，模型每镜重新摆一次摄影机 |
+| `same-take-camera-change` | warn | `same-take` 的两镜运镜或轴线侧变了 | 摄影机没停机就不可能换机位：改成 `hard-cut`，或把景别、运镜、轴线侧写回与上一镜一致 |
+| `framing-repeat` | warn | 同场景硬切，两镜同景别 + 同运镜 + 同轴线侧 | 换机位至少 30°，或换一档景别 / 换一个高度；否则切过去像跳帧 |
+| `framing-jump` | warn | 同场景硬切，景别一步跨 ≥2 档且没 `hiddenCut` | 中间垫一档（全景 / 中景），或标 `hiddenCut` 用遮挡换机位；跨度 ≥2 时末帧也一定接不住 |
 | `no-camera-anchor` | warn | 两辆以上载具同框，提示词却没写机位锚 | 第一句补「镜头装在哪 / 朝哪 / 多高」，如 `camera mounted low on the rear bumper of the black sedan, looking forward over both roofs` |
 | `bare-direction` | warn | 方位词没有参照系（`on the left` / `to the right`），模型分不清画面左 / 车身左 / 车道左 | 改成 `frame left`、`the black car's rear-left quarter panel`、`the left-hand lane`，见 `references/video-prompt.md` 第三节 |
 | `prop-undeclared` | warn | 分镜提到的家具 / 桌上物件在场景卡陈设清单与道具卡里都没有出处 | 补进场景卡 `inventory`（中文名 + 英文名 + 相对门窗的位置），或升级成道具卡；否则同一张桌子每镜都会被重新摆一次 |

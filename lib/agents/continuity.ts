@@ -12,6 +12,7 @@ import {
   clamp,
   CUT_POINT_RULES,
   dedupeByName,
+  FRAMING_HANDOFF_RULES,
   MOTION_SCOPE_RULES,
   normalizeCameraMove,
   normalizeShotSize,
@@ -318,6 +319,7 @@ export function buildBlueprintSystemPrompt(
 9. exit 必须是一个可以直接拍出来的画面状态：谁、在哪里、什么姿势、朝向哪里、手里拿着什么、主体在画面哪个位置、朝哪个方向运动、背景里有什么锚点，以及光源方向与色温、画面里最显眼的一两个固定件（仪表台 / 门框 / 路灯）——这些是下一镜唯一能继承的空间情报。不要写情绪或抽象概念。
 10. transition=same-take 的两镜，action 必须首尾相接：上一镜没做完的动作，下一镜接着做完；hard-cut / time-jump 允许动作跳，但不许人物凭空换位、道具凭空出现。
 ${CUT_POINT_RULES}
+${FRAMING_HANDOFF_RULES}
 11. 空间连续：全片尽量在同一个空间内完成，开场用大远景 / 全景把空间关系交代清楚。每一镜都必须写 transition，说明这一镜怎么交到下一镜，只能取三个值：
     - same-take：同一个连续动作被切成两镜，下一镜从这一镜的最后一帧原样继续，景别与机位都不许变（景别一变就不是同一次拍摄）。全片连续出现不得超过 2 次——每接一次画面都会掉一点细节，接多了人物就漂了。
     - hard-cut：停机换了机位——换景别 / 换角度 / 正反打。下一镜是新的机位，画面必须重新构图。绝大多数镜头都应该是这个。

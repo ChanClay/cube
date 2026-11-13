@@ -55,7 +55,8 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 - **镜数跟着「叙事断点」走，不跟着时长或景别走**：同一空间、同一主体连续推进的段落——追逐、穿行、对峙、同一个人的连续台词——放进一个镜头，用 `beatSheet` 把秒级推进写全。只有真正需要断开的地方才切：换空间、跳时间、要藏起一个信息、情绪需要停顿，**以及对话里换了一个人开口**。不要为了换景别、换机位、凑时长而切镜。
 - **对话段落按「话轮」切，不按「对话段落」切**：话轮表（谁先说、谁接、谁沉默）先排出来，一个话轮一镜；换人开口就是一次 `hard-cut` 反打，`transitionReason` 写「反打承接上一句的话尾」。说话人的镜头里留听者的肩 / 侧脸 / 后脑，听到关键台词的人单独给一个不开口的反应镜头。
 - 景别按「建立 → 逼近 → 细节 → 释放」推进：开场用大远景/全景交代空间关系，情绪高点用近景/特写，结尾释放回环境或留白。
-- 相邻两镜不要同景别 + 同运镜。景别一次最多跨 1 档（特写直接接大远景等于换了个世界）。
+- 相邻两镜不要同景别 + 同运镜 + 同机位侧（那是跳帧，不是剪辑，`framing-repeat`）。景别一次最多跨 1 档（特写直接接大远景等于换了个世界，`framing-jump`）。
+- **取景与机位要成对地跨镜设计**（`FRAMING_HANDOFF_RULES`）：每个非首镜的 `entryState` 机位段写三样东西——轴线哪一侧、高度、距离或焦段感，并且写成相对上一镜的变化（沿轴线转 30°、抬到胸口高度、退到一臂）。同一段落停在同一轴线侧，只有正反打换侧且必须先垫中性机位；同一动作被切成两镜时主体占画比要几乎一致；每个非首镜至少复用上一镜的一个空间参照（同一条路、同一盏灯、同一个门框），并落在画框同一侧。`same-take` 的两镜运镜与轴线侧必须完全一致（`same-take-camera-change`），机位段缺失会报 `camera-position-missing`。
 - `transition` 只按「摄影机有没有停机」判断：同一次拍摄里切两刀 = `same-take`（单镜 ≤8 秒、全片连续不超过 2 次；景别与机位都不许变）；停机换机位 = `hard-cut`（绝大多数镜头）；时间或地点跳转 = `time-jump`。
 - `referencePrevFrame`：只有「同场景 + 同景别的 `hard-cut`」写 `true`（下一镜第一帧就是本镜最后一帧，接缝不跳）；同场景跨 1 档或标了 `hiddenCut` 时留空即自动降级成 `reference_image`（只借光线、材质与空间，构图重来）；跨 2 档以上写 `true` 无效且校验报错，必须先改镜头序列；`time-jump`、换场景一律 `false`。
 - **接缝本身（末帧档位、`entryState` 继承、特写空间）走 `shot-handoff` skill**：大景别直切特写（如航拍 → 车内特写）跨度 ≥2，末帧一定不生效，只能靠「垫一档」或 `hiddenCut` 改序列；特写的 `entryState` 必须继承上一镜末帧的容器几何、固定件、光源与窗外锚点，否则内饰每镜重造、特写角度失控。
@@ -151,13 +152,14 @@ description: This skill should be used when writing, rewriting, auditing, or fix
 node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 ```
 
-校验覆盖：镜数与时长、英文提示词词数与禁用词、景别/运镜与英文是否对得上、固定短语是否复用、秒级节拍是否覆盖 0~duration、台词长度与说话人、一镜多人说话（`multi-speaker`）、台词复述画面（`dialogue-flat`）、开场没有旁白交代前情（`no-opening-voiceover`）、主体/场景引用、跨镜状态链是否断开、出口是否出画（`exit-offscreen`）、运动方向是否翻转（`direction-flip`）、硬切是否写了切点说明（`cut-undeclared`）。`fatal` 必须清零，`warn` 逐条判断。
+校验覆盖：镜数与时长、英文提示词词数与禁用词、景别/运镜与英文是否对得上、固定短语是否复用、秒级节拍是否覆盖 0~duration、台词长度与说话人、一镜多人说话（`multi-speaker`）、台词复述画面（`dialogue-flat`）、开场没有旁白交代前情（`no-opening-voiceover`）、主体/场景引用、跨镜状态链是否断开、出口是否出画（`exit-offscreen`）、运动方向是否翻转（`direction-flip`）、硬切是否写了切点说明（`cut-undeclared`）、取景与机位是否串联（`camera-position-missing` / `same-take-camera-change` / `framing-repeat` / `framing-jump`）。`fatal` 必须清零，`warn` 逐条判断。
 
 自检清单：
 
 1. 第 1 镜 3 秒内是否让人看懂「谁、在哪、发生了什么异常」？如果第 1 镜是空镜 / 大远景，有没有用一句旁白把前情交代掉（谁 / 在哪 / 为什么打），再接人物开口——而不是让人物的第一句台词自己解释设定？
 2. 第 1 镜到最后一镜连读，每处跳跃是否都在上一镜的 `transition` 里声明过？
-3. 镜数是否跟着叙事断点走：串联性强的段落（追逐、穿行、对峙）有没有被拆成好几镜？相邻两镜是否同景别 + 同运镜？same-take 的景别是否完全没变、是否连续超过 2 次？跨了景别的长镜头是否都标了 `hiddenCut`？
+3. 镜数是否跟着叙事断点走：串联性强的段落（追逐、穿行、对峙）有没有被拆成好几镜？相邻两镜是否同景别 + 同运镜 + 同机位侧？same-take 的景别、运镜与轴线侧是否完全没变、是否连续超过 2 次？跨了景别的长镜头是否都标了 `hiddenCut`？
+3.1 **取景与机位是否串得上**：每镜 `entryState` 的机位段有没有轴线侧 / 高度 / 距离，并说清相对上一镜怎么变？景别有没有一步跨 ≥2 档？同一动作切成两镜时主体占画比是否几乎一致？每个非首镜是否复用了上一镜的一个空间锚点，且机位锚短语逐字复用？
 4. 每镜是否只有一个可见动作，且这个动作在 duration 内做得完？
 5. 全片光比、色温、颗粒是否同一套语言（同一场景内不许一会儿日光一会儿霓虹）？
 6. 是否每镜都在解释剧情，而没有一镜只靠画面推进？
@@ -183,7 +185,7 @@ node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>
 ## 与本仓库代码的关系
 
 - 本 skill 是「怎么写」的规范；运行时真正下发给模型的提示词在 `lib/agents/*.ts`。
-- 改代码里的提示词时，景别/运镜/词数/禁用词、跨镜连贯性、剪辑点（`CUT_POINT_RULES`）、主体卡（`SUBJECT_CARD_RULES`）、台词分析（`DIALOGUE_RULES`）、一人一镜（`SPEAKER_SHOT_RULES`）等规则的**唯一来源**是 `lib/skills/spec.ts`，不要在 `storyboard.ts`、`review.ts`、`/api/shot/refine` 各写一份，否则模型会收到互相矛盾的指令。
+- 改代码里的提示词时，景别/运镜/词数/禁用词、跨镜连贯性、剪辑点（`CUT_POINT_RULES`）、取景与机位（`FRAMING_HANDOFF_RULES`）、主体卡（`SUBJECT_CARD_RULES`）、台词分析（`DIALOGUE_RULES`）、一人一镜（`SPEAKER_SHOT_RULES`）等规则的**唯一来源**是 `lib/skills/spec.ts`，不要在 `storyboard.ts`、`review.ts`、`/api/shot/refine` 各写一份，否则模型会收到互相矛盾的指令。
 - 对白设计在蓝图阶段就产出（`lib/agents/continuity.ts` 的 `Beat.dialogue`：speaker / intent / subtext / effect / listener），分镜阶段只负责把它落成台词与镜头；审片用 `narrationSpeakerConflicts` 兜住「一镜两人说话」，命中 `multi-speaker` 时允许拆镜，拆完的镜数会覆盖原目标镜数。
 - 主体卡复用 `Script.characters` 这个结构（含载具与关键道具），卡片的配图会作为参考图挂在它出镜的镜头上；`lib/skills/shot-media` 只认 `characterNames` 与描述里的名字，所以分镜时必须把载具写进本镜 `characters`。
 - 想把脚本直接跑成视频，走 app 的 `POST /api/script` 生成，再逐镜生成；`lib/agents/storyboard.ts` 已实现「蓝图 → 分镜 → 英译 → 审片 → 定稿」全链路，手写脚本只在用户要求离线输出或改稿时使用。

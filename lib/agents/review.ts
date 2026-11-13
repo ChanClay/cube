@@ -6,6 +6,7 @@ import { expandStyle } from '@/lib/skills/style-presets';
 import type { Script } from '@/lib/types';
 import type { StoryPlan } from './continuity';
 import {
+  cameraAxisSide,
   cameraMoveEn,
   CONTINUITY_RULES,
   BACKGROUND_CAST_RULES,
@@ -19,6 +20,7 @@ import {
   hasTransitionHint,
   isEnglishPrompt,
   matchedWords,
+  mentionsCameraSetup,
   mergeCards,
   narrationLimit,
   narrationSpeakerConflicts,
@@ -29,6 +31,7 @@ import {
   screenDirection,
   SHOT_LANGUAGE_RULES,
   shotSizeEn,
+  shotSizeGap,
   SPEAKER_SHOT_RULES,
   stateOverlap,
   SUBJECT_CARD_RULES,
@@ -537,6 +540,77 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
         });
       }
 
+      /**
+       * 取景与机位的串联：状态链接上了，画面仍然可以「不像同一次拍摄」——
+       * 每一镜重新摆一次机位、切过去同景别同角度（跳帧）、或者景别一步跳两级。
+       * 这三条只看中文字段，判定保守：拿不准就不报。
+       */
+      if (entry && !mentionsCameraSetup(entry)) {
+        issues.push({
+          level: 'warn',
+          code: 'camera-position-missing',
+          shotIndex: shot.index,
+          message:
+            `第 ${shot.index} 镜的 entryState 没有写机位（轴线哪一侧 / 高度 / 距离）：模型会每镜重新摆一次摄影机。` +
+            '补成相对上一镜的写法（沿轴线转 30° / 抬到胸口高度 / 退到一臂），两镜才像同一次拍摄',
+        });
+      }
+
+      const prevSceneKey = resolveShotScenes(script, prev)
+        .map((scene) => scene.id ?? scene.name)
+        .join('|');
+      const sceneKey = resolveShotScenes(script, shot)
+        .map((scene) => scene.id ?? scene.name)
+        .join('|');
+      const sameScene = !!prevSceneKey && prevSceneKey === sceneKey;
+      const sizeGap = shotSizeGap(prev, shot);
+      const prevSide = cameraAxisSide(prev.entryState ?? '');
+      const side = cameraAxisSide(entry);
+
+      if (
+        shot.transition === 'same-take' &&
+        (prev.cameraMove !== shot.cameraMove || (!!prevSide && !!side && prevSide !== side))
+      ) {
+        issues.push({
+          level: 'warn',
+          code: 'same-take-camera-change',
+          shotIndex: shot.index,
+          message:
+            `第 ${shot.index} 镜标了 same-take，运镜或机位侧却变了（「${prev.shotSize}·${prev.cameraMove}」→「${shot.shotSize}·${shot.cameraMove}」）：` +
+            '摄影机没停机就不可能换机位。要么改成 hard-cut，要么把景别、运镜与轴线侧写回与上一镜一致',
+        });
+      }
+
+      if (
+        shot.transition === 'hard-cut' &&
+        !shot.hiddenCut &&
+        sameScene &&
+        sizeGap === 0 &&
+        prev.cameraMove === shot.cameraMove &&
+        (!prevSide || !side || prevSide === side)
+      ) {
+        issues.push({
+          level: 'warn',
+          code: 'framing-repeat',
+          shotIndex: shot.index,
+          message:
+            `第 ${prev.index} 镜与第 ${shot.index} 镜同景别（${shot.shotSize}）同运镜（${shot.cameraMove}）` +
+            `${prevSide && side && prevSide === side ? '且机位在同一轴线侧' : ''}：` +
+            '切过去像跳帧，不像剪辑。换机位至少 30°，或换一档景别、换一个高度',
+        });
+      }
+
+      if (shot.transition === 'hard-cut' && !shot.hiddenCut && sameScene && sizeGap >= 2) {
+        issues.push({
+          level: 'warn',
+          code: 'framing-jump',
+          shotIndex: shot.index,
+          message:
+            `第 ${shot.index} 镜景别从${prev.shotSize}直接跳到${shot.shotSize}（跨 ${sizeGap} 档）：观众会失去方位感，两个画面读成两个世界。` +
+            '中间垫一档（全景 / 中景），或用 hiddenCut 遮挡换机位',
+        });
+      }
+
       if (shot.transition === 'hard-cut') return;
 
       // 明确写了跳转（片刻后 / 次日 / 转场）时，允许状态不连续
@@ -616,6 +690,13 @@ const REPAIRABLE = new Set([
   'exit-offscreen',
   'direction-flip',
   'cut-undeclared',
+  /**
+   * 机位 / 取景的两条会重写 entryState 与运镜，交给模型修；
+   * framing-repeat 与 framing-jump 不进修复集：它们的正解通常是改镜头序列
+   * （垫一档、加 hiddenCut），一次全文重写容易顺手打乱切点，留给人工判断。
+   */
+  'camera-position-missing',
+  'same-take-camera-change',
   'timeline-missing',
   'dialogue-empty',
   'dialogue-no-speaker',

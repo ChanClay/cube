@@ -46,10 +46,14 @@ function withEnd(text: string): string {
  * 必须把作用范围写死：模型的 reference_image 是「角色 / 物品 / 风格参考」，
  * 不给边界它会连构图和机位一起抄。这里只借光线与材质，
  * 景别、机位、构图回到本镜自己的描述。
+ *
+ * 唯一要延续的是「串联」本身：同一轴线侧、同一运动方向。
+ * 这是换景别时两镜仍像同一次拍摄的依据——末帧可以不给构图，但不能连方向也一起丢掉。
  */
 const FRAME_REFERENCE_STYLE =
   'Match the lighting, color temperature and scene materials of the reference image, ' +
-  'but keep the framing, shot size and camera angle described above exactly.';
+  'but keep the framing, shot size and camera angle described above exactly. ' +
+  'Stay on the same side of the action axis and keep the same screen direction of travel as the reference; only the framing changes.';
 
 /** 英文并列：A / A and B / A, B and C */
 function joinNames(names: string[]): string {

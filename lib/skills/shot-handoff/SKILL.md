@@ -69,6 +69,25 @@ description: This skill should be used when writing or fixing the handoff betwee
 - **上一镜末帧里没有的人不许出现在本镜入口。** 运行时用 `lastFrameCast`（画面事实）而非 `characterNames`（分镜意图）去重末帧人物，本镜入口凭空多一个人，成片就会「多出一个乘客」。
 - **反方向同样成立：末帧里有的一群人不许消失。** 群演没有主体卡，末帧参考只保证像素从哪来，保证不了人数被保留——所以人群必须写进 `backgroundCast`（`desc` + 逐字复用的 `promptEn`），同场景相邻镜头由定稿层继承上一镜，人群退场要显式写 `crowdCleared: true`。不写就等着「上一镜结尾一群人、下一镜只剩角色卡上那一个主角」。接帧（`first_frame`）镜也会点名末帧里的人物并锁人数，别把它当成「只接像素」。
 
+### 3.1 机位段要相对上一镜写：取景与机位的串联
+
+第三段（机位）不是「这一镜机位在哪」，而是「机位从上一镜怎么变过来」。只写「机位在侧面」等于让模型每镜重新摆一次摄影机，两镜各自成立、接起来就是一组摆拍图。
+
+机位三要素，缺一不可：
+
+1. **轴线侧**：人物 / 车头连线的哪一侧（副驾侧、轴线左侧、车的右后四分之一）。
+2. **高度**：腰平 / 胸平 / 眼平 / 顶视 / 贴地。
+3. **距离或焦段感**：半臂 / 一臂 / 三米，广角还是中长焦观感。
+
+再补一句「相对上一镜怎么变」：沿轴线转了多少度、抬高还是压低、推进还是拉远。四条硬约束：
+
+- **换机位至少 30°**。同景别 + 同运镜 + 同机位侧 = 跳帧，不是剪辑；切之前先问「这一刀观众能看出机位变了吗」。
+- **同一段落停在同一轴线侧**。只有正反打换侧，且必须先过桥：垫一个中性机位（迎面 / 背面 / 空镜 / 手部特写），或让主体在画面内完成转向。机位换侧，画面方向一定跟着翻。
+- **景别是阶梯**。一次最多跨 1 档；跨度 ≥2 必须先垫一档（大远景 → 全景 / 中景 → 特写），或用 `hiddenCut`。跨度 ≥2 时末帧一定用不上，只能靠卡片自救。
+- **共用锚点、复用机位短语**。每个非首镜至少复用上一镜的一个空间参照（同一条路、同一盏灯、门框、挡风玻璃），并让它落在画框同一侧；同一段落的「镜头装在哪 / 朝哪 / 多高 / 多近」写成一句固定英文，跨镜逐字复用，只换主体与动作。
+
+校验器对应四个码：`camera-position-missing`（entryState 没写机位段）、`same-take-camera-change`（没停机却换了运镜或轴线侧）、`framing-repeat`（同景别同运镜同侧，像跳帧）、`framing-jump`（景别跨 ≥2 档且没 hiddenCut）。
+
 ## 四、特写：五个必答问题，缺一个就是无场景空镜
 
 特写不是「把环境删掉只拍脸」，是「用局部承载环境」。每写一个特写，先答完这五问：
@@ -120,11 +139,12 @@ constant subtle motion, no frozen frame
 6. 本镜入口里的人，上一镜末帧里真的有吗？
 7. 跑 `node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>`，把 `state-missing` / `exit-offscreen` / `direction-flip` / `cut-undeclared` 清到零。
 8. 上一镜结尾的一群人有没有被缩成本镜主角一个人？同场景人群是否由 `backgroundCast` 继承，人群退场有没有显式写 `crowdCleared: true`？
+9. 取景与机位是否成对设计：每镜的机位段有没有写轴线侧 / 高度 / 距离，并说清相对上一镜转了 30° 还是抬高了？相邻两镜是不是同景别 + 同运镜 + 同轴线侧（`framing-repeat`）？景别有没有一步跨 ≥2 档（`framing-jump`）？标了 `same-take` 的两镜运镜与轴线侧是否完全一致（`same-take-camera-change`）？
 
 ## 七、分工与唯一事实来源
 
 - 整片结构（蓝图、主体卡、镜数、台词、风格）→ `cinematic-script` skill。
 - 接缝（末帧档位、`entryState` 继承、特写空间、切点）→ 本 skill。
-- 硬约束以代码为准，文档与代码冲突时改文档：`lib/skills/shot-media.ts`（`prevFrameUsage` / `prevFrameCast`）、`lib/skills/spec.ts`（`shotSizeGap` / `endsOffscreen` / `CUT_POINT_RULES` / `CONTINUITY_RULES`）、`lib/agents/storyboard.ts`（`resolveReferenceFrames`）。
+- 硬约束以代码为准，文档与代码冲突时改文档：`lib/skills/shot-media.ts`（`prevFrameUsage` / `prevFrameCast`）、`lib/skills/spec.ts`（`shotSizeGap` / `endsOffscreen` / `CUT_POINT_RULES` / `CONTINUITY_RULES` / `FRAMING_HANDOFF_RULES` / `mentionsCameraSetup` / `cameraAxisSide`）、`lib/agents/storyboard.ts`（`resolveReferenceFrames`）。
 
 完整决策矩阵、车内 / 机舱 / 走廊三套交接配方与逐字段 JSON 示例见 `references/handoff-recipes.md`。
