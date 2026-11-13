@@ -1,4 +1,4 @@
-import { hasPrevFrameReference } from './media';
+import { hasCarryFrame, hasPrevFrameReference } from './media';
 import { blockingClause, sceneAnchorClause } from './scene-anchor';
 import { stripScopedMotion } from './spec';
 import type { MediaInput, Scene, Shot, ShotBeat } from '@/lib/types';
@@ -7,7 +7,13 @@ type PromptShot = Pick<Shot, 'narration' | 'narrationType' | 'speaker'> &
   Partial<
     Pick<
       Shot,
-      'characterNames' | 'beatSheet' | 'description' | 'entryState' | 'exitState' | 'blockingEn'
+      | 'characterNames'
+      | 'beatSheet'
+      | 'description'
+      | 'entryState'
+      | 'exitState'
+      | 'blockingEn'
+      | 'backgroundCast'
     >
   >;
 
@@ -60,7 +66,7 @@ function joinNames(names: string[]): string {
  * 2. 说「保持位置」—— 换机位时位置必然变，模型会把参考图里的人留在原位，
  *    再按文字描述画一个，于是同一个人出现两次。所以只锁脸和服装，并显式禁止重复。
  */
-function frameReferenceClause(cast: string[], characterCount = 0): string {
+function frameReferenceClause(cast: string[], characterCount = 0, crowd: string[] = []): string {
   const names = cast
     .map((name) => name.trim())
     .filter(Boolean)
@@ -68,17 +74,76 @@ function frameReferenceClause(cast: string[], characterCount = 0): string {
 
   const identity =
     names.length === 0
-      ? 'The reference image is the last frame of the previous shot; ' +
-        'do not duplicate or add any character from it.'
+      ? crowd.length === 0
+        ? 'The reference image is the last frame of the previous shot; ' +
+          'do not duplicate or add any character from it.'
+        : 'The reference image is the last frame of the previous shot; ' +
+          'keep the same people and the same crowd as in it.'
       : `The reference image is the last frame of the previous shot and shows ${joinNames(names)} ` +
         `— the same ${names.length > 1 ? 'characters' : 'person'} described above, not ` +
         `${names.length > 1 ? 'additional characters' : 'an additional character'}. ` +
         'Keep only their faces and wardrobe consistent; do not duplicate them.';
 
-  // 单人镜头多出一个人是最常见的错误，直接给个人数上限
-  const count = characterCount === 1 ? ' Only one person appears in frame.' : '';
+  /**
+   * 背景人群必须点名并锁人数。
+   *
+   * 没有卡的人不在名单里，模型会把「一群人」当成背景噪声重画：
+   * 上一镜结尾站着一群人，本镜就只剩角色卡上的那一个主角。
+   */
+  const crowdLine =
+    crowd.length > 0
+      ? ` The reference image also contains ${joinNames(crowd)}; keep that crowd in frame with the same headcount and wardrobe.`
+      : '';
 
-  return `${identity}${count} ${FRAME_REFERENCE_STYLE}`;
+  // 单人镜头多出一个人是最常见的错误，直接给个人数上限；本镜有人群时这条会把人删光
+  const count = characterCount === 1 && crowd.length === 0 ? ' Only one person appears in frame.' : '';
+
+  return `${identity}${crowdLine}${count} ${FRAME_REFERENCE_STYLE}`;
+}
+
+/**
+ * 接帧镜（上一镜末帧当首帧）的限定句。
+ *
+ * 首帧就是上一镜最后一帧，人物本来就在画面里；但模型会连「一个人」和
+ * 「一群人」一起重画：不点名、不锁人数，末帧里的一群人就缩成主角一个。
+ */
+function carryFrameClause(cast: string[], characterCount = 0, crowd: string[] = []): string {
+  const names = cast
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const people = names.length > 0 ? ` and shows ${joinNames(names)}` : '';
+  const crowdLine =
+    crowd.length > 0
+      ? ` The frame also contains ${joinNames(crowd)}; keep the same headcount and wardrobe.`
+      : '';
+  const count = characterCount === 1 && crowd.length === 0 ? ' Only one person appears in frame.' : '';
+
+  return (
+    `This shot begins on the exact last frame of the previous shot${people}. ` +
+    'Keep every person visible in that frame — including any background crowd — with the same faces, wardrobe and headcount; ' +
+    `do not replace them with a single character or add new people.${crowdLine}${count}`
+  );
+}
+
+/**
+ * 背景人群（没有主体卡的人）的英文短语。
+ *
+ * 逐字复用 backgroundCast.promptEn：人群不登记，每一镜的人数、装扮、队形
+ * 都会被模型重新发明，跨镜接缝上就出现「一群人变一个人」。
+ */
+function crowdNames(shot: PromptShot): string[] {
+  return (shot.backgroundCast ?? [])
+    .map((item) => (item.promptEn ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+/** 本镜画面里的背景人群：始终拼进提示词，与有没有末帧参考无关 */
+function crowdClause(crowd: string[]): string {
+  if (crowd.length === 0) return '';
+  return ` Background crowd (keep the same headcount and wardrobe throughout the shot): ${joinNames(crowd)}.`;
 }
 
 /**
@@ -131,15 +196,23 @@ export function buildVideoPrompt(
   const motion = safeMotion
     ? ` Overall motion (motion quality only, never add a person, animal or object not described above): ${safeMotion}.`
     : '';
-  // 场景锚定与走位放在最后：它们只补漏掉的空间事实，不参与动作链
+  // 场景锚定、走位与人群放在最后：它们只补漏掉的空间事实，不参与动作链
   const anchor = sceneAnchorClause(shot, scene, base);
   const blocking = blockingClause(base, shot.blockingEn);
-  /** 画面描述 + 秒级时间轴 + 运动基调 + 场景锚定 + 走位：旧剧本没有这些字段时不会多出任何内容 */
-  const extras = `${timeline}${motion}${anchor}${blocking}`;
+  const crowd = crowdNames(shot);
+  /** 画面描述 + 秒级时间轴 + 运动基调 + 场景锚定 + 走位 + 背景人群：旧剧本没有这些字段时不会多出任何内容 */
+  const extras = `${timeline}${motion}${anchor}${blocking}${crowdClause(crowd)}`;
   const body = extras ? `${withEnd(base)}${extras}` : base;
+  const characterCount = (shot.characterNames ?? []).length;
+  /**
+   * 末帧参考（借光线 / 重构构图）与接帧（首帧就是上一镜末帧）都要点名图里的人。
+   * 不点名时模型只会把末帧当调色板，末帧里的一群人在本镜被重新数一遍。
+   */
   const reference = hasPrevFrameReference(media)
-    ? ` ${frameReferenceClause(refCast, (shot.characterNames ?? []).length)}`
-    : '';
+    ? ` ${frameReferenceClause(refCast, characterCount, crowd)}`
+    : hasCarryFrame(media)
+      ? ` ${carryFrameClause(refCast, characterCount, crowd)}`
+      : '';
 
   // 没写台词，或明确选了「都不要」：画面描述原样提交，模型只出环境音/BGM
   if (!line || shot.narrationType === 'none') {

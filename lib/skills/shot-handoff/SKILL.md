@@ -67,6 +67,7 @@ description: This skill should be used when writing or fixing the handoff betwee
 
 - **入口不是复述上一镜的景别**，而是把上一镜的事实搬到新机位上。
 - **上一镜末帧里没有的人不许出现在本镜入口。** 运行时用 `lastFrameCast`（画面事实）而非 `characterNames`（分镜意图）去重末帧人物，本镜入口凭空多一个人，成片就会「多出一个乘客」。
+- **反方向同样成立：末帧里有的一群人不许消失。** 群演没有主体卡，末帧参考只保证像素从哪来，保证不了人数被保留——所以人群必须写进 `backgroundCast`（`desc` + 逐字复用的 `promptEn`），同场景相邻镜头由定稿层继承上一镜，人群退场要显式写 `crowdCleared: true`。不写就等着「上一镜结尾一群人、下一镜只剩角色卡上那一个主角」。接帧（`first_frame`）镜也会点名末帧里的人物并锁人数，别把它当成「只接像素」。
 
 ## 四、特写：五个必答问题，缺一个就是无场景空镜
 
@@ -118,6 +119,7 @@ constant subtle motion, no frozen frame
 5. 上一镜 `exitState` 是否以出画收尾（会让末帧空掉）？
 6. 本镜入口里的人，上一镜末帧里真的有吗？
 7. 跑 `node lib/skills/cinematic-script/scripts/validate_script.mjs <script.json>`，把 `state-missing` / `exit-offscreen` / `direction-flip` / `cut-undeclared` 清到零。
+8. 上一镜结尾的一群人有没有被缩成本镜主角一个人？同场景人群是否由 `backgroundCast` 继承，人群退场有没有显式写 `crowdCleared: true`？
 
 ## 七、分工与唯一事实来源
 

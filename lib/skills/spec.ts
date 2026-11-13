@@ -6,7 +6,7 @@
  * 同时提供确定性的规范化与检查函数，供三个 agent 共用。
  */
 
-import type { CharacterSubject, ShotBeat, ShotTransition } from '@/lib/types';
+import type { CharacterSubject, NarrationType, ShotBeat, ShotTransition } from '@/lib/types';
 
 /** 从远到近；也是提示词里推荐的情绪推进顺序 */
 export const SHOT_SIZES = ['大远景', '远景', '全景', '中景', '近景', '特写'] as const;
@@ -211,6 +211,19 @@ export function trimNarration(text: unknown, duration = 5): string {
 }
 
 /**
+ * 台词类型的兜底归一。
+ *
+ * 没有台词才是真正的「都不要」；写了台词却标 none 属于自相矛盾，按旁白兜住。
+ * 模型不给类型时按旁白处理：旧剧本的 narration 基本都是画外音，
+ * 默认成 dialogue 会让人物莫名其妙开口。
+ */
+export function normalizeNarrationType(raw: unknown, narration: string): NarrationType {
+  if (raw === 'dialogue') return 'dialogue';
+  if (raw === 'none' && !narration.trim()) return 'none';
+  return 'voiceover';
+}
+
+/**
  * 台词设计。
  *
  * 模型最容易把台词写成「剧情说明书」：交代身份、复述上一场、把画面已经说清的
@@ -310,6 +323,20 @@ export const SUBJECT_CARD_RULES = `主体卡不是「人物卡」：凡是需要
 - 机甲 / 机器人 / 巨兽 / 坐骑；
 - 贯穿全片的关键道具：武器、箱子、信物。
 漏一张卡就是漏一份一致性：没写卡的那辆车，每一镜都会被模型重新设计一遍（车型、颜色、改装件全变）。`;
+
+/**
+ * 背景人群：有卡的人保住了，没有卡的人就消失了。
+ *
+ * 主体卡只写「需要被认出的固定主体」，群演 / 士兵 / 路人没有固定长相，
+ * 但「画面里有几个人」是同一件事：不登记，模型每镜自己数一遍，
+ * 上一镜结尾的一群人到了下一镜就只剩角色卡里那一个主角。
+ */
+export const BACKGROUND_CAST_RULES = `背景人群（scene 里没有主体卡的人）必须单独登记，不能只写在描述里：
+- 画面里出现两个以上没有主体卡的人（士兵、路人、宾客、围观者、随从、敌方小队）时，本镜写 backgroundCast 数组：每项给中文 desc（人群构成与数量，如「八名披甲的西凉兵」）和全片逐字复用的英文 promptEn（如 "eight armored Xiliang soldiers in dark lamellar armor"）；
+- 人群不占主体卡槽位，也不要给群演写一张「士兵甲」的角色卡：没有固定长相的主体拆成卡，只会每镜换一张脸；
+- 同场景相邻镜头默认沿用上一镜的人群，只写这一镜真正变化的部分（有人倒下、人群散开、援兵涌入）；不写或写 [] 都算沿用，因为模型会顺手把「没写人群」写成空数组——人群真的退场时，必须显式写 crowdCleared: true；
+- 人群的数量、装扮、队形是画面事实：上一镜结尾站着一群人，下一镜没有写人群退场，就必须还是同一群人，不许缩成主角一个人；
+- 主角单独的特写里，人群可以只作为背景虚影保留（写进 promptEn，如 "the same crowd blurred in the background"），但人数与装扮必须一致。`;
 
 
 /**

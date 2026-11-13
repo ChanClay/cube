@@ -72,6 +72,13 @@
       "narrationType": "dialogue",
       "speaker": "说话的角色名（仅 dialogue）",
       "characters": ["出镜角色名"],
+      "backgroundCast": [
+        {
+          "desc": "八名披甲的西凉兵",
+          "promptEn": "eight armored Xiliang soldiers in dark lamellar armor"
+        }
+      ],
+      "crowdCleared": false,
       "scenes": ["所在场景名"]
     }
   ]
@@ -79,6 +86,8 @@
 ```
 
 - `id`、`media`、`lastFrameCast` 由系统写入，手写脚本可以省略。
+- `backgroundCast` 是没有主体卡的背景人群（群演 / 士兵 / 路人）：`desc` 写构成与数量，`promptEn` 是全片逐字复用的英文短语。同场景相邻镜头由定稿层继承上一镜（`inheritBackgroundCast`），省略或写 `[]` 都会继承（模型会把「这一镜没写人群」顺手输出成空数组）；人群真的退场要显式写 `crowdCleared: true`。运行时把 `promptEn` 拼进提示词，带末帧参考时还会锁人数——不写就会出现「上一镜结尾一群人、下一镜只剩主角一个人」。
+- `narration` / `narrationType` / `speaker` 是设计层事实，不是 `description` 的派生物：单镜重算（`/api/shot/refine`）会原样保留它们，不会因为「画面描述里没写台词」而清空；整稿修复漏写时也按原稿兜住（`mergeRepairedShots`）。
 - 首镜没有 `transition` / `referencePrevFrame` / `transitionReason` / `hiddenCut`。
 - `referencePrevFrame` 只表达「要不要用上一镜末帧」，怎么用由景别跨度决定：同景别 → 当首帧；跨 1 档或 `hiddenCut` → 只当 `reference_image`；跨 2 档以上 → 不用。代码见 `lib/skills/shot-media.ts` 的 `prevFrameUsage`。同场景跨度 ≥2 的 `hard-cut` 写 `true` 无效且校验报错，必须先改序列（中间垫一档，或改成 `hiddenCut` 的隐蔽换机位）。
 - 镜头的主体 / 场景字段在 JSON 里叫 `characters` / `scenes`（系统读作 `characterNames` / `sceneNames`，并另存一份 `sceneIds` 供改名后仍能定位卡片）；名字必须逐字来自顶层清单。载具卡同样要写进本镜 `characters`，否则那一镜不会带它的参考图。
@@ -104,6 +113,7 @@
 | 场景卡 | 1~4 个，`promptEn` 15~25 词 | `continuity.ts` |
 | 场景陈设 | `inventory` 5~12 件，每件带 `en` 与位置 `where`；陈设按「状态」拆卡，不按机位拆卡 | `normalizeInventory` / `set-dressing.ts` |
 | 走位 `blocking` | 两人以上同框或人物会位移时必填，另配 8~18 词 `blockingEn`，参考系用固定件不用「画面左侧」 | `lib/skills/scene-anchor.ts` |
+| 背景人群 `backgroundCast` | 两个以上无主体卡的人必须登记（`desc` + 逐字复用 `promptEn`）；同场景省略即继承上一镜，退场写 `crowdCleared: true` | `BACKGROUND_CAST_RULES` / `inheritBackgroundCast` |
 | `videoPrompt` | 英文，40~125 词（<30 或 >170 判不合格） | `PROMPT_*_WORDS` |
 | `videoPrompt` 中文占比 | 汉字 / (字母 + 汉字) ≤ 12% | `isEnglishPrompt` |
 | 台词长度 | `min(60, max(16, duration × 4))` 字 | `narrationLimit` |

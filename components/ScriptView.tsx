@@ -612,6 +612,7 @@ export default function ScriptView({
                 prevSceneName={shots[activeIndex - 1]?.sceneNames?.[0] ?? ''}
                 prevShotSize={shots[activeIndex - 1]?.shotSize ?? ''}
                 prevCast={prevFrameCast(shots[activeIndex - 1] ?? null)}
+                prevBackgroundCast={shots[activeIndex - 1]?.backgroundCast ?? []}
                 prevExitState={shots[activeIndex - 1]?.exitState ?? ''}
                 prevFrameRefEnabled={prevFrameRefEnabled}
                 onAbandon={onAbandonShot ? () => onAbandonShot(activeShot) : undefined}

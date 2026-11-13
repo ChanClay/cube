@@ -131,6 +131,20 @@ export interface Scene {
 export type NarrationType = 'dialogue' | 'voiceover' | 'none';
 
 /**
+ * 镜头里的背景人群（群演 / 士兵 / 路人 / 围观者）。
+ *
+ * 这类人没有固定长相，不该占主体卡槽位，但也必须登记下来：
+ * 不写进数据，每一镜的人数、装扮、队形都会被模型重新发明一遍，
+ * 上一镜结尾的一群人到了下一镜就只剩角色卡里那一个主角。
+ */
+export interface BackgroundCast {
+  /** 中文描述（给人看，也用于审片比对），例：八名披甲的西凉兵 */
+  desc: string;
+  /** 全片逐字复用的英文短语，例：eight armored Xiliang soldiers */
+  promptEn: string;
+}
+
+/**
  * 镜头内部的秒级节拍：这一段秒数里画面发生了什么变化。
  * 秒数是相对本镜起点的偏移，第一段从 0 开始，最后一段到 duration 结束。
  */
@@ -212,6 +226,21 @@ export interface Shot {
   speaker?: string;
   /** 这一镜出场的角色名（对应 Script.characters） */
   characterNames?: string[];
+  /**
+   * 这一镜画面里的背景人群（没有主体卡的人）。
+   *
+   * 同场景相邻镜头默认继承上一镜的名单（由分镜定稿层补齐）；
+   * 空数组同样视为「没有新信息」，会被继承覆盖，避免模型顺手写 [] 把一群人清掉。
+   * 运行时会把 promptEn 逐字拼进提示词，并在带末帧参考时禁止模型删人。
+   */
+  backgroundCast?: BackgroundCast[];
+  /**
+   * 这一镜人群明确退场（上一镜的人已经散了 / 只剩下主角）。
+   *
+   * 只有显式写 true 才会清空继承来的人群：`[]` 不足以表达「退场」，
+   * 因为模型会把它当成「这一镜没写人群」的默认值。
+   */
+  crowdCleared?: boolean;
   /**
    * 与上一镜的衔接方式；第一镜恒为 undefined。
    * 旧剧本没有这个字段时回落到 continueFromPrev（见 lib/skills/shot-media 的 isSameTakeShot）。

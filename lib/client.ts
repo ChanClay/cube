@@ -1,7 +1,9 @@
 import type { VideoModelSpec } from './video-models';
 import type {
+  BackgroundCast,
   ComposeResult,
   MediaInput,
+  NarrationType,
   Project,
   ProjectMedia,
   ProjectSummary,
@@ -180,8 +182,23 @@ export interface RefineShotBody {
   after?: string;
   /** 上一镜末帧里实际在场的人物名：本镜会带上那张末帧当参考图，提示词要按这份名单点名 */
   prevCast?: string[];
+  /** 上一镜结尾画面里的背景人群（无主体卡）：本镜开头必须还是这一群人 */
+  prevBackgroundCast?: BackgroundCast[];
   /** 上一镜的结尾状态（分镜写的画面事实），用来对齐动作与位置 */
   prevExitState?: string;
+  /**
+   * 本镜当前的台词与类型。
+   *
+   * 台词是设计层事实，不是画面描述的派生物：用户只改画面描述时，
+   * 重算必须原样保留这几项，否则台词会因为「描述里没写」被静默清空。
+   */
+  narration?: string;
+  narrationType?: NarrationType;
+  speaker?: string;
+  /** 本镜当前的背景人群：重算时默认原样保留，不许把一群人改成一个主角 */
+  backgroundCast?: BackgroundCast[];
+  /** 本镜人群是否已明确退场 */
+  crowdCleared?: boolean;
   /** 全片角色卡，保证重算后角色外貌不漂移 */
   characters?: { name: string; desc: string }[];
   /** 全片场景卡：重算后必须复用本镜所在场景的固定空间短语与陈设清单 */
@@ -207,10 +224,13 @@ export type RefinedShot = Pick<
   | 'cameraMove'
   | 'videoPrompt'
   | 'narration'
+  | 'narrationType'
   | 'speaker'
   | 'beatSheet'
   | 'blocking'
   | 'blockingEn'
+  | 'backgroundCast'
+  | 'crowdCleared'
 >;
 
 /** 从已生成的视频里抽一帧，交给下一镜当首帧 */

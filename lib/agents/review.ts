@@ -8,6 +8,7 @@ import type { StoryPlan } from './continuity';
 import {
   cameraMoveEn,
   CONTINUITY_RULES,
+  BACKGROUND_CAST_RULES,
   countWords,
   CUT_POINT_RULES,
   DIALOGUE_RULES,
@@ -650,6 +651,7 @@ function buildSystemPrompt(): string {
 6.1 修衔接时按剪辑点规则改：出口停在可切帧、方向不翻转、硬切写清承接的相位或锚点。
 ${CUT_POINT_RULES}
 6.2 主体一致性：${SUBJECT_CARD_RULES}
+6.3 ${BACKGROUND_CAST_RULES}
 7. narration 是这一镜唯一的说话人所说的一句台词，10~20 字；narrationType 只能是 dialogue / voiceover / none，none 时 narration 必须为空字符串。
 8. dialogue 必须同时给 speaker（说话人，必须是本镜 characters 里的名字），并把 speaker 加进 characters；voiceover / none 时 speaker 留空。不要把人物台词写成 voiceover，也不要把旁白写成 dialogue。
 8.1 一人一镜（修多说话人的唯一正确做法）：一镜里出现两个人的台词时，把这一镜拆成相邻两镜——A 的镜头（带听者的肩 / 侧脸）→ B 的反打镜头（带说话人的肩 / 后脑），每镜只留一个人的台词与 speaker，transition 写 hard-cut 并说明「反打承接 A 的话尾」；听者如果要单独给反应，就再占一镜。拆出来的镜头沿用原来的动作与状态链，不新增剧情。
@@ -689,6 +691,8 @@ JSON 结构：
       "narrationType": "dialogue | voiceover | none",
       "speaker": "说话的角色名（仅 dialogue，其余留空）",
       "characters": ["出镜主体名"],
+      "backgroundCast": [{ "desc": "没有主体卡的背景人群构成与数量", "promptEn": "eight armored soldiers in dark lamellar armor" }],
+      "crowdCleared": "true / false：本镜人群是否明确退场",
       "scenes": ["所在场景名"]
     }
   ]
@@ -769,6 +773,8 @@ ${plan.beats
       narrationType: shot.narrationType ?? 'voiceover',
       speaker: shot.speaker ?? '',
       characters: shot.characterNames ?? [],
+      backgroundCast: shot.backgroundCast ?? [],
+      crowdCleared: shot.crowdCleared ?? false,
       scenes: shot.sceneNames ?? [],
     })),
     null,

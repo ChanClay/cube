@@ -229,7 +229,7 @@ export interface ResolvedShotMedia {
   skippedCards: number;
   /** 是否把上一镜末帧作为参考图带了进去（硬切镜头的风格锚点） */
   withPrevFrameRef: boolean;
-  /** 参考图里实际在场的人物，用于在提示词里点名（没带参考图时为空） */
+  /** 末帧里实际在场的人物（首帧承接与参考图都算），用于在提示词里点名；没带末帧时为空 */
   prevFrameCast: string[];
   /** next 与传入的 media 是否不同（不同才需要写回剧本） */
   changed: boolean;
@@ -301,6 +301,11 @@ export function resolveShotMedia(
   // 首帧优先：承接上一镜时不能再塞参考图，否则会被路由到 r2v，接缝就断了
   if (carryFrame && !hasReferences) {
     const injected: MediaInput = { ...carryFrame, auto: true };
+    /**
+     * 首帧就是上一镜末帧，人物名单同样要交给提示词：接帧镜没有卡片，
+     * 不点名的话模型会把末帧里的一群人压成角色卡上的那一个主角。
+     */
+    usedCast = prevFrameCast(prev);
     return finish([injected, ...rest], 'carry', [injected], cards.length);
   }
 

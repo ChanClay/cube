@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server';
 import { config } from '@/lib/config';
 import { logAgentWarn } from '@/lib/services/logger';
 import { callChatJson } from '@/lib/agents/llm';
+import type { BackgroundCast, NarrationType } from '@/lib/types';
 import {
+  BACKGROUND_CAST_RULES,
   DIALOGUE_RULES,
   normalizeBeatSheet,
   normalizeCameraMove,
+  normalizeNarrationType,
   normalizeShotSize,
   SHOT_LANGUAGE_RULES,
   SPEAKER_SHOT_RULES,
@@ -25,6 +28,8 @@ function buildSystemPrompt(): string {
 要求：
 1. ${VIDEO_PROMPT_RULES}
 2. videoPrompt 的唯一依据是用户改好的「画面描述」：描述里写到的主体、动作、道具、环境、光线逐项翻进英文；描述里没有的元素一个都不许加。
+2.1 台词不是画面描述的派生物，是用户已经定稿的事实：若提供了「当前台词」，narration / narrationType / speaker 必须原样返回，一个字都不许改；只有用户明确要求删掉或换掉台词时才能改。绝不许因为「画面描述里没写台词」就清空它——台词本来就不该出现在画面描述里。
+2.2 背景人群同理：若提供了「当前背景人群」，backgroundCast 必须原样返回，人数、装扮与 promptEn 都不许改；只有画面描述明确写了人群变化（涌入 / 散去 / 倒下）时才跟着改。人群全部退场时返回 crowdCleared: true（空数组不算退场，会被上一镜的人群覆盖）。绝不许把一群人缩成主角一个人。
 3. description 不需要你重写（用户已经改好），不要返回它。
 4. ${SHOT_LANGUAGE_RULES}
 5. 若提供了主体卡（人物 / 载具 / 关键道具），本镜出镜主体的外貌必须与卡片一致；视频提示词里沿用卡片已有的英文固定短语，不要自行改写年龄、发型、服装、装甲与涂装、车型与车漆、道具。
@@ -33,8 +38,9 @@ function buildSystemPrompt(): string {
 6.2 本镜的地点由「本镜所在场景」决定：英文提示词里的空间短语必须来自该场景卡，不许改写成别的场景的地点，也不许把画面带回片头场景。本镜没标场景时，按上一镜的场景承接；两者都没有时，只写画面描述里出现的地点。
 6.3 本镜用到的家具与桌上物件必须来自该场景卡的「固定陈设」清单，名字与位置照着清单写；清单里没有的物件不要凭空加，也不要自行改动物件的左右关系。
 6.4 两人以上同框、或人物在画面里会位移时，写 blocking（中文走位）与 blockingEn（8~18 词英文）：谁站在空间的哪一侧、面朝哪里、彼此距离。参考系只能用场景卡的固定件（相对门窗 / 桌子哪一端），不许写「画面左侧 / 右侧」——换机位就翻面。走位要与相邻镜头一致；单人镜头可以留空。
-7. narration 是这一镜唯一的说话人所说的一句台词，或一句画外旁白，可为空字符串（不要写"旁白："前缀）。一镜只能有一个说话人，严禁把两个人的对白写进同一镜——要换人开口就换镜。
-8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字且只有一个；旁白或没有台词时 speaker 留空。
+7. narration 是这一镜唯一的说话人所说的一句台词，或一句画外旁白（不要写"旁白："前缀）。只有在没有提供「当前台词」、并且这一镜确实没有人开口时才留空。一镜只能有一个说话人，严禁把两个人的对白写进同一镜——要换人开口就换镜。
+8. 若是画面里的角色开口说话，speaker 必须是角色表里的名字且只有一个；旁白或没有台词时 speaker 留空。给了「当前台词」时 speaker 沿用原值。
+8.0 ${BACKGROUND_CAST_RULES}
 8.1 ${DIALOGUE_RULES}
 8.2 ${SPEAKER_SHOT_RULES}
 9. title 是这一镜的小标题，4~8 个字。
@@ -47,8 +53,11 @@ JSON 结构：
   "shotSize": "中景",
   "cameraMove": "缓慢推近",
   "videoPrompt": "English prompt for the text-to-video model",
-  "narration": "旁白或台词",
+  "narration": "旁白或台词（有当前台词时必须原样照抄）",
+  "narrationType": "dialogue（画面里的人物开口）| voiceover（画外旁白，人不开口）| none（无口播）",
   "speaker": "说话的角色名，旁白留空",
+  "backgroundCast": [{ "desc": "没有主体卡的背景人群构成与数量；有当前人群时原样照抄", "promptEn": "eight armored soldiers in dark lamellar armor" }],
+  "crowdCleared": "true / false：本镜人群是否明确退场（清空继承来的人群）；空数组不算退场",
   "blocking": "本镜人物走位：谁在空间的哪一侧、面朝哪里（参考门窗 / 固定件，不写「画面左侧」）；单人镜头可留空",
   "blockingEn": "8-18 words English blocking phrase appended to the video prompt; may be empty for a single character",
   "beatSheet": [{ "from": 0, "to": 2, "action": "这一段里发生的可见动作", "actionEn": "8-14 words of the same action in English" }]
@@ -64,7 +73,16 @@ function buildUserPrompt(input: {
   before: string;
   after: string;
   prevCast: string[];
+  prevBackgroundCast: BackgroundCast[];
   prevExitState: string;
+  /** 本镜已定稿的台词 / 类型 / 说话人：默认原样保留，不参与重算 */
+  narration: string;
+  narrationType?: NarrationType;
+  speaker: string;
+  /** 本镜当前的背景人群：默认原样保留 */
+  backgroundCast: BackgroundCast[];
+  /** 本镜人群是否已经明确退场（退场后不再拿上一镜的人群兜底） */
+  crowdCleared: boolean;
   characters: { name: string; desc: string }[];
   scenes: {
     name: string;
@@ -128,6 +146,36 @@ function buildUserPrompt(input: {
         ? `${input.prevSceneName}（本镜未标注，按上一镜的场景承接）`
         : '（未标注，也没有上一镜可承接：只写画面描述里出现的地点，不要回到片头场景）';
   lines.push('', `本镜所在场景：${sceneLine}`);
+
+  /**
+   * 台词与人群是「已定稿的事实」，不是这次要重算的东西。
+   *
+   * 以前这里只给画面描述：模型看不到旧台词，又收到「描述里没有的元素不许加」，
+   * 最省事且合规的输出就是清空 narration——用户只改画面，人物却突然不说话了。
+   */
+  if (input.narration.trim()) {
+    lines.push(
+      '',
+      `当前台词（用户未要求改动，必须原样返回）：${input.narration}`,
+      `台词类型：${input.narrationType ?? 'voiceover'}${input.speaker ? `｜说话人：${input.speaker}` : ''}`,
+      '台词本来就不写在画面描述里：描述里没有这句台词，不代表要删掉它。除非用户明确要求删改，否则 narration / narrationType / speaker 逐字照抄。',
+    );
+  }
+
+  if (input.backgroundCast.length > 0) {
+    lines.push(
+      '',
+      '当前背景人群（没有主体卡的人，必须原样保留）：',
+      ...input.backgroundCast.map((item) => `- ${item.desc}｜英文固定短语：${item.promptEn}`),
+      '人群是画面事实：不许把一群人缩成主角一个人，也不许换装扮与人数；只有画面描述明确写了人群变化时才改，人群全部退场时返回 crowdCleared: true。',
+    );
+  } else if (!input.crowdCleared && input.prevBackgroundCast.length > 0) {
+    lines.push(
+      '',
+      `上一镜结尾的背景人群（本镜没有写人群退场，开头必须还是这一群人）：` +
+        input.prevBackgroundCast.map((item) => `${item.desc}（${item.promptEn}）`).join('；'),
+    );
+  }
 
   lines.push('', '修改后的画面描述（必须严格照此生成）：', input.description);
 
@@ -224,6 +272,37 @@ function parseCast(raw: unknown): string[] {
   return raw.map((item) => str(item)).filter(Boolean).slice(0, 8);
 }
 
+/** 背景人群：只认有内容的两项，最多 4 组；退场由 crowdCleared 表达，空数组不算 */
+function parseBackgroundCast(raw: unknown): BackgroundCast[] {
+  if (!Array.isArray(raw)) return [];
+  const result: BackgroundCast[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const desc = str(record.desc ?? record.name);
+    const promptEn = str(record.promptEn ?? record.en);
+    if (!desc && !promptEn) continue;
+    result.push({ desc: desc || promptEn, promptEn: promptEn || desc });
+    if (result.length >= 4) break;
+  }
+  return result;
+}
+
+function parseNarrationType(raw: unknown): NarrationType | undefined {
+  return raw === 'dialogue' || raw === 'voiceover' || raw === 'none' ? raw : undefined;
+}
+
+/**
+ * 台词类型：用户已有的 none 必须守住。
+ *
+ * `none` 的语义是「台词保留但不提交」，如果按「有台词就归成 voiceover」处理，
+ * 一次重算就会让本该静音的镜头突然念出来。
+ */
+function resolveNarrationType(requested: NarrationType | undefined, narration: string): NarrationType {
+  if (requested === 'none') return 'none';
+  return normalizeNarrationType(requested, narration);
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -248,7 +327,13 @@ export async function POST(request: Request) {
     before: str(payload.before),
     after: str(payload.after),
     prevCast: parseCast(payload.prevCast),
+    prevBackgroundCast: parseBackgroundCast(payload.prevBackgroundCast),
     prevExitState: str(payload.prevExitState),
+    narration: str(payload.narration),
+    narrationType: parseNarrationType(payload.narrationType),
+    speaker: str(payload.speaker),
+    backgroundCast: parseBackgroundCast(payload.backgroundCast),
+    crowdCleared: payload.crowdCleared === true,
     characters: parseCharacters(payload.characters),
     scenes: parseScenes(payload.scenes),
     sceneNames: parseCast(payload.sceneNames),
@@ -272,14 +357,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '模型没有返回视频提示词，请重试' }, { status: 502 });
     }
 
+    /**
+     * 台词兜底：模型没写台词、而用户原本有台词时，保留原文。
+     *
+     * 这是「改画面描述导致人物突然不说话」的最后一道闸：提示词已经要求原样返回，
+     * 但模型仍可能因为「描述里没写」而吐出空串，空串绝不能覆盖已定稿的台词。
+     */
+    const modelNarration = trimNarration(obj.narration, input.duration);
+    const keepExisting = !modelNarration.trim() && !!input.narration.trim();
+    const narration = keepExisting
+      ? trimNarration(input.narration, input.duration)
+      : modelNarration;
+    const narrationType = resolveNarrationType(
+      keepExisting ? input.narrationType : (parseNarrationType(obj.narrationType) ?? input.narrationType),
+      narration,
+    );
+    /**
+     * 人群同理：模型没给出人群时沿用原值，绝不允许「没写」把一群人清掉。
+     * 退场只能由 crowdCleared 明确表达——空数组是模型的默认值，不能当成「人散了」。
+     */
+    const modelCrowd = parseBackgroundCast(obj.backgroundCast);
+    const crowdCleared =
+      obj.crowdCleared === true || (input.crowdCleared && modelCrowd.length === 0);
+    const backgroundCast = crowdCleared
+      ? []
+      : modelCrowd.length > 0
+        ? modelCrowd
+        : input.backgroundCast.length > 0
+          ? input.backgroundCast
+          : input.prevBackgroundCast;
+
     return NextResponse.json({
       shot: {
         title: str(obj.title),
         shotSize: normalizeShotSize(obj.shotSize),
         cameraMove: normalizeCameraMove(obj.cameraMove),
         videoPrompt,
-        narration: trimNarration(obj.narration, input.duration),
-        speaker: str(obj.speaker) || undefined,
+        narration,
+        narrationType,
+        speaker: narrationType === 'dialogue' ? str(obj.speaker) || input.speaker || undefined : undefined,
+        backgroundCast,
+        crowdCleared: crowdCleared || undefined,
         blocking: str(obj.blocking ?? obj.staging) || undefined,
         blockingEn: str(obj.blockingEn ?? obj.stagingEn) || undefined,
         beatSheet: normalizeBeatSheet(obj.beatSheet, input.duration),

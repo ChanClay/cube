@@ -14,6 +14,7 @@ import { shotLimits } from '@/lib/skills/shot-plan';
 import { shotSizeGap } from '@/lib/skills/spec';
 import { videoModelLabel } from '@/lib/video-models';
 import type {
+  BackgroundCast,
   Character,
   MediaInput,
   MediaType,
@@ -50,6 +51,8 @@ interface Props {
   prevShotSize?: string;
   /** 上一镜末帧里实际在场的人物：重算提示词时按这份名单点名，避免凭空多出人 */
   prevCast?: string[];
+  /** 上一镜结尾的背景人群（无主体卡）：本镜没有明确写人群退场时，开头必须还是这一群人 */
+  prevBackgroundCast?: BackgroundCast[];
   /** 上一镜的结尾状态，用于对齐动作与位置 */
   prevExitState?: string;
   /** 全局开关（VIDEO_REFERENCE_PREV_FRAME）：关掉时这个选项不可用 */
@@ -110,6 +113,7 @@ export default function ShotCard({
   prevSceneName = '',
   prevShotSize = '',
   prevCast = [],
+  prevBackgroundCast = [],
   prevExitState = '',
   prevFrameRefEnabled = true,
   onAbandon,
@@ -226,7 +230,14 @@ export default function ShotCard({
         before: beforeDescription,
         after: afterDescription,
         prevCast,
+        prevBackgroundCast,
         prevExitState,
+        // 台词与人群是已定稿的事实：交给服务端原样返回，不参与重算
+        narration: shot.narration,
+        narrationType: shot.narrationType,
+        speaker: shot.speaker,
+        backgroundCast: shot.backgroundCast ?? [],
+        crowdCleared: shot.crowdCleared,
         characters: characters.map(({ name, desc }) => ({ name, desc })),
         scenes: scenes.map(({ name, desc, promptEn, inventory, state }) => ({
           name,
@@ -243,16 +254,36 @@ export default function ShotCard({
         shotSize: next.shotSize,
         cameraMove: next.cameraMove,
         videoPrompt: next.videoPrompt,
-        narration: next.narration,
       };
+      /**
+       * 台词是定稿事实，不是画面描述的派生物：模型给了才覆盖。
+       * 以前这里无条件写 narration，模型吐一个空串就把整段台词清掉了。
+       */
+      if (next.narration?.trim()) {
+        patch.narration = next.narration;
+        if (next.narrationType) patch.narrationType = next.narrationType;
+      }
       if (next.title) patch.title = next.title;
       // 模型给了说话人就更新；没给时保留原值，避免重算把已选的人清掉
       if (next.speaker) patch.speaker = next.speaker;
+      // 类型改成旁白 / 无口播时，旧的说话人已经无意义，一并清掉
+      else if (next.narrationType && next.narrationType !== 'dialogue') patch.speaker = undefined;
       // 时间轴按新描述重算过才覆盖，没拿到就保留原来的
       if (next.beatSheet?.length) patch.beatSheet = next.beatSheet;
       // 走位同理：模型给空值时不清掉用户手写的那一份
       if (next.blocking?.trim()) patch.blocking = next.blocking;
       if (next.blockingEn?.trim()) patch.blockingEn = next.blockingEn;
+      /**
+       * 背景人群也是画面事实：模型没给就沿用原来的，一群人不会悄悄变成一个人。
+       * 退场只认显式的 crowdCleared；空数组是模型的默认值，不能当成「人散了」。
+       */
+      if (next.crowdCleared) {
+        patch.backgroundCast = [];
+        patch.crowdCleared = true;
+      } else if (next.backgroundCast?.length) {
+        patch.backgroundCast = next.backgroundCast;
+        patch.crowdCleared = false;
+      }
       onChange(patch);
     } catch (err) {
       setRefineError(err instanceof Error ? err.message : String(err));

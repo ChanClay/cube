@@ -11,7 +11,7 @@ import {
 } from '@/lib/skills/shot-plan';
 import { normalizeVideoModel, type VideoModelId } from '@/lib/video-models';
 import { expandStyle } from '@/lib/skills/style-presets';
-import type { Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
+import type { BackgroundCast, Character, NarrationType, Scene, Script, Shot } from '@/lib/types';
 import { adaptStory } from './adaptation';
 import {
   planStory,
@@ -25,6 +25,7 @@ import { localizePrompts } from './localize';
 import { auditScript, canChangeShotCount, needsRepair, requestRepair, type ScriptIssue } from './review';
 import {
   APPEARANCE_ONLY_RULES,
+  BACKGROUND_CAST_RULES,
   clamp,
   CONTINUITY_RULES,
   CUT_POINT_RULES,
@@ -38,6 +39,7 @@ import {
   MOTION_SCOPE_RULES,
   normalizeBeatSheet,
   normalizeCameraMove,
+  normalizeNarrationType,
   normalizeShotSize,
   parseTransition,
   PREV_FRAME_RULES,
@@ -120,6 +122,7 @@ function buildSystemPrompt(): string {
    ${SUBJECT_CARD_RULES}
    ${APPEARANCE_ONLY_RULES}
    本镜出现载具（主角座驾、追车、警车…）时，必须把它当成出镜主体写进本镜的 characters 数组并复用它的 promptEn；漏写就等于这一镜没有那辆车的参考图，车型与涂装每镜都会变。
+9.1 ${BACKGROUND_CAST_RULES}
 10. 场景一致性：同一空间只使用蓝图场景卡的英文空间短语（promptEn），不要逐镜改写地点与光线。
    这一镜用到的家具 / 陈设必须来自场景卡的陈设清单（inventory）；确实需要画面里出现清单没写的物件时，先在场景卡补上它（中文名 name + 英文名 en + 位置 where，其中英文位置 whereEn 才是运行时拼进提示词的那一份），再写这一镜。不要靠提示词逐镜即兴摆家具。清单里的位置一律用固定件做参照（桌头正对门、靠窗那面墙），不许写「画面左侧」——画面方位随镜头翻转。
 10.1 人物走位：两人以上同框、或人物在镜头里会位移时，必须写 blocking（中文走位）与 blockingEn（8~18 词英文）。参考系只能用场景卡的固定件（相对门窗 / 桌子哪一端 / 柜台哪一侧），绝对不许写「画面左侧 / 右侧」——换机位就翻面了，这正是同一场面在不同镜头里左右互换的原因。同场景的镜头复用同一份走位措辞，只写这一镜真正变化的部分；走位与 entryState 必须一致，不许一处说在窗边、另一处说在门口。
@@ -198,6 +201,8 @@ JSON 结构：
       "narrationType": "dialogue（画面里的人物开口）| voiceover（画外旁白，人不开口）| none（无口播）",
       "speaker": "说这句台词的角色名（仅 dialogue 时填写，必须来自本镜 characters；一镜只有一个）",
       "characters": ["出镜角色名"],
+      "backgroundCast": [{ "desc": "没有主体卡的背景人群构成与数量，如「八名披甲的西凉兵」；同场景相邻镜头沿用上一镜，不写即继承", "promptEn": "eight armored Xiliang soldiers in dark lamellar armor" }],
+      "crowdCleared": "true / false：这一镜人群是否明确退场（清空上一镜继承的人群）；不写即沿用上一镜",
       "scenes": ["所在场景名"]
     }
   ]
@@ -239,6 +244,7 @@ ${req.idea}
 3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame 是否按档位写（跨度 ≥2 的硬切有没有先改成「垫一档」或 hiddenCut，而不是硬写 true）？跨了景别的长镜头是不是都写了 hiddenCut=true？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作，并且每段都给了 8~14 词的 actionEn？
 5) 主体名 / 场景名是否逐字来自上方清单？本镜出现的每一辆车（主角座驾、追车、警车…）是否都写进了 characters 并复用它的 promptEn？
+5.1) 画面里没有主体卡的人（群演 / 士兵 / 路人）是否都写进了 backgroundCast（中文 desc + 逐字复用的英文 promptEn）？同场景相邻镜头有没有把上一镜的一群人悄悄缩成主角一个人？人群退场是否显式写了 crowdCleared: true？
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？两个以上主体（尤其载具）同框时，第一句有没有写机位锚（镜头装在哪 / 朝哪 / 多高），谁在画面哪一侧、谁挡住谁、接触点在哪个部位是否都写得出来？每个 left / right / front / behind 是否都带了参照系（frame left / 实体名 + 部位 / the left-hand lane）？裸写的一律不合格——中文写「车尾左后方」、英文写 front right 这种方位错位必须逐条核对掉。
 6.1) 空间描述是否「先机位、再布局、后动作」？把提示词当读者读一遍：如果需要猜「谁在谁的左边」，模型就会猜，而且经常猜反。
 7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？这一镜是否有至少一个贯穿全镜的持续运动源（特写 / 近景最容易漏，只写表情就是一张静止的肖像）？
@@ -348,11 +354,25 @@ function normalizeCharacterNames(raw: Record<string, unknown>): string[] {
   return normalizeNameList(raw.characters ?? raw.characterNames ?? raw.character);
 }
 
-function normalizeNarrationType(raw: unknown, narration: string): NarrationType {
-  if (raw === 'dialogue') return 'dialogue';
-  // 没有台词才是真正的「都不要」；写了台词却标 none 属于自相矛盾，按旁白兜住
-  if (raw === 'none' && !narration.trim()) return 'none';
-  return 'voiceover';
+/**
+ * 背景人群。
+ *
+ * undefined = 模型没写（同场景继承上一镜）；[] = 人群明确退场。
+ * 这两种状态必须区分开，否则「省略」与「清空」会被当成同一件事。
+ */
+function normalizeBackgroundCast(raw: unknown): BackgroundCast[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items: BackgroundCast[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const desc = str(record.desc ?? record.name);
+    const promptEn = str(record.promptEn ?? record.en);
+    if (!desc && !promptEn) continue;
+    items.push({ desc: desc || promptEn, promptEn: promptEn || desc });
+    if (items.length >= 4) break;
+  }
+  return items;
 }
 
 /**
@@ -434,6 +454,10 @@ function normalizeShot(
     narrationType,
     speaker: normalizeSpeaker(raw, narrationType, characterNames),
     characterNames,
+    backgroundCast: normalizeBackgroundCast(
+      raw.backgroundCast ?? raw.crowd ?? raw.backgroundPeople,
+    ),
+    crowdCleared: parseBool(raw.crowdCleared ?? raw.backgroundCastCleared),
     sceneNames: normalizeNameList(raw.scenes ?? raw.scene),
     media: [],
   };
@@ -1021,6 +1045,38 @@ function resolveReferenceFrames(script: Script): void {
   });
 }
 
+/**
+ * 背景人群的定稿层（在末帧开关定稿之后跑）。
+ *
+ * 末帧参考只解决「像素从哪来」，解决不了「上一镜的一群人到了下一镜只剩主角」：
+ * 群演没有主体卡，模型重写提示词时不会自己记住人数。这里把上一镜的人群
+ * 确定性地继承到同场景的下一镜，只有三种情况不继承：
+ * - 时间 / 地点跳转（人群本来就不在）；
+ * - 本镜写了新的人群（backgroundCast 非空）；
+ * - 本镜显式声明人群退场（crowdCleared: true）——`[]` 不算声明，
+ *   模型会把「这一镜没写人群」顺手输出成空数组，尊重它就等于继续丢人。
+ */
+function inheritBackgroundCast(script: Script): void {
+  script.shots.forEach((shot, i) => {
+    if (i === 0) return;
+    if (shot.crowdCleared) {
+      shot.backgroundCast = [];
+      return;
+    }
+    if (shot.backgroundCast && shot.backgroundCast.length > 0) return;
+
+    const prev = script.shots[i - 1];
+    if (!prev.backgroundCast || prev.backgroundCast.length === 0) return;
+    if (shot.transition === 'time-jump') return;
+
+    const prevScene = (prev.sceneNames ?? []).join('|');
+    const scene = (shot.sceneNames ?? []).join('|');
+    if (prevScene && scene && prevScene !== scene) return;
+
+    shot.backgroundCast = prev.backgroundCast.map((item) => ({ ...item }));
+  });
+}
+
 /** 成稿后的统一收口：角色 / 场景卡、镜数、时长、引用全部对齐 */
 function finalizeScript(
   script: Script,
@@ -1050,6 +1106,8 @@ function finalizeScript(
   resolveTransitions(script);
   // 末帧参考图的开关依赖 transition 与场景，必须排在后
   resolveReferenceFrames(script);
+  // 人群继承依赖 transition / 场景，必须排在末帧开关之后
+  inheritBackgroundCast(script);
   stabilizeStateChain(script);
 }
 
@@ -1137,6 +1195,22 @@ function mergeRepairedShots(
       if (!shot.entryState && prev.entryState) shot.entryState = prev.entryState;
       if (!shot.exitState && prev.exitState) shot.exitState = prev.exitState;
       if (!shot.beatSheet && prev.beatSheet) shot.beatSheet = prev.beatSheet;
+      /**
+       * 台词不是画面描述的派生物：修复稿漏写 narration 时按原稿兜住，
+       * 否则一次「画面优化」的修复就会让这一镜静默失声（类型还是 dialogue、台词却是空串）。
+       */
+      if (!shot.narration.trim() && prev.narration.trim()) {
+        shot.narration = prev.narration;
+        shot.narrationType = prev.narrationType;
+        shot.speaker = prev.speaker;
+      }
+      // 背景人群同理：修复稿没写（或顺手写了 []）就沿用原稿；退场由 crowdCleared 表达
+      if (shot.backgroundCast?.length === 0 && prev.backgroundCast?.length) {
+        shot.backgroundCast = prev.backgroundCast;
+      }
+      if (shot.crowdCleared === undefined && prev.crowdCleared !== undefined) {
+        shot.crowdCleared = prev.crowdCleared;
+      }
     });
   }
 
