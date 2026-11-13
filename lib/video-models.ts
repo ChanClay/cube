@@ -37,8 +37,19 @@ export interface VideoModelSpec {
    *   受 VIDEO_AUDIO 控制）
    */
   audio: 'always' | 'toggle';
+  /** 该模型支持的输入格式（模型管理页展示用，与 provider 实际分流一致） */
+  inputs: VideoModelInput[];
   /** 下拉里的一行说明 */
   summary: string;
+}
+
+/** 单种输入格式 */
+export interface VideoModelInput {
+  kind: 'text' | 'image' | 'reference';
+  /** 展示名，如「文本提示词」「首帧图片」 */
+  label: string;
+  /** 一行说明 */
+  detail: string;
 }
 
 /** 顺序即创建剧本页下拉框里的顺序：wan3.0 → Seedance → HappyHorse */
@@ -52,6 +63,15 @@ export const VIDEO_MODELS: VideoModelSpec[] = [
     preferredShotSeconds: 10,
     maxShotCount: 12,
     audio: 'toggle',
+    inputs: [
+      { kind: 'text', label: '文本提示词', detail: '纯文字描述生视频' },
+      {
+        kind: 'image',
+        label: '首帧 / 尾帧图片',
+        detail: '首帧起画，配尾帧做首尾过渡；带首尾帧时画幅固定 adaptive',
+      },
+      { kind: 'reference', label: '参考视频 / 音频', detail: '参考素材延续风格，可带音频' },
+    ],
     summary: '首尾帧 / 参考视频音频，2~30 秒，音轨可开关',
   },
   {
@@ -64,6 +84,11 @@ export const VIDEO_MODELS: VideoModelSpec[] = [
     maxShotCount: 12,
     // 2.5 / 2.0 系列有 generate_audio，受 VIDEO_AUDIO 控制（1.0 pro 无声，没有这个参数）
     audio: 'toggle',
+    inputs: [
+      { kind: 'text', label: '文本提示词', detail: '纯文字描述生视频' },
+      { kind: 'image', label: '首帧 / 尾帧图片', detail: '首帧起画，配尾帧做首尾过渡' },
+      { kind: 'reference', label: '参考图 / 视频 / 音频', detail: '多模态参考素材定主体与风格' },
+    ],
     summary: '首尾帧 / 参考图·视频·音频，4~30 秒，音轨可开关（火山方舟）',
   },
   {
@@ -76,6 +101,15 @@ export const VIDEO_MODELS: VideoModelSpec[] = [
     maxShotCount: 12,
     // 原生联合生成音轨（对白 / 环境音 / 拟音），接口没有 audio 开关，不能关
     audio: 'always',
+    inputs: [
+      { kind: 'text', label: '文本提示词', detail: '纯文字描述生视频' },
+      {
+        kind: 'image',
+        label: '首帧图片',
+        detail: '首帧起画（i2v），画幅跟随首帧；同时给尾帧时尾帧会被丢弃',
+      },
+      { kind: 'reference', label: '参考图（≤9 张）', detail: '多图参考定主体与风格，支持 ratio' },
+    ],
     summary: '首帧 / 参考图（≤9 张）生视频，3~15 秒，原生音轨（不可关）',
   },
 ];

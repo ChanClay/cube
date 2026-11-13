@@ -5,6 +5,7 @@ import { currentUserId } from '@/lib/services/auth';
 import { submitLockKey, withSubmitLock } from '@/lib/services/submit-lock';
 import { MAX_NOVEL_CHARS, MIN_NOVEL_CHARS } from '@/lib/skills/shot-plan';
 import { normalizeVideoModel } from '@/lib/video-models';
+import { defaultVideoModel } from '@/lib/services/settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,8 +46,8 @@ export async function POST(request: Request) {
   const duration = Number(payload.duration);
   /** 缺省仍是「按镜头数」，保持老调用方的行为 */
   const mode = payload.mode === 'duration' ? 'duration' : 'shots';
-  /** 创建剧本时选定的视频模型；老客户端没传时按旧剧本的 wan3.0 处理 */
-  const videoModel = normalizeVideoModel(payload.videoModel);
+  /** 创建剧本时选定的视频模型；老客户端没传时用模型管理页设置的默认模型 */
+  const videoModel = normalizeVideoModel(payload.videoModel, await defaultVideoModel());
 
   try {
     /**

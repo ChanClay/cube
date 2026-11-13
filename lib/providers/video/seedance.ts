@@ -1,4 +1,4 @@
-import { config } from '@/lib/config';
+import { config, VIDEO_DEFAULT_BASE_URLS } from '@/lib/config';
 import type { JobStatus, MediaInput, MediaType } from '@/lib/types';
 import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
 
@@ -41,7 +41,6 @@ import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
  * 用 1.0 pro 时剧本仍按 2.5 的 4~30 秒排片，提交时会被夹进 2~12 秒并告警。
  */
 
-const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const VALID_RATIOS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive']);
 /** 与 lib/skills/media.ts 的 reference_image 上限保持一致（2.5 接口本身允许 30 张） */
 const MAX_REFERENCE_IMAGES = 9;
@@ -273,22 +272,22 @@ export class SeedanceProvider implements VideoProvider {
   readonly name = 'seedance';
 
   get model(): string {
-    return config.video.seedance.model;
+    return config.video.models.seedance.model;
   }
 
   private get baseUrl(): string {
-    return config.video.seedance.baseUrl || DEFAULT_BASE_URL;
+    return config.video.models.seedance.baseUrl || VIDEO_DEFAULT_BASE_URLS.seedance;
   }
 
   private headers(): Record<string, string> {
-    if (!config.video.seedance.apiKey) {
+    if (!config.video.models.seedance.apiKey) {
       throw new Error(
         '未配置 VIDEO_SEEDANCE_API_KEY（火山方舟 API Key），请填入 .env.local 后重启服务',
       );
     }
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.video.seedance.apiKey}`,
+      Authorization: `Bearer ${config.video.models.seedance.apiKey}`,
     };
   }
 

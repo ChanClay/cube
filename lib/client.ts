@@ -1,4 +1,4 @@
-import type { VideoModelSpec } from './video-models';
+import type { VideoModelId, VideoModelSpec } from './video-models';
 import type {
   BackgroundCast,
   ComposeResult,
@@ -34,6 +34,14 @@ export interface HealthInfo {
     referencePrevFrame: boolean;
   };
   pollIntervalMs: number;
+}
+
+/** 模型管理页的数据：已配置的模型 + 新建剧本的默认模型 */
+export interface VideoModelSettings {
+  /** 已在 env 配置好 API Key 的视频模型 */
+  models: VideoModelSpec[];
+  /** 新建剧本的默认模型 */
+  defaultModel: VideoModelId;
 }
 
 /* ---------- 账号 ---------- */
@@ -264,6 +272,23 @@ const query = (params: Record<string, string | number | undefined>) => {
 
 export const api = {
   health: () => request<HealthInfo>('/api/health'),
+
+  /** 已在 env 配置好的视频模型列表与默认模型（模型管理页用），见 app/api/models/route.ts */
+  videoModels: () => request<VideoModelSettings>('/api/models'),
+
+  /** 把某个已配置的模型设为新建剧本的默认模型 */
+  setDefaultModel: (modelId: VideoModelId) =>
+    request<{ ok: boolean; defaultModel: VideoModelId }>('/api/models', {
+      method: 'POST',
+      body: JSON.stringify({ modelId }),
+    }),
+
+  /** 保存下拉框里的模型显示顺序，返回重排后的模型列表 */
+  setModelOrder: (modelIds: VideoModelId[]) =>
+    request<{ ok: boolean; models: VideoModelSpec[] }>('/api/models', {
+      method: 'PATCH',
+      body: JSON.stringify({ modelIds }),
+    }),
 
   /* ---------- 账号 ---------- */
 

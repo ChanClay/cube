@@ -1,4 +1,4 @@
-import { config } from '@/lib/config';
+import { config, VIDEO_DEFAULT_BASE_URLS } from '@/lib/config';
 import type { JobStatus } from '@/lib/types';
 import { videoModelSpec } from '@/lib/video-models';
 import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
@@ -32,7 +32,6 @@ import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
  * 音频 / 文档 / 网页、原生音轨与提示词扩写；带首帧 / 尾帧时画幅固定用 adaptive。
  */
 
-const DEFAULT_BASE_URL = 'https://cn-beijing.maas.qianwenaiapi.com/api/v1';
 /** 时长区间与剧本规划共用同一份能力表，避免两处漂移 */
 const SPEC = videoModelSpec('wan3.0-video');
 const DEFAULT_MODEL = SPEC.id;
@@ -105,29 +104,29 @@ export class WanProvider implements VideoProvider {
   readonly name = 'wan';
 
   get model(): string {
-    return config.video.wan.model || DEFAULT_MODEL;
+    return config.video.models.wan.model || DEFAULT_MODEL;
   }
 
   private get baseUrl(): string {
-    return config.video.baseUrl || DEFAULT_BASE_URL;
+    return config.video.models.wan.baseUrl || VIDEO_DEFAULT_BASE_URLS.wan;
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
-    if (!config.video.apiKey) {
+    if (!config.video.models.wan.apiKey) {
       throw new Error(
-        '未配置 VIDEO_API_KEY（阿里云百炼 DashScope API Key），请填入 .env.local 后重启服务',
+        '未配置 Wan 3.0 的 API Key（VIDEO_WAN_API_KEY，或共享的 VIDEO_API_KEY），请填入 .env.local 后重启服务',
       );
     }
     // /compatible-mode/v1 是 OpenAI 兼容层，不接受异步任务（会返回
     // "current user api does not support asynchronous calls"）
     if (this.baseUrl.includes('compatible-mode')) {
       throw new Error(
-        `VIDEO_BASE_URL 不能是 compatible-mode 地址（当前 ${this.baseUrl}）。视频生成需要原生异步地址，例如 https://dashscope.aliyuncs.com/api/v1`,
+        `Wan 3.0 的 VIDEO_WAN_BASE_URL / VIDEO_BASE_URL 不能是 compatible-mode 地址（当前 ${this.baseUrl}）。视频生成需要原生异步地址，例如 https://dashscope.aliyuncs.com/api/v1`,
       );
     }
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.video.apiKey}`,
+      Authorization: `Bearer ${config.video.models.wan.apiKey}`,
       ...extra,
     };
   }

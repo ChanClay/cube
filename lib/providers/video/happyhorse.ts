@@ -1,4 +1,4 @@
-import { config } from '@/lib/config';
+import { config, VIDEO_DEFAULT_BASE_URLS } from '@/lib/config';
 import type { JobStatus, MediaInput, MediaType } from '@/lib/types';
 import { videoModelSpec } from '@/lib/video-models';
 import type { CreateVideoInput, VideoProvider, VideoTaskState } from './types';
@@ -40,7 +40,6 @@ type HappyHorseModels = { t2v: string; i2v: string; r2v: string };
  * }
  */
 
-const DEFAULT_BASE_URL = 'https://cn-beijing.maas.qianwenaiapi.com/api/v1';
 const DEFAULT_RATIO = '16:9';
 /** HappyHorse 支持的比例（没有 adaptive） */
 const VALID_RATIOS = new Set([
@@ -191,33 +190,33 @@ export class HappyHorseProvider implements VideoProvider {
 
   /** 健康检查展示用的基础模型名（实际调用按模式取 models.*） */
   get model(): string {
-    return config.video.happyhorse.base;
+    return config.video.models.happyhorse.base;
   }
 
   private get models(): HappyHorseModels {
-    return config.video.happyhorse;
+    return config.video.models.happyhorse;
   }
 
   private get baseUrl(): string {
-    return config.video.baseUrl || DEFAULT_BASE_URL;
+    return config.video.models.happyhorse.baseUrl || VIDEO_DEFAULT_BASE_URLS.happyhorse;
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
-    if (!config.video.apiKey) {
+    if (!config.video.models.happyhorse.apiKey) {
       throw new Error(
-        '未配置 VIDEO_API_KEY（阿里云百炼 DashScope API Key），请填入 .env.local 后重启服务',
+        '未配置 HappyHorse 的 API Key（VIDEO_HAPPYHORSE_API_KEY，或共享的 VIDEO_API_KEY），请填入 .env.local 后重启服务',
       );
     }
     // /compatible-mode/v1 是 OpenAI 兼容层，不接受异步任务（会返回
     // "current user api does not support asynchronous calls"）
     if (this.baseUrl.includes('compatible-mode')) {
       throw new Error(
-        `VIDEO_BASE_URL 不能是 compatible-mode 地址（当前 ${this.baseUrl}）。视频生成需要原生异步地址，例如 https://dashscope.aliyuncs.com/api/v1`,
+        `HappyHorse 的 VIDEO_HAPPYHORSE_BASE_URL / VIDEO_BASE_URL 不能是 compatible-mode 地址（当前 ${this.baseUrl}）。视频生成需要原生异步地址，例如 https://dashscope.aliyuncs.com/api/v1`,
       );
     }
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.video.apiKey}`,
+      Authorization: `Bearer ${config.video.models.happyhorse.apiKey}`,
       ...extra,
     };
   }

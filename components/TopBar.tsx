@@ -97,6 +97,10 @@ export default function TopBar({ health, children, homeLink = false }: Props) {
           视频 <b>{videoModelText(health)}</b>
         </span>
 
+        <Link href="/models" className="btn btn--ghost btn--sm" title="查看已配置的视频模型">
+          模型
+        </Link>
+
         {user && (
           <span className="user-chip" title={`已登录：${user.username}`}>
             <span className="user-avatar">{user.username.slice(0, 1).toUpperCase()}</span>

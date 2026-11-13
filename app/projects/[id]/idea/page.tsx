@@ -8,6 +8,7 @@ import TopBar from '@/components/TopBar';
 import { NEW_SCRIPT_TITLE } from '@/lib/skills/blank-script';
 import { api, type HealthInfo } from '@/lib/client';
 import { demoScript } from '@/lib/skills/demo-script';
+import type { VideoModelId, VideoModelSpec } from '@/lib/video-models';
 import type { Project, Script, StoredScript } from '@/lib/types';
 
 /**
@@ -50,6 +51,10 @@ function IdeaPageInner() {
   const fresh = search.get('fresh') === '1' && mode === 'new';
 
   const [health, setHealth] = useState<HealthInfo | null>(null);
+  /** 模型管理页设置的新建剧本默认模型 */
+  const [defaultModel, setDefaultModel] = useState<VideoModelId | null>(null);
+  /** 模型管理页排好序的模型列表（下拉框按这个顺序显示） */
+  const [orderedModels, setOrderedModels] = useState<VideoModelSpec[] | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   /** 顶栏里可直接改的项目名，失焦时落库 */
   const [projectName, setProjectName] = useState('');
@@ -72,6 +77,16 @@ function IdeaPageInner() {
       .health()
       .then((info) => {
         if (!cancelled) setHealth(info);
+      })
+      .catch(() => undefined);
+
+    api
+      .videoModels()
+      .then((settings) => {
+        if (!cancelled) {
+          setDefaultModel(settings.defaultModel);
+          setOrderedModels(settings.models);
+        }
       })
       .catch(() => undefined);
 
@@ -309,6 +324,8 @@ function IdeaPageInner() {
               initialShotCount={shots.length || undefined}
               initialShotDuration={shots[0]?.duration || undefined}
               initialVideoModel={source?.script.videoModel}
+              defaultVideoModel={defaultModel ?? undefined}
+              models={orderedModels ?? undefined}
               projectName={projectName}
               onProjectNameChange={setProjectName}
               onProjectNameCommit={() => void saveProjectName()}

@@ -104,6 +104,11 @@ const SCHEMA = [
     INDEX idx_scripts_project_id (project_id),
     INDEX idx_scripts_user (user_id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    key_name   VARCHAR(64) NOT NULL PRIMARY KEY,
+    value      TEXT        NOT NULL,
+    updated_at BIGINT      NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
 /** 历史剧本自动归入的默认项目 */

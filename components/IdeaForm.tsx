@@ -18,6 +18,7 @@ import {
   normalizeVideoModel,
   videoModelSpec,
   type VideoModelId,
+  type VideoModelSpec,
 } from '@/lib/video-models';
 
 /** 预设风格标签（明细描述见 lib/skills/style-presets，生成时自动展开） */
@@ -51,6 +52,10 @@ interface Props {
   initialShotDuration?: number;
   /** 编辑既有剧本时回填的视频模型 */
   initialVideoModel?: string;
+  /** 新建剧本时的默认模型（模型管理页设置的全站默认）；有 initialVideoModel 时以它为准 */
+  defaultVideoModel?: VideoModelId;
+  /** 下拉框里的模型列表（模型管理页排好序的顺序）；不传时用内置顺序 */
+  models?: VideoModelSpec[];
   /** 项目名（新建项目时就是在这里改）：传了才渲染这一行 */
   projectName?: string;
   onProjectNameChange?: (value: string) => void;
@@ -70,6 +75,8 @@ export default function IdeaForm({
   initialShotCount,
   initialShotDuration,
   initialVideoModel,
+  defaultVideoModel,
+  models,
   projectName,
   onProjectNameChange,
   onProjectNameCommit,
@@ -86,7 +93,7 @@ export default function IdeaForm({
   const [shotDuration, setShotDuration] = useState(initialShotDuration ?? 5);
   const [totalDuration, setTotalDuration] = useState(60);
   const [videoModel, setVideoModel] = useState<VideoModelId>(
-    normalizeVideoModel(initialVideoModel, DEFAULT_VIDEO_MODEL_ID),
+    normalizeVideoModel(initialVideoModel ?? defaultVideoModel, DEFAULT_VIDEO_MODEL_ID),
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,6 +128,13 @@ export default function IdeaForm({
   useEffect(() => {
     if (initialVideoModel) setVideoModel(normalizeVideoModel(initialVideoModel));
   }, [initialVideoModel]);
+
+  /** 模型管理页设置的默认模型是异步取回来的，回来后补一次默认选中 */
+  useEffect(() => {
+    if (!initialVideoModel && defaultVideoModel) {
+      setVideoModel(normalizeVideoModel(defaultVideoModel));
+    }
+  }, [defaultVideoModel, initialVideoModel]);
 
   /** 模型决定单镜 / 总时长区间，切模型时把已经越界的值收回来 */
   const limits = shotLimits(videoModel);
@@ -270,7 +284,7 @@ export default function IdeaForm({
               onChange={(e) => setVideoModel(normalizeVideoModel(e.target.value))}
               disabled={loading}
             >
-              {VIDEO_MODELS.map((model) => (
+              {(models?.length ? models : VIDEO_MODELS).map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label} · {model.summary}
                 </option>

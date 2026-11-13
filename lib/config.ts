@@ -18,6 +18,19 @@ const HAPPYHORSE_BASE =
 const happyhorseModel = (mode: 't2v' | 'i2v' | 'r2v', envKey: string) =>
   trim(process.env[envKey]) || `${HAPPYHORSE_BASE}-${mode}`;
 
+const bailianApiKey = trim(process.env.VIDEO_API_KEY);
+const bailianBaseUrl = stripSlash(trim(process.env.VIDEO_BASE_URL));
+
+/**
+ * provider 未单独配置 baseurl 时的兜底地址（provider 实现与模型管理页共用）。
+ * 百炼的两个模型共用 DashScope 原生异步地址；Seedance 走火山方舟。
+ */
+export const VIDEO_DEFAULT_BASE_URLS = {
+  happyhorse: 'https://cn-beijing.maas.qianwenaiapi.com/api/v1',
+  wan: 'https://cn-beijing.maas.qianwenaiapi.com/api/v1',
+  seedance: 'https://ark.cn-beijing.volces.com/api/v3',
+} as const;
+
 export const config = {
   port: Number(trim(process.env.PORT) || 4500),
   llm: {
@@ -44,33 +57,50 @@ export const config = {
     localize: bool(process.env.SCRIPT_LOCALIZE, true),
   },
   video: {
-    /** 阿里云百炼（两个模型共用同一套 Key 与异步接口地址） */
-    apiKey: trim(process.env.VIDEO_API_KEY),
-    baseUrl: stripSlash(trim(process.env.VIDEO_BASE_URL)),
-    /** HappyHorse 1.1：三种生成模式各自一个模型 ID */
-    happyhorse: {
-      /** 基础名（健康检查 / 日志展示用） */
-      base: HAPPYHORSE_BASE,
-      t2v: happyhorseModel('t2v', 'VIDEO_MODEL_T2V'),
-      i2v: happyhorseModel('i2v', 'VIDEO_MODEL_I2V'),
-      r2v: happyhorseModel('r2v', 'VIDEO_MODEL_R2V'),
-    },
-    /** 万相 wan3.0：单模型，文生 / 首尾帧 / 参考素材都走它 */
-    wan: {
-      model: trim(process.env.VIDEO_MODEL_WAN) || 'wan3.0-video',
-    },
     /**
-     * 火山方舟 Seedance：另一套平台，Key 与百炼不通用。
-     * 时长区间 / 参考素材 / 音轨随版本不同，provider 按模型名自动判定
-     * （1.0 pro 是 2~12 秒且没有 r2v，见 lib/providers/video/seedance.ts 的 profileFor）；
-     * 剧本规划仍按 lib/video-models.ts 的 4~30 秒。
+     * 百炼共享兜底：happyhorse / wan 未单独配置 Key / 地址时回落到这里
+     * （角色卡 / 场景卡的文生图也用它）。
      */
-    seedance: {
-      apiKey: trim(process.env.VIDEO_SEEDANCE_API_KEY) || trim(process.env.ARK_API_KEY),
-      baseUrl:
-        stripSlash(trim(process.env.VIDEO_SEEDANCE_BASE_URL)) ||
-        'https://ark.cn-beijing.volces.com/api/v3',
-      model: trim(process.env.VIDEO_MODEL_SEEDANCE) || 'doubao-seedance-2-5-260628',
+    apiKey: bailianApiKey,
+    baseUrl: bailianBaseUrl,
+    /**
+     * 每个视频模型一套独立的连接配置（Key / baseurl / 模型 ID），
+     * 未单独配置时回落到上面的百炼共享值。模型管理页按这套展示。
+     */
+    models: {
+      /** HappyHorse 1.1：三种生成模式各自一个模型 ID */
+      happyhorse: {
+        apiKey: trim(process.env.VIDEO_HAPPYHORSE_API_KEY) || bailianApiKey,
+        apiKeyEnv: trim(process.env.VIDEO_HAPPYHORSE_API_KEY)
+          ? 'VIDEO_HAPPYHORSE_API_KEY'
+          : 'VIDEO_API_KEY',
+        baseUrl: stripSlash(trim(process.env.VIDEO_HAPPYHORSE_BASE_URL)) || bailianBaseUrl,
+        /** 基础名（健康检查 / 日志展示用） */
+        base: HAPPYHORSE_BASE,
+        t2v: happyhorseModel('t2v', 'VIDEO_MODEL_T2V'),
+        i2v: happyhorseModel('i2v', 'VIDEO_MODEL_I2V'),
+        r2v: happyhorseModel('r2v', 'VIDEO_MODEL_R2V'),
+      },
+      /** 万相 wan3.0：单模型，文生 / 首尾帧 / 参考素材都走它 */
+      wan: {
+        apiKey: trim(process.env.VIDEO_WAN_API_KEY) || bailianApiKey,
+        apiKeyEnv: trim(process.env.VIDEO_WAN_API_KEY) ? 'VIDEO_WAN_API_KEY' : 'VIDEO_API_KEY',
+        baseUrl: stripSlash(trim(process.env.VIDEO_WAN_BASE_URL)) || bailianBaseUrl,
+        model: trim(process.env.VIDEO_MODEL_WAN) || 'wan3.0-video',
+      },
+      /**
+       * 火山方舟 Seedance：另一套平台，Key 与百炼不通用。
+       * 时长区间 / 参考素材 / 音轨随版本不同，provider 按模型名自动判定
+       * （1.0 pro 是 2~12 秒且没有 r2v，见 lib/providers/video/seedance.ts 的 profileFor）；
+       * 剧本规划仍按 lib/video-models.ts 的 4~30 秒。
+       */
+      seedance: {
+        apiKey: trim(process.env.VIDEO_SEEDANCE_API_KEY) || trim(process.env.ARK_API_KEY),
+        apiKeyEnv: 'VIDEO_SEEDANCE_API_KEY',
+        baseUrl:
+          stripSlash(trim(process.env.VIDEO_SEEDANCE_BASE_URL)) || VIDEO_DEFAULT_BASE_URLS.seedance,
+        model: trim(process.env.VIDEO_MODEL_SEEDANCE) || 'doubao-seedance-2-5-260628',
+      },
     },
     /** 兜底画质：实际按项目设置（创建项目时选择，默认 480p） */
     resolution: trim(process.env.VIDEO_RESOLUTION) || '480p',
@@ -114,7 +144,63 @@ export function llmConfigured(): boolean {
 
 export function videoConfigured(): boolean {
   // 百炼（HappyHorse / wan3.0）与火山方舟（Seedance）各一套 Key，任一配好即可用
-  return config.video.apiKey.length > 0 || config.video.seedance.apiKey.length > 0;
+  return (
+    config.video.models.happyhorse.apiKey.length > 0 ||
+    config.video.models.wan.apiKey.length > 0 ||
+    config.video.models.seedance.apiKey.length > 0
+  );
+}
+
+/** 某个视频模型是否已在 env 配好 API Key（模型管理页只展示 true 的那些） */
+export function videoModelConfigured(provider: keyof typeof config.video.models): boolean {
+  return config.video.models[provider].apiKey.length > 0;
+}
+
+/**
+ * 模型管理页展示的连接信息。只报配置来源与环境变量键名，不回传密钥。
+ */
+export interface VideoModelConnection {
+  provider: 'happyhorse' | 'wan' | 'seedance';
+  /** 是否已在 env 配好 API Key */
+  configured: boolean;
+  /** 实际生效的 baseurl（未配置时为 provider 的兜底地址） */
+  baseUrl: string;
+  /** 实际生效的 API Key 来自哪个环境变量 */
+  apiKeyEnv: string;
+  /** 实际调用的模型 ID（HappyHorse 为基础名） */
+  model: string;
+  /** HappyHorse 三种生成模式各自的模型 ID，其他模型为 null */
+  modes: { mode: 't2v' | 'i2v' | 'r2v'; model: string }[] | null;
+}
+
+export function videoModelConnection(
+  provider: 'happyhorse' | 'wan' | 'seedance',
+): VideoModelConnection {
+  if (provider === 'happyhorse') {
+    const happyhorse = config.video.models.happyhorse;
+    return {
+      provider,
+      configured: happyhorse.apiKey.length > 0,
+      baseUrl: happyhorse.baseUrl || VIDEO_DEFAULT_BASE_URLS.happyhorse,
+      apiKeyEnv: happyhorse.apiKeyEnv,
+      model: happyhorse.base,
+      modes: [
+        { mode: 't2v', model: happyhorse.t2v },
+        { mode: 'i2v', model: happyhorse.i2v },
+        { mode: 'r2v', model: happyhorse.r2v },
+      ],
+    };
+  }
+
+  const model = config.video.models[provider];
+  return {
+    provider,
+    configured: model.apiKey.length > 0,
+    baseUrl: model.baseUrl || VIDEO_DEFAULT_BASE_URLS[provider],
+    apiKeyEnv: model.apiKeyEnv,
+    model: model.model,
+    modes: null,
+  };
 }
 
 export function imageConfigured(): boolean {
