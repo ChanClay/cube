@@ -42,7 +42,7 @@ make distclean    # 连 node_modules 一起清理
 
 ## 文档
 
-- [视频模型](./docs/video-models.md)：HappyHorse 1.1 / wan3.0 的生成模式分流、素材限制、音轨、接口参数与全部环境变量
+- [视频模型](./docs/video-models.md)：HappyHorse 1.1 / wan3.0 / Seedance 2.5 的生成模式分流、素材限制、音轨、接口参数与全部环境变量
 - [文生图模型](./docs/image-models.md)：角色卡 / 场景卡配图用的万相模型、协议差异与提示词增强
 
 ## 环境变量
@@ -72,12 +72,20 @@ make distclean    # 连 node_modules 一起清理
 | --- | --- | --- | --- | --- |
 | `happyhorse-1.1` | `happyhorse` | **3~15 秒** | 首帧 / 参考图（≤9 张） | 原生音视频联合生成，**始终带音轨、不可关** |
 | `wan3.0-video` | `wan` | **2~30 秒** | 首尾帧 + 参考图 / 视频 / 音频 / 文档 / 网页 | 原生，可用 `audio` 开关 |
+| `seedance-2.5` | `seedance` | **4~30 秒** | 首尾帧 + 参考图 / 视频 / 音频 | `generate_audio` 开关（火山方舟） |
 
-最小配置：
+最小配置（百炼）：
 
 ```env
 VIDEO_API_KEY=sk-your-dashscope-key
 VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
+```
+
+用 Seedance 另配一套火山方舟的 Key（与百炼不通用）：
+
+```env
+VIDEO_SEEDANCE_API_KEY=your-ark-api-key
+VIDEO_MODEL_SEEDANCE=doubao-seedance-2-5-260628
 ```
 
 生成模式分流、素材限制、音轨差异、接口参数与全部 `VIDEO_*` 变量见 [docs/video-models.md](./docs/video-models.md)。
@@ -95,7 +103,7 @@ VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
    - 左栏「故事素材」：先选「故事创意」或「小说 / 章节」。
      - 故事创意：一段想法或梗概，内部先由故事架构师规划蓝图，再由分镜编剧写画面，最后审片一次（见「剧本 agent（三步）」）
      - 小说 / 章节：粘贴或导入 txt / md（200~30000 字）。镜头数量、每镜时长与总时长由改编模型按剧情决定，不再让用户手填；先压成一条主线，再走同样的分镜链路（见「小说 / 章节改编」）
-     - **视频模型**：创建前先选模型（默认 HappyHorse 1.1），单镜时长区间、总时长上限、生成时走的接口都由它决定，创建后固定；编辑既有剧本时回填原模型。能力表见 `lib/video-models.ts`
+     - **视频模型**：创建前先选模型（默认 wan3.0，下拉顺序 wan3.0 / Seedance 2.5 / HappyHorse 1.1），单镜时长区间、总时长上限、生成时走的接口都由它决定，创建后固定；编辑既有剧本时回填原模型。能力表见 `lib/video-models.ts`
      - 每次生成都会新增一份剧本
      - **按镜头数量**：手动指定镜头数（1–12）与单镜时长（滑块范围随模型：wan3.0 2–30 秒 / HappyHorse 3–15 秒）
      - **按总时长**：只给视频总时长（下限 = 单镜下限，上限 = 单镜上限 × 12），按 1 秒粒度调整。不预设镜头数，只给 AI 一个合法区间（`ceil(总时长/单镜上限)` ~ `min(12, 总时长/单镜下限)`），由它按剧情自己判断切几刀并分配每镜时长——串联性强的段落（追逐、穿行、对峙）会合并成一个镜头，用秒级节拍承载，不再被切成等长的几段。每镜时长都在模型的单镜区间内，总和等于设定的总时长
@@ -106,7 +114,7 @@ VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
    - 卡片配图会作为首帧的**兜底**参与生成（见下一节的首帧优先级）。
 3. **生成视频**：单镜头点击「生成视频」，或点「全部生成」进入串行队列（并发 = 1）：一次只提交一镜，等它成功后再用 ffmpeg 抽该视频的**末帧**，作为下一镜的 `first_frame` 传进去，保证画面承接。页面每 5 秒轮询一次任务状态，完成后直接内联播放，可打开原视频。
    - **衔接方式（transition）**：每一镜有一项 `same-take` / `hard-cut` / `time-jump`，由分镜阶段产出（镜头卡片上可改，鼠标悬停能看到判定依据）。它是素材决策的唯一依据：
-     - `same-take`（承接上一镜）：抽上一镜末帧当首帧，**本镜不能再传参考图**——两个模型都把首帧与 `reference_*` 视为互斥（HappyHorse 更极端：`first_frame` 走 i2v、`reference_image` 走 r2v，是两个模型）；
+     - `same-take`（承接上一镜）：抽上一镜末帧当首帧，**本镜不能再传参考图**——三个模型都把首帧与 `reference_*` 视为互斥（HappyHorse 更极端：`first_frame` 走 i2v、`reference_image` 走 r2v，是两个模型）；
      - `hard-cut` / `time-jump`：走角色卡 / 场景卡的 `reference_image`，画面不接帧。
      分镜的判断会再过一层确定性否决（`lib/agents/storyboard.ts` 的 `resolveTransitions`）：换场景、景别跨 2 档以上、首尾状态对不上、有人物的镜头超过 8 秒、连续接帧超过 2 次，一律改判 `hard-cut`，否决原因写进 `transitionReason`。模型没写 transition 时，只有首尾状态重合度 ≥ 0.4 才推定承接，否则按剪辑点处理。
    - **首帧优先级**（单镜生成与串行队列一致，仅 `same-take` 镜头会走到这里）：
@@ -130,14 +138,14 @@ VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
      - **单人镜头给人数上限**：`characterNames` 只有一个时追加 `Only one person appears in frame`。
      - **卡片与末帧同时传，不做身份去重**：试过「末帧里已经出现的人就不传他的卡」，结果整段视频彻底失去参考——末帧是一张整帧场景图，模型把它当环境 / 光线 / 风格参考，不会当成某个具体人物，删掉角色卡等于把身份参考一起删了。重复人物改由提示词约束（只锁脸和服装、`do not duplicate`、单人镜头给人数上限）。
      - 重算某镜提示词（`/api/shot/refine`）时也会把同一份名单与上一镜 `exitState` 一起喂给模型，并要求「本镜开头的人物与名单完全一致，需要新角色时写成过程中走进画面」。
-   - 两个模型都原生出音轨：HappyHorse 1.1 是音视频联合生成、且无法关闭；wan3.0 由 `VIDEO_AUDIO` 控制。
+   - 三个模型都原生出音轨：HappyHorse 1.1 是音视频联合生成、且无法关闭；wan3.0（`audio`）与 Seedance 2.5（`generate_audio`）由 `VIDEO_AUDIO` 控制。
 4. **合成成片**：2 个以上镜头完成后点「合成成片」，服务端下载各镜头并用 ffmpeg 拼接为一个 MP4，可播放/下载。
 
 ## 台词与声音
 
-两个模型都会原生出声，差别只在能不能关：HappyHorse 1.1 是音视频联合生成、**音轨不可关闭**，也不接受 `reference_audio` 指定音色；wan3.0 可以用 `VIDEO_AUDIO` 关掉。细节见 [docs/video-models.md](./docs/video-models.md)。
+三个模型都会原生出声，差别只在能不能关：HappyHorse 1.1 是音视频联合生成、**音轨不可关闭**，也不接受 `reference_audio` 指定音色；wan3.0 与 Seedance 2.5 可以用 `VIDEO_AUDIO` 关掉。细节见 [docs/video-models.md](./docs/video-models.md)。
 
-两种模型都必须**把台词写进 prompt 才会被说出来**，写法一致：
+三个模型都必须**把台词写进 prompt 才会被说出来**，写法一致：
 
 - 分镜输出 `narration`（这一镜要说的话）和 `narrationType`：`dialogue` 是角色开口、会驱动口型；`voiceover` 是画外旁白、人物闭嘴
 - `dialogue` 还会输出 `speaker`（谁在说，必须是本镜 `characters` 里的名字）。多人物镜头会把说话人写进提示词，避免模型挑错人开口
@@ -156,6 +164,7 @@ VIDEO_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/api/v1
 
 - **wan3.0**：首帧 / 尾帧 / 参考图 / 参考视频 / 参考音频 / 文档 / 网页（全模态）
 - **HappyHorse 1.1**：首帧 / 尾帧 / 参考图（只吃图片，JPEG / PNG / WEBP，≤20MB）
+- **Seedance 2.5**：首帧 / 尾帧 / 参考图 / 参考视频 / 参考音频（不支持文档、网页；2.5 / 2.0 系列不接受含真人人脸的参考素材）
 
 | 来源 | 存储 | 说明 |
 | --- | --- | --- |

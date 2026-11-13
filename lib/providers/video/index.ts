@@ -1,5 +1,6 @@
 import type { VideoProviderName } from '@/lib/video-models';
 import { HappyHorseProvider } from './happyhorse';
+import { SeedanceProvider } from './seedance';
 import { WanProvider } from './wan';
 import type { VideoProvider } from './types';
 
@@ -14,15 +15,16 @@ const instances: Partial<Record<VideoProviderName, VideoProvider>> = {};
 const FACTORIES: Record<VideoProviderName, () => VideoProvider> = {
   happyhorse: () => new HappyHorseProvider(),
   wan: () => new WanProvider(),
+  seedance: () => new SeedanceProvider(),
 };
 
 export function isVideoProviderName(value: unknown): value is VideoProviderName {
-  return value === 'happyhorse' || value === 'wan';
+  return typeof value === 'string' && value in FACTORIES;
 }
 
 /**
  * 取 provider 实现。
- * @param name provider 名（'happyhorse' / 'wan'）
+ * @param name provider 名（'happyhorse' / 'wan' / 'seedance'）
  */
 export function getProvider(name: VideoProviderName): VideoProvider {
   instances[name] ??= FACTORIES[name]();

@@ -8,7 +8,8 @@ export interface CreateVideoInput {
   ratio?: string;
   media: MediaInput[];
   /**
-   * 是否要模型生成音轨；只有 wan3.0 认这个开关（不传时用全局 VIDEO_AUDIO）。
+   * 是否要模型生成音轨；wan3.0（`audio`）与 Seedance（`generate_audio`）认这个开关
+   * （不传时用全局 VIDEO_AUDIO）。
    * HappyHorse 1.1 始终生成音轨、没有对应参数，会忽略该字段。
    */
   audio?: boolean;

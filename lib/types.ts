@@ -8,12 +8,12 @@ import type { VideoRatio, VideoResolution } from './video-options';
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
 /**
- * 素材类型表。
+ * 素材类型表。各模型支持的子集不同，由 lib/skills/media.ts 的 mediaTypesFor 按 provider 过滤。
  *
- * 当前视频模型 HappyHorse 1.1 只接受图片：
- * - first_frame / last_frame：帧图，i2v 只取其中一张当首帧（last_frame 仅作兜底）
- * - reference_image：参考图，1~9 张走 r2v
- * - reference_video / reference_audio / file / link：模型不支持，保留仅为兼容旧数据，提交前会被摘掉
+ * - first_frame / last_frame：帧图，首帧（+ 尾帧）生视频
+ * - reference_image：参考图（1~9 张）
+ * - reference_video / reference_audio：wan3.0 与 Seedance 支持；HappyHorse 不支持，提交前会被摘掉
+ * - file / link：只有 wan3.0 支持，其余模型提交前会被摘掉
  */
 export type MediaType =
   | 'first_frame'

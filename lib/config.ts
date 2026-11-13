@@ -59,6 +59,17 @@ export const config = {
     wan: {
       model: trim(process.env.VIDEO_MODEL_WAN) || 'wan3.0-video',
     },
+    /**
+     * 火山方舟 Seedance：另一套平台，Key 与百炼不通用。
+     * 时长区间按 2.5 写在 lib/video-models.ts；换成 1.0 pro（2~12 秒）时记得一起改。
+     */
+    seedance: {
+      apiKey: trim(process.env.VIDEO_SEEDANCE_API_KEY) || trim(process.env.ARK_API_KEY),
+      baseUrl:
+        stripSlash(trim(process.env.VIDEO_SEEDANCE_BASE_URL)) ||
+        'https://ark.cn-beijing.volces.com/api/v3',
+      model: trim(process.env.VIDEO_MODEL_SEEDANCE) || 'doubao-seedance-2-5-260628',
+    },
     /** 兜底画质：实际按项目设置（创建项目时选择，默认 480p） */
     resolution: trim(process.env.VIDEO_RESOLUTION) || '480p',
     /** 兜底画幅：实际按项目设置（默认 16:9）；HappyHorse 首帧模式的画幅跟随首帧 */
@@ -100,7 +111,8 @@ export function llmConfigured(): boolean {
 }
 
 export function videoConfigured(): boolean {
-  return config.video.apiKey.length > 0;
+  // 百炼（HappyHorse / wan3.0）与火山方舟（Seedance）各一套 Key，任一配好即可用
+  return config.video.apiKey.length > 0 || config.video.seedance.apiKey.length > 0;
 }
 
 export function imageConfigured(): boolean {

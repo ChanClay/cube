@@ -50,8 +50,8 @@ export async function startVideoJob(input: StartVideoJobInput): Promise<VideoJob
   const ratio = input.ratio || config.video.ratio;
   const media = input.media ?? [];
   /**
-   * 只有 wan3.0 认这个开关；HappyHorse 1.1 原生联合生成音轨、没有 audio 参数，
-   * provider 会忽略它（音轨照样有，关不掉）。
+   * wan3.0（`audio`）与 Seedance（`generate_audio`）认这个开关；
+   * HappyHorse 1.1 原生联合生成音轨、没有对应参数，provider 会忽略它（音轨照样有，关不掉）。
    */
   const audio = config.video.audio;
 

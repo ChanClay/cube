@@ -1,5 +1,5 @@
 import type { MediaInput, MediaType } from '@/lib/types';
-import { videoModelSpec } from '@/lib/video-models';
+import { videoModelSpec, type VideoProviderName } from '@/lib/video-models';
 
 export const MEDIA_LABEL: Record<MediaType, string> = {
   first_frame: '首帧图',
@@ -39,14 +39,31 @@ export const IMAGE_MEDIA_TYPES: MediaType[] = [
   'reference_image',
 ];
 
+/** Seedance 支持图片 / 视频 / 音频参考，但没有文档、网页 */
+export const SEEDANCE_MEDIA_TYPES: MediaType[] = [
+  'first_frame',
+  'last_frame',
+  'reference_image',
+  'reference_video',
+  'reference_audio',
+];
+
+/** 每个 provider 能挂的素材类型；Record 保证新增 provider 时这里不会漏 */
+const MEDIA_TYPES_BY_PROVIDER: Record<VideoProviderName, MediaType[]> = {
+  wan: MEDIA_TYPES,
+  happyhorse: IMAGE_MEDIA_TYPES,
+  seedance: SEEDANCE_MEDIA_TYPES,
+};
+
 /**
  * 这份剧本的视频模型能挂哪些素材。
  *
  * wan3.0 全模态（首尾帧 + 参考图 / 视频 / 音频 / 文档 / 网页）；
- * HappyHorse 1.1 只吃图片，其余类型提交前会被 provider 摘掉，所以下拉里不给。
+ * HappyHorse 1.1 只吃图片；Seedance 吃图片 / 视频 / 音频。
+ * 不支持的素材即使出现在旧数据里，提交前也会被 provider 摘掉，所以下拉里不给。
  */
 export function mediaTypesFor(videoModel?: string | null): MediaType[] {
-  return videoModelSpec(videoModel).provider === 'wan' ? MEDIA_TYPES : IMAGE_MEDIA_TYPES;
+  return MEDIA_TYPES_BY_PROVIDER[videoModelSpec(videoModel).provider];
 }
 
 /** 各类型的数量上限（取两个模型里更严的一档：参考图 9 张、首尾帧各 1 张） */

@@ -8,10 +8,10 @@
  * 模型 ID 与密钥等运行期配置在 lib/config.ts。
  */
 
-export type VideoModelId = 'happyhorse-1.1' | 'wan3.0-video';
+export type VideoModelId = 'happyhorse-1.1' | 'wan3.0-video' | 'seedance-2.5';
 
 /** 实现该模型的 provider 名（对应 lib/providers/video 下的实现） */
-export type VideoProviderName = 'happyhorse' | 'wan';
+export type VideoProviderName = 'happyhorse' | 'wan' | 'seedance';
 
 export interface VideoModelSpec {
   /** 剧本上记录的模型标识 */
@@ -33,14 +33,39 @@ export interface VideoModelSpec {
   /**
    * 音轨能力：
    * - `always`：原生音视频联合生成，始终带音轨，接口没有开关（HappyHorse 1.1）
-   * - `toggle`：可用 audio 参数开关（wan3.0，受 VIDEO_AUDIO 控制）
+   * - `toggle`：可用 audio 参数开关（wan3.0 的 `audio` / Seedance 的 `generate_audio`，
+   *   受 VIDEO_AUDIO 控制）
    */
   audio: 'always' | 'toggle';
   /** 下拉里的一行说明 */
   summary: string;
 }
 
+/** 顺序即创建剧本页下拉框里的顺序：wan3.0 → Seedance → HappyHorse */
 export const VIDEO_MODELS: VideoModelSpec[] = [
+  {
+    id: 'wan3.0-video',
+    provider: 'wan',
+    label: '万相 Wan 3.0',
+    minShotSeconds: 2,
+    maxShotSeconds: 30,
+    preferredShotSeconds: 10,
+    maxShotCount: 12,
+    audio: 'toggle',
+    summary: '首尾帧 / 参考视频音频，2~30 秒，音轨可开关',
+  },
+  {
+    id: 'seedance-2.5',
+    provider: 'seedance',
+    label: 'Seedance 2.5',
+    minShotSeconds: 4,
+    maxShotSeconds: 30,
+    preferredShotSeconds: 10,
+    maxShotCount: 12,
+    // 2.5 / 2.0 系列有 generate_audio，受 VIDEO_AUDIO 控制（1.0 pro 无声，没有这个参数）
+    audio: 'toggle',
+    summary: '首尾帧 / 参考图·视频·音频，4~30 秒，音轨可开关（火山方舟）',
+  },
   {
     id: 'happyhorse-1.1',
     provider: 'happyhorse',
@@ -53,21 +78,10 @@ export const VIDEO_MODELS: VideoModelSpec[] = [
     audio: 'always',
     summary: '首帧 / 参考图（≤9 张）生视频，3~15 秒，原生音轨（不可关）',
   },
-  {
-    id: 'wan3.0-video',
-    provider: 'wan',
-    label: '万相 Wan 3.0',
-    minShotSeconds: 2,
-    maxShotSeconds: 30,
-    preferredShotSeconds: 10,
-    maxShotCount: 12,
-    audio: 'toggle',
-    summary: '首尾帧 / 参考视频音频，2~30 秒，音轨可开关',
-  },
 ];
 
-/** 新建剧本时默认选中的模型 */
-export const DEFAULT_VIDEO_MODEL_ID: VideoModelId = 'happyhorse-1.1';
+/** 新建剧本时默认选中的模型（下拉第一项） */
+export const DEFAULT_VIDEO_MODEL_ID: VideoModelId = 'wan3.0-video';
 
 /**
  * 旧剧本没有 `videoModel` 字段时的归属。
@@ -90,7 +104,11 @@ export function normalizeVideoModel(
 /** 取模型能力；未知值按旧剧本处理（wan3.0） */
 export function videoModelSpec(value?: string | null): VideoModelSpec {
   const id = normalizeVideoModel(value);
-  return VIDEO_MODELS.find((model) => model.id === id) ?? VIDEO_MODELS[VIDEO_MODELS.length - 1];
+  return (
+    VIDEO_MODELS.find((model) => model.id === id) ??
+    VIDEO_MODELS.find((model) => model.id === LEGACY_VIDEO_MODEL_ID) ??
+    VIDEO_MODELS[0]
+  );
 }
 
 export function videoModelLabel(value?: string | null): string {
