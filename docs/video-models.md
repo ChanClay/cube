@@ -42,9 +42,19 @@
 
 **限制**：时长 `[4, 30]` 秒；`resolution` 小写 `480p` / `720p` / `1080p`；`ratio` 支持 `21:9` / `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `adaptive`；文档与网页不支持。参考图本地统一按 9 张上限（2.5 接口本身允许 30 张）；2.5 / 2.0 系列**不接受含真人人脸的参考图 / 视频**。
 
+**模型版本差异**（`VIDEO_MODEL_SEEDANCE` 填什么，就按哪个版本的能力走，判定见 `seedance.ts` 的 `profileFor`）：
+
+| 版本 | 单镜时长 | 参考素材（r2v） | `generate_audio` |
+| --- | --- | --- | --- |
+| 2.0 / 2.5（默认，如 `doubao-seedance-2-5-260628`） | 4~30 秒 | 图片 / 视频 / 音频 | 有 |
+| 1.0 lite | 2~12 秒 | 参考图（≤4 张） | 无 |
+| 1.0 pro / pro-fast（如 `doubao-seedance-1-0-pro-fast-251015`） | 2~12 秒 | **不支持**，只有文生与首尾帧 | 无 |
+
+1.0 pro / pro-fast 收到参考素材会回 `task_type r2v does not support model ...` 的 400，provider 在提交前就拦下并给出换模型的提示；时长会被自动夹进版本区间（剧本仍按 2.5 的 4~30 秒排片，超出部分服务端告警）。
+
 **音轨**：`generate_audio` 默认 `true`，受 `VIDEO_AUDIO` 控制；1.0 pro 系列是无声模型，没有这个参数，provider 会按模型名自动跳过。
 
-换模型版本（`VIDEO_MODEL_SEEDANCE`）时注意能力不同：1.0 pro 是 2~12 秒、参考素材只有图片，需同步改 `lib/video-models.ts` 里的单镜区间。
+换模型版本（`VIDEO_MODEL_SEEDANCE`）时注意能力不同：1.0 pro / pro-fast 是 2~12 秒且**没有 r2v**，带参考素材的镜头会直接被拦下；1.0 lite 能给参考图但没有音轨。剧本的单镜区间仍按 `lib/video-models.ts` 的 4~30 秒排片，需要严格对齐 1.0 的话再改那张表。
 
 ## 环境变量
 
@@ -57,7 +67,7 @@
 | `VIDEO_MODEL_WAN` | wan3.0 模型 ID，默认 `wan3.0-video` |
 | `VIDEO_SEEDANCE_API_KEY` | 火山方舟 API Key（也认 `ARK_API_KEY`），与百炼的 Key 不通用 |
 | `VIDEO_SEEDANCE_BASE_URL` | 火山方舟接口地址，默认 `https://ark.cn-beijing.volces.com/api/v3` |
-| `VIDEO_MODEL_SEEDANCE` | Seedance 模型 ID，默认 `doubao-seedance-2-5-260628`；也可填方舟 Endpoint ID |
+| `VIDEO_MODEL_SEEDANCE` | Seedance 模型 ID，默认 `doubao-seedance-2-5-260628`；也可填方舟 Endpoint ID。1.0 pro / pro-fast 不支持参考素材（r2v），详见上面的版本差异表 |
 | `VIDEO_RESOLUTION` | 兜底画质：`480p` / `720p` / `1080p`。实际画质按项目设置（创建项目时选择，默认 `480p`） |
 | `VIDEO_RATIO` | 兜底画幅：`21:9` / `16:9` / `4:3` / `3:4` / `4:5` / `5:4` / `1:1` / `9:21` / `9:16`。实际画幅按项目设置（默认 `16:9`）；HappyHorse i2v 画幅跟随首帧，wan3.0 带首尾帧固定 `adaptive` |
 | `VIDEO_DURATION` | 兜底时长（秒），实际以每个镜头的 duration 为准（按模型区间夹住） |

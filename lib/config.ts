@@ -61,7 +61,9 @@ export const config = {
     },
     /**
      * 火山方舟 Seedance：另一套平台，Key 与百炼不通用。
-     * 时长区间按 2.5 写在 lib/video-models.ts；换成 1.0 pro（2~12 秒）时记得一起改。
+     * 时长区间 / 参考素材 / 音轨随版本不同，provider 按模型名自动判定
+     * （1.0 pro 是 2~12 秒且没有 r2v，见 lib/providers/video/seedance.ts 的 profileFor）；
+     * 剧本规划仍按 lib/video-models.ts 的 4~30 秒。
      */
     seedance: {
       apiKey: trim(process.env.VIDEO_SEEDANCE_API_KEY) || trim(process.env.ARK_API_KEY),
