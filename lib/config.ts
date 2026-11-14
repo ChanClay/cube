@@ -22,6 +22,30 @@ const bailianApiKey = trim(process.env.VIDEO_API_KEY);
 const bailianBaseUrl = stripSlash(trim(process.env.VIDEO_BASE_URL));
 
 /**
+ * 角色卡 / 场景卡配图用哪家文生图：
+ * - `wan`：百炼万相（默认，保持原有行为）
+ * - `seedream`：火山方舟 Seedream，与 Seedance 同平台，Key 一般可复用
+ *
+ * 填错或未配置一律按 wan 处理，避免一个拼写错误把配图链路整个打挂。
+ */
+export type ImageProviderName = 'wan' | 'seedream';
+
+const imageProvider: ImageProviderName =
+  trim(process.env.IMAGE_PROVIDER).toLowerCase() === 'seedream' ? 'seedream' : 'wan';
+
+/** Seedream 的 Key 优先级：专用 > Seedance（同属方舟）> ARK_API_KEY */
+const seedreamImageApiKey =
+  trim(process.env.IMAGE_SEEDREAM_API_KEY) ||
+  trim(process.env.VIDEO_SEEDANCE_API_KEY) ||
+  trim(process.env.ARK_API_KEY);
+
+const seedreamImageApiKeyEnv = trim(process.env.IMAGE_SEEDREAM_API_KEY)
+  ? 'IMAGE_SEEDREAM_API_KEY'
+  : trim(process.env.VIDEO_SEEDANCE_API_KEY)
+    ? 'VIDEO_SEEDANCE_API_KEY'
+    : 'ARK_API_KEY';
+
+/**
  * provider 未单独配置 baseurl 时的兜底地址（provider 实现与模型管理页共用）。
  * 百炼的两个模型共用 DashScope 原生异步地址；Seedance 走火山方舟。
  */
@@ -127,11 +151,25 @@ export const config = {
     referencePrevFrame: bool(process.env.VIDEO_REFERENCE_PREV_FRAME, true),
   },
   image: {
-    /** 角色卡 / 场景卡配图用的文生图模型；默认复用视频的百炼 Key 与地址 */
+    /** 用哪家文生图：wan（百炼万相）/ seedream（火山方舟 Seedream） */
+    provider: imageProvider,
+    /** 万相：默认复用视频的百炼 Key 与地址；provider=seedream 时不用 */
     apiKey: trim(process.env.IMAGE_API_KEY) || trim(process.env.VIDEO_API_KEY),
     baseUrl:
       stripSlash(trim(process.env.IMAGE_BASE_URL)) || stripSlash(trim(process.env.VIDEO_BASE_URL)),
     model: trim(process.env.IMAGE_MODEL) || 'wan2.6-t2i',
+    /**
+     * 火山方舟 Seedream：与 Seedance 同一平台、同一套 Key。
+     * 体积/尺寸语义与百炼不同（像素写成 `1024x1536`，不是 `1104*1472`），
+     * 由 lib/providers/image/seedream.ts 做映射。
+     */
+    seedream: {
+      apiKey: seedreamImageApiKey,
+      apiKeyEnv: seedreamImageApiKeyEnv,
+      baseUrl:
+        stripSlash(trim(process.env.IMAGE_SEEDREAM_BASE_URL)) || VIDEO_DEFAULT_BASE_URLS.seedance,
+      model: trim(process.env.IMAGE_SEEDREAM_MODEL) || 'doubao-seedream-5-5-261028',
+    },
   },
   /** 站点对外地址；配置后本地素材会被拼成绝对地址交给视频模型 */
   publicBaseUrl: stripSlash(trim(process.env.PUBLIC_BASE_URL)),
@@ -204,5 +242,7 @@ export function videoModelConnection(
 }
 
 export function imageConfigured(): boolean {
-  return config.image.apiKey.length > 0;
+  return config.image.provider === 'seedream'
+    ? config.image.seedream.apiKey.length > 0
+    : config.image.apiKey.length > 0;
 }

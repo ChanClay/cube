@@ -6,7 +6,7 @@ import {
   buildCardPrompt,
   cardImageSize,
 } from '@/lib/skills/image-prompt';
-import { generateImage } from '@/lib/providers/image/wan-image';
+import { generateImage } from '@/lib/providers/image';
 import { currentUserId } from '@/lib/services/auth';
 import { acquireSubmitLock, releaseSubmitLock, submitLockKey } from '@/lib/services/submit-lock';
 import { UPLOAD_DIR } from '@/lib/services/uploads';
@@ -34,8 +34,9 @@ const MIME_BY_EXT: Record<string, string> = {
  * 给角色卡 / 场景卡生成一张配图。
  * body: { prompt, kind: 'character' | 'scene', style? }
  *
- * 万相返回的地址只保留 24 小时，所以这里立刻下载并落到 .data/uploads，
- * 前端拿到的是站内永久地址。
+ * 上游（万相 / Seedream）返回的地址只保留 24 小时，所以这里立刻下载并落到
+ * .data/uploads，前端拿到的是站内永久地址。
+ * 具体走哪家由 IMAGE_PROVIDER 决定，见 lib/providers/image/index.ts。
  */
 export async function POST(request: Request) {
   let body: unknown;
