@@ -1,6 +1,7 @@
 import type { ResultSetHeader } from 'mysql2';
 import { currentUserId } from './auth';
 import { DEFAULT_PROJECT_ID, getDb } from './db';
+import { logAgentWarn } from './logger';
 import type { Script, StoredScript, StoredScriptSummary } from '@/lib/types';
 
 const MAX_SCRIPTS = 200;
@@ -34,7 +35,17 @@ export interface SaveScriptInput {
 function parseContent(row: ScriptRow): Script {
   try {
     return JSON.parse(row.content) as Script;
-  } catch {
+  } catch (err) {
+    /**
+     * 解析失败不能只留一个空壳就完事——「界面上的角色卡全没了」
+     * 大多是这一处静默清空造成的，必须把原因与内容样本留进日志。
+     */
+    void logAgentWarn('save', {
+      reason: '剧本 content 解析失败，已退化为空剧本（角色卡与镜头全部丢失）',
+      id: row.id,
+      error: err instanceof Error ? err.message : String(err),
+      sample: row.content?.slice(0, 200),
+    });
     return { title: row.title, logline: '', style: row.style, characters: [], shots: [] };
   }
 }
@@ -65,12 +76,47 @@ export async function saveScript(input: SaveScriptInput): Promise<StoredScript> 
   const userId = await currentUserId();
 
   const [existingRows] = await pool.query(
-    'SELECT created_at, project_id FROM scripts WHERE id = ? AND user_id = ? LIMIT 1',
+    'SELECT created_at, project_id, content FROM scripts WHERE id = ? AND user_id = ? LIMIT 1',
     [id, userId],
   );
-  const existing = (existingRows as { created_at: number | string; project_id: string | null }[])[0];
+  const existing = (existingRows as {
+    created_at: number | string;
+    project_id: string | null;
+    content: string;
+  }[])[0];
   const createdAt = existing ? Number(existing.created_at) : now;
   const projectId = input.projectId?.trim() || existing?.project_id || DEFAULT_PROJECT_ID;
+
+  /**
+   * 剧本是整份覆盖写，两个会话先后保存时后写者会整体顶掉前者。
+   * 这里不做字段级合并（用户主动删卡必须生效），但在「这次保存让角色卡变少」时
+   * 留痕——丢卡事件至少能从日志里追回来，而不是无声无息。
+   */
+  if (existing) {
+    const storedNames = new Set<string>();
+    try {
+      const stored = JSON.parse(existing.content) as Script;
+      for (const c of stored.characters ?? []) {
+        const name = (c?.name ?? '').trim();
+        if (name) storedNames.add(name);
+      }
+    } catch {
+      // 旧内容已损坏，解析失败由 parseContent / getScript 侧留痕
+    }
+    const incomingNames = new Set(
+      (script.characters ?? [])
+        .map((c) => (c?.name ?? '').trim())
+        .filter(Boolean),
+    );
+    const missing = [...storedNames].filter((name) => !incomingNames.has(name));
+    if (missing.length > 0) {
+      void logAgentWarn('save', {
+        reason: '本次保存减少了角色卡（并发整体覆盖或主动删除）',
+        id,
+        missing,
+      });
+    }
+  }
 
   await pool.query(
     `INSERT INTO scripts (id, user_id, project_id, idea, title, style, content, created_at, updated_at)

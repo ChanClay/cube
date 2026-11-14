@@ -111,12 +111,16 @@ export function shotSizeGap(
   return Math.abs(shotSizeRank(a.shotSize) - shotSizeRank(b.shotSize));
 }
 
-/** 按 name 去重，保留第一次出现的顺序（模型经常把同一角色 / 场景写两遍） */
+/**
+ * 按 name 去重，保留第一次出现的顺序（模型经常把同一角色 / 场景写两遍）。
+ * 比较键先 trim 并忽略大小写：模型写「老陈 」和「老陈」是同一个主体，
+ * 不归一的话两张重复卡会各留一张。
+ */
 export function dedupeByName<T extends { name: string }>(items: T[]): T[] {
   const seen = new Set<string>();
   const result: T[] = [];
   for (const item of items) {
-    const key = item.name.trim();
+    const key = item.name.trim().toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
     result.push(item);

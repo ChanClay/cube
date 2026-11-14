@@ -63,7 +63,7 @@ export async function logVideoError(
 
 /** 剧本 agent 链路异常（改编 / 蓝图 / 翻译 / 审片失败会降级，属于告警） */
 export async function logAgentWarn(
-  scope: 'adapt' | 'plan' | 'script' | 'localize' | 'review',
+  scope: 'adapt' | 'plan' | 'script' | 'localize' | 'review' | 'save',
   detail: Record<string, unknown>,
 ): Promise<void> {
   return logEvent('agent', scope, detail, 'warn');

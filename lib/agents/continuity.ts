@@ -256,7 +256,7 @@ export function buildBlueprintSystemPrompt(
    motion / motionEn：全片运动基调。motion 一句话说清「观众在任何一镜里都该感到画面在动，还是可以静止」，以及动感来自哪里；motionEn 是它的英文短句（≤18 词），运行时会被逐镜追加到每一条视频提示词的末尾。这两条是全片属性，不是某一镜的动作清单——规则见下。
    ${MOTION_SCOPE_RULES}
 4. 结构：用经典节拍组织，每个 beat 标注 beat 字段，只能取：开场钩子 / 铺垫 / 激励事件 / 升级 / 中点转折 / 低谷 / 高潮 / 余韵。镜数少时可以省略部分节拍，但开场钩子、高潮、余韵不能缺。
-5. 主体卡 2~5 张（最多 8 张，放在 characters 数组里）：role 写叙事功能。
+5. 主体卡 2~5 张（最多 8 张，放在 characters 数组里）：role 写叙事功能。characters 数组的长度必须与实际设计出的主体数完全一致——先列完清单再逐个写卡，每个主体一张卡，不许合并、不许省略，写完自检数量与清单一一致。
    写卡之前先列一遍「本片有哪些需要在两个以上镜头里被认出来的视觉主体」，再逐个判断主体类型。不判断类型就套人类模板，会把机甲、巨兽、载具写成「三十岁男人」；漏掉一个主体，就会在成片里每镜重新设计一遍。
    ${SUBJECT_CARD_RULES}
    每张卡都必须带 subjectType，只能取 human / vehicle / mech（人类与类人写 human，载具写 vehicle，机甲 / 机器人 / 机械巨兽写 mech）。
@@ -740,13 +740,25 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
   }
 
   const charactersRaw = Array.isArray(obj.characters) ? obj.characters : [];
-  const characters = dedupeByName(
-    charactersRaw
-      .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
-      .slice(0, 8)
-      .map(normalizeCharacter)
-      .filter((c): c is PlanCharacter => c !== null),
-  );
+  const normalized = charactersRaw
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+    .map(normalizeCharacter)
+    .filter((c): c is PlanCharacter => c !== null);
+  const characters = dedupeByName(normalized).slice(0, 8);
+  // 缺名字的卡 / 重复名 / 超限都会在这里被丢：必须留痕，不能静默消失
+  const droppedUnnamed = charactersRaw.length - normalized.length;
+  if (droppedUnnamed > 0 || charactersRaw.length > characters.length) {
+    void logAgentWarn('plan', {
+      reason:
+        droppedUnnamed > 0
+          ? `主体卡有 ${droppedUnnamed} 张缺 name 字段被丢弃`
+          : charactersRaw.length > 8
+            ? '主体卡超过 8 张，超出部分被截断'
+            : '主体卡存在重复名字，去重后被丢弃',
+      total: charactersRaw.length,
+      kept: characters.length,
+    });
+  }
   if (characters.length === 0) {
     problems.push({ code: 'no-character', message: '没有给出任何角色', blocking: true });
   }

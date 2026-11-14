@@ -154,6 +154,7 @@ function buildSystemPrompt(): string {
 【七、数据完整性】
 21. 每个镜头的 characters 是这一镜真正出镜的主体名数组（人物，以及本镜出现的载具卡 / 主要道具卡），必须逐字使用角色表名字（无主体出镜时给空数组）；每个镜头里的 scenes 必须逐字使用场景表名字。
 22. JSON 顶层的 scenes 是全片复用的场景卡（1~4 个），有蓝图时直接沿用蓝图；不要按镜头重复写场景卡。
+22.1 JSON 顶层的 characters 必须与主体卡清单逐字一一对应：有蓝图时数量与名字都照抄清单，一个主体一张卡，不得新增清单外的主体，也不得漏掉清单里的主体；没有蓝图时，必须与你开头列出的主体清单一一对应，同样不得中途增删。
 23. 所有镜头 duration 之和必须等于用户要求的总时长；给了「镜头时长分配」就逐条照抄，不要改动。
 24. shots 数组长度必须精确等于目标镜数。
 25. 只输出一个 JSON 对象，不要解释文字、不要 markdown 代码块。
@@ -242,6 +243,7 @@ ${req.idea}
 
   const selfCheck = `输出前自检（不通过就改，不要把自检写进 JSON）：
 1) shots 是否正好 ${expectedShots} 个？
+1.1) characters 数组是否与主体卡清单逐字一一对应（名字与数量都一致，没有多写、漏写或改名的主体）？
 2) transition=same-take 时，本镜的 entryState 是否与上一镜的 exitState 是同一个画面事实（谁 / 在哪 / 什么姿势 / 手里拿着什么 / 朝哪边运动），只是换了措辞？transition=hard-cut / time-jump 时，人物、场景、光线、运动方向与背景锚点是否仍然与上一镜一致？
 3) 第 1 镜到最后一镜连起来读：每一处跳跃（换场地、换时间、动作不连续）是否都在上一镜的 transition 里写成了 hard-cut / time-jump？写成 same-take 的两镜，是不是真的同一个连续动作、景别与机位都没换？全片 same-take 是否没有连续出现超过 2 次？referencePrevFrame 是否按档位写（跨度 ≥2 的硬切有没有先改成「垫一档」或 hiddenCut，而不是硬写 true）？跨了景别的长镜头是不是都写了 hiddenCut=true？
 4) 每镜的 beatSheet 是否从 0 秒切到 duration 秒、段与段之间不断档不重叠、每段都是一个（且只有一个）可见动作，并且每段都给了 8~14 词的 actionEn？
@@ -491,10 +493,10 @@ function normalizeScript(
   shots.forEach((s, i) => (s.index = i + 1));
 
   const charactersRaw = Array.isArray(obj.characters) ? obj.characters : [];
+  /** 先归一 + 去重再截断：截断在去重前会白白砍掉后面还没去重的不同主体 */
   const characters: Character[] = dedupeByName(
     charactersRaw
       .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
-      .slice(0, 8)
       .map((c) => {
         const name = str(c.name, '角色');
         const desc = str(c.desc);
@@ -506,13 +508,26 @@ function normalizeScript(
           promptEn: str(c.promptEn) || undefined,
         };
       }),
-  );
+  ).slice(0, 8);
+  if (charactersRaw.length > characters.length) {
+    void logAgentWarn('script', {
+      reason:
+        charactersRaw.length > 8
+          ? '模型输出的主体卡超过 8 张，超出部分被截断'
+          : '模型输出的主体卡存在重复名字，去重后被丢弃',
+      total: charactersRaw.length,
+      kept: characters.length,
+      dropped: charactersRaw
+        .slice(characters.length)
+        .map((c) => str((c as Record<string, unknown>).name))
+        .filter(Boolean),
+    });
+  }
 
   const scenesRaw = Array.isArray(obj.scenes) ? obj.scenes : [];
   const scenes: Scene[] = dedupeByName(
     scenesRaw
       .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
-      .slice(0, 8)
       .map((s) => ({
         id: crypto.randomUUID(),
         name: str(s.name, '场景'),
@@ -522,7 +537,7 @@ function normalizeScript(
         state: str(s.state ?? s.variant) || undefined,
       }))
       .filter((s) => s.name.trim() || s.desc.trim()),
-  );
+  ).slice(0, 8);
 
   const sceneIdByName = new Map(
     scenes.filter((scene) => scene.id).map((scene) => [scene.name.trim(), scene.id as string]),
