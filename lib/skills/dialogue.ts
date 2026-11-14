@@ -41,18 +41,19 @@ function withEnd(text: string): string {
 }
 
 /**
- * 带上一镜末帧当参考图时追加的稳定句。
+ * 带上一镜末帧当参考图时追加的起始句。
  *
- * 必须把作用范围写死：模型的 reference_image 是「角色 / 物品 / 风格参考」，
- * 不给边界它会连构图和机位一起抄。这里只借光线与材质，
- * 景别、机位、构图回到本镜自己的描述。
- *
- * 唯一要延续的是「串联」本身：同一轴线侧、同一运动方向。
- * 这是换景别时两镜仍像同一次拍摄的依据——末帧可以不给构图，但不能连方向也一起丢掉。
+ * 模型的 reference_image 默认语义是「角色 / 物品 / 风格参考」，
+ * 不明说「视频从这张图开始」，它就只当调色板用，衔接感全靠运气。
+ * 现在的策略是「起点锁死、走向放开」：
+ * - 起点：开头那一帧就是参考图（上一镜末帧）；
+ * - 走向：构图按本镜自己的景别 / 机位描述重新取景发散——全景推进接中景固定机位时，
+ *   模型围绕末帧重新组织画面，而不是被钉死在上一镜构图里做推拉；
+ * - 延续：只有运动轴线与出画方向必须保持——这是换景别后两镜仍像同一次拍摄的依据。
  */
 const FRAME_REFERENCE_STYLE =
-  'Match the lighting, color temperature and scene materials of the reference image, ' +
-  'but keep the framing, shot size and camera angle described above exactly. ' +
+  'The video begins on this exact frame: the opening frame matches it, then the camera and the action continue naturally from there, ' +
+  're-framing toward the shot size and camera angle described above. ' +
   'Stay on the same side of the action axis and keep the same screen direction of travel as the reference; only the framing changes.';
 
 /** 英文并列：A / A and B / A, B and C */
@@ -65,25 +66,34 @@ function joinNames(names: string[]): string {
 /**
  * 限定句 + 点名参考图里的人物。
  *
- * 两个坑必须同时堵住：
+ * 三个坑必须同时堵住：
  * 1. 不点名 —— 模型只会把末帧当调色板，人物身份信息全浪费；
  * 2. 说「保持位置」—— 换机位时位置必然变，模型会把参考图里的人留在原位，
  *    再按文字描述画一个，于是同一个人出现两次。所以只锁脸和服装，并显式禁止重复。
+ * 3. 多张参考图时说「the reference image」—— 模型不知道指哪张。末帧总是排在
+ *    参考图最末位（见 resolveShotMedia），所以用「the last reference image」指路。
  */
-function frameReferenceClause(cast: string[], characterCount = 0, crowd: string[] = []): string {
+function frameReferenceClause(
+  cast: string[],
+  characterCount = 0,
+  crowd: string[] = [],
+  /** 本镜是否还有卡片等其它参考图（有则必须用「最后一张」指代末帧） */
+  multipleRefs = false,
+): string {
   const names = cast
     .map((name) => name.trim())
     .filter(Boolean)
     .slice(0, 4);
 
+  const subject = multipleRefs ? 'The last reference image' : 'The reference image';
   const identity =
     names.length === 0
       ? crowd.length === 0
-        ? 'The reference image is the last frame of the previous shot; ' +
+        ? `${subject} is the exact last frame of the previous shot; ` +
           'do not duplicate or add any character from it.'
-        : 'The reference image is the last frame of the previous shot; ' +
+        : `${subject} is the exact last frame of the previous shot; ` +
           'keep the same people and the same crowd as in it.'
-      : `The reference image is the last frame of the previous shot and shows ${joinNames(names)} ` +
+      : `${subject} is the exact last frame of the previous shot and shows ${joinNames(names)} ` +
         `— the same ${names.length > 1 ? 'characters' : 'person'} described above, not ` +
         `${names.length > 1 ? 'additional characters' : 'an additional character'}. ` +
         'Keep only their faces and wardrobe consistent; do not duplicate them.';
@@ -97,7 +107,7 @@ function frameReferenceClause(cast: string[], characterCount = 0, crowd: string[
    */
   const crowdLine =
     crowd.length > 0
-      ? ' The reference image also contains the same background crowd described above; keep its headcount and wardrobe unchanged.'
+      ? ` ${subject} also contains the same background crowd described above; keep its headcount and wardrobe unchanged.`
       : '';
 
   // 单人镜头多出一个人是最常见的错误，直接给个人数上限；本镜有人群时这条会把人删光
@@ -211,11 +221,12 @@ export function buildVideoPrompt(
   const body = extras ? `${withEnd(base)}${extras}` : base;
   const characterCount = (shot.characterNames ?? []).length;
   /**
-   * 末帧参考（借光线 / 重构构图）与接帧（首帧就是上一镜末帧）都要点名图里的人。
-   * 不点名时模型只会把末帧当调色板，末帧里的一群人在本镜被重新数一遍。
+   * 末帧参考（从上一镜末帧开始拓展）与接帧（首帧就是上一镜末帧，仅用户手选 / 旧数据）
+   * 都要点名图里的人。不点名时模型只会把末帧当调色板，末帧里的一群人在本镜被重新数一遍。
    */
+  const multipleRefs = media.filter((item) => item.type === 'reference_image').length > 1;
   const reference = hasPrevFrameReference(media)
-    ? ` ${frameReferenceClause(refCast, characterCount, crowd)}`
+    ? ` ${frameReferenceClause(refCast, characterCount, crowd, multipleRefs)}`
     : hasCarryFrame(media)
       ? ` ${carryFrameClause(refCast, characterCount, crowd)}`
       : '';

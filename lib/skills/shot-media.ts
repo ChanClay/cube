@@ -1,24 +1,22 @@
 import { MAX_MEDIA_TOTAL, isCarryFrameUrl } from './media';
 import { pickSceneImage, resolveShotScenes } from './scene-anchor';
-import { endsOffscreen, shotSizeGap } from './spec';
 import type { MediaInput, Scene, Script, Shot, ShotTransition } from '@/lib/types';
 
 /**
  * 镜头级的自动素材关联。
  *
- * 五条硬规则：
+ * 几条硬规则：
  * 1. 角色卡 / 场景卡是「设计参考」，一律作为 reference_image，
  *    不再当首帧——单人设定图当首帧会把整段视频压成同样的背景。
- * 2. HappyHorse 1.1 把「首帧」和「参考图」拆成两个模型（i2v / r2v），
- *    所以每一镜只能在「接帧」和「参考图」之间二选一。
- * 3. 首帧的物理含义是本镜第 0 帧 = 上一镜最后一帧，只有摄影机没停机才成立，
- *    因此「当首帧」严格限定在同景别：same-take，或同场景同景别的 hard-cut。
- * 4. 景别一变，画面必须重新构图：末帧最多降级成 reference_image（只借光线 / 色调）。
- *    硬把特写的末帧当首帧，这一镜就变成一次拉镜头，分镜写的剪辑节奏整个消失，
- *    而且首帧与卡片互斥，景别跨度越大越需要角色卡的时候反而把卡全丢掉。
- * 5. 接帧的镜头卡片让位（首帧互斥），身份只能靠首帧里已经有的人物和提示词约束
- *    （只锁脸和服装、禁止 duplicate、单人镜头给人数上限）；走参考图的镜头才会把
- *    卡片和末帧一起传，且不做身份去重。
+ * 2. 上一镜末帧也一律作为 reference_image 注入，不再占用 first_frame 参数：
+ *    首帧参数会把本镜第 0 帧钉死在上一镜的构图上（全景缓慢推进接中景固定机位时，
+ *    生成退化成一次反向拉镜头，分镜写的剪辑节奏消失，而且首帧与卡片互斥，
+ *    越是需要重新取景的镜头反而把角色卡全丢掉）。改成参考图后，提示词负责告诉
+ *    模型「视频从这张图开始、围绕它重新取景发散」，卡片也能同时传入。
+ * 3. first_frame 参数只留给用户手动指定的场景：用户手选首帧时完全尊重，
+ *    自动注入不再产生它。
+ * 4. 跨场景 / 时间跳转不自动带末帧：旧场景的光线会把新场景带歪；
+ *    跨场景只有手动打开才带（只借光线与色调）。
  */
 
 export const TRANSITION_LABEL: Record<ShotTransition, string> = {
@@ -29,10 +27,10 @@ export const TRANSITION_LABEL: Record<ShotTransition, string> = {
 
 export const TRANSITION_HINT: Record<ShotTransition, string> = {
   'same-take':
-    '同一动作被切成两镜：抽上一镜末帧当首帧，本镜不能再传参考图（首帧走 i2v、参考图走 r2v，二选一）',
+    '同一动作被切成两镜：抽上一镜末帧作起始参考图，本镜从这张图开始继续拍；角色卡 / 场景卡照常传',
   'hard-cut':
-    '换角度 / 换景别：同景别才抽上一镜末帧当首帧；景别变了只当风格参考图，角色卡照常传',
-  'time-jump': '时间或地点跳转：不接帧，走角色卡 / 场景卡参考图',
+    '换角度 / 换景别：同场景时抽上一镜末帧作起始参考图，围绕它重新取景发散；换场景不自动带帧',
+  'time-jump': '时间或地点跳转：不带末帧，走角色卡 / 场景卡参考图',
 };
 
 /**
@@ -46,9 +44,9 @@ export function isSameTakeShot(shot: Shot): boolean {
 
 /**
  * 上一镜末帧在这一镜里的角色：
- * - first_frame：直接接住画面（此时不能传任何参考图），接缝不会跳
- * - reference_image：跨场景时手动打开才用，只借光线 / 色调，不改构图
- * - null：不用（时间跳转、换场景、第一镜）
+ * - reference_image：作为起始参考图带入，提示词会告诉模型「从这张图开始拓展」
+ * - null：不用（时间跳转、换场景且未手动打开、第一镜）
+ * （'first_frame' 仍在类型里：老调用方没有 shot 时回落为当首帧；用户手选首帧不受影响）
  */
 export type PrevFrameUsage = 'first_frame' | 'reference_image' | null;
 
@@ -67,19 +65,12 @@ export function prevFrameCast(prev: Shot | null): string[] {
 export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   if (!prev) return null;
 
-  const gap = shotSizeGap(shot, prev);
   /**
-   * 上一镜结束时主体已经出画（冲出画外 / 消失在雨幕）：那张末帧是空的，
-   * 当首帧只会让这一镜从空画面开始。降级成参考图，只借光线与色调。
+   * same-take 的物理前提是「摄影机没停机」：末帧就是事实上的起始画面，
+   * 无论景别是否跳变都带上（作为起始参考图而非首帧参数，
+   * 模型从它开始继续拍，而不是被钉死在第 0 帧的构图上）。
    */
-  const offscreen = endsOffscreen(prev.exitState ?? '');
-
-  /**
-   * same-take 的物理前提是「摄影机没停机」，所以景别必须完全一致。
-   * 分镜把景别写跳了还标 same-take 属于误判，这时宁可什么都不接：
-   * 硬接的结果是本镜从上一镜的构图里拉远 / 推近，等于凭空多了一次运镜。
-   */
-  if (isSameTakeShot(shot)) return gap === 0 && !offscreen ? 'first_frame' : null;
+  if (isSameTakeShot(shot)) return 'reference_image';
 
   // 分镜 / 用户关掉了就完全不抽
   if (shot.referencePrevFrame === false) return null;
@@ -93,16 +84,13 @@ export function prevFrameUsage(shot: Shot, prev: Shot | null): PrevFrameUsage {
   if (!sameScene) return shot.referencePrevFrame === true ? 'reference_image' : null;
 
   /**
-   * 同场硬切按景别跨度分档：
-   * - 同景别换角度：构图几乎一样，末帧当首帧接缝完全连续；
-   * - 跨 1 档 / 遮挡转场：交接点画面本来就在变，真接住会把剪辑点变成推拉镜头，
-   *   改成参考图，既重新构图又保住角色卡与场景卡；
-   * - 跨 2 档以上：接不住也不该接，走卡片保人物一致。
+   * 同场硬切：任何景别跨度都把末帧作为起始参考图带上。
+   * 不再占用 first_frame 参数后，末帧不会把本镜钉死在上一镜的构图里，
+   * 全景推进接中景固定机位这类「围绕末帧重新取景」的衔接成为可能；
+   * 景别跨度越大，越依赖提示词里「按本镜景别重新取景」的约束，
+   * 而角色卡 / 场景卡也不再因为互斥被丢掉。
    */
-  // 同景别但上一镜已经出画：首帧会是一张空路，改用参考图保住光线与卡片
-  if (gap === 0) return offscreen ? 'reference_image' : 'first_frame';
-  if (gap === 1 || shot.hiddenCut) return 'reference_image';
-  return null;
+  return 'reference_image';
 }
 
 /** 单次最多 9 张参考图（HappyHorse r2v 上限，与 lib/skills/media.ts 的 reference_image 上限一致） */
@@ -221,15 +209,15 @@ export function hasManualFirstFrame(media: MediaInput[], script: Script | null):
 
 export interface ResolvedShotMedia {
   next: MediaInput[];
-  /** carry=用了上一镜末帧当首帧；cards=补了卡片参考图；null=没动 */
+  /** carry=老调用方（无 shot）把末帧当首帧注入；cards=补了卡片参考图；null=没动 */
   source: 'carry' | 'cards' | null;
   /** 本次新挂上的素材 */
   injected: MediaInput[];
-  /** 因为首帧 / 参考图互斥、或槽位不足而没挂上的卡片数量 */
+  /** 因为槽位不足而没挂上的卡片数量 */
   skippedCards: number;
-  /** 是否把上一镜末帧作为参考图带了进去（硬切镜头的风格锚点） */
+  /** 是否把上一镜末帧作为起始参考图带了进去 */
   withPrevFrameRef: boolean;
-  /** 末帧里实际在场的人物（首帧承接与参考图都算），用于在提示词里点名；没带末帧时为空 */
+  /** 末帧里实际在场的人物（用于在提示词里点名）；没带末帧时为空 */
   prevFrameCast: string[];
   /** next 与传入的 media 是否不同（不同才需要写回剧本） */
   changed: boolean;
@@ -243,9 +231,9 @@ const sameMedia = (a: MediaInput[], b: MediaInput[]): boolean =>
  * 重新计算这一镜的自动素材：
  * - 先摘掉上一轮自动挂的抽帧 / 卡片图，避免旧素材挡住新决策；
  * - 用户手选首尾帧时完全尊重，不再自动注入；
- * - 同景别（same-take / 硬切）才用衔接帧当首帧，接缝才不会跳；跨景别降级为参考图；
- * - 换场景、时间跳转、景别跨度大的镜头走卡片参考图；
- * - 衔接帧拿不到时降级为参考图，不让这一镜裸奔。
+ * - 上一镜末帧一律作为起始参考图注入（不再占用 first_frame 参数），
+ *   与卡片参考图共存，提示词负责「从这张图开始拓展」；
+ * - 换场景、时间跳转的镜头走卡片参考图（跨场景手动打开才带末帧）。
  */
 export function resolveShotMedia(
   media: MediaInput[],
@@ -258,7 +246,7 @@ export function resolveShotMedia(
   const cardUrls = autoCardUrls(script);
   /**
    * 抽到的末帧怎么用，由上一镜与本镜的关系决定（见 prevFrameUsage）：
-   * 同景别当首帧；跨 1 档 / 遮挡转场 / 跨场景手动打开时当参考图；其余情况不用。
+   * 同场衔接（same-take / 同场硬切）与跨场景手动打开时作为起始参考图；其余情况不用。
    * 没有 shot 的老调用方保持原行为：末帧当首帧。
    */
   const usage: PrevFrameUsage = shot ? prevFrameUsage(shot, prev) : 'first_frame';
@@ -298,7 +286,7 @@ export function resolveShotMedia(
 
   const hasReferences = rest.some((item) => !isFrame(item.type));
 
-  // 首帧优先：承接上一镜时不能再塞参考图，否则会被路由到 r2v，接缝就断了
+  // 首帧优先：仅剩老调用方（无 shot）会走到这里——末帧当首帧时不能塞参考图，否则会被路由到 r2v
   if (carryFrame && !hasReferences) {
     const injected: MediaInput = { ...carryFrame, auto: true };
     /**
@@ -318,7 +306,8 @@ export function resolveShotMedia(
   const existingUrls = new Set(rest.map((item) => item.url));
   const currentImages = rest.filter((item) => item.type === 'reference_image').length;
   /**
-   * 末帧排在最末位：槽位不够时先丢它，人物一致性优先。
+   * 末帧排在参考图最末位：槽位不够时先丢它，人物一致性优先；
+   * 提示词（buildVideoPrompt）按「最后一张参考图」指路，所以顺序不能乱。
    * 这里必须先判容量再决定收不收——收进来再被 validateMedia 拒单就白跑一镜。
    */
   const refFrame =

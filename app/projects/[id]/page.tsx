@@ -14,6 +14,7 @@ import { clearQueueMark, markQueueRunning, readQueueMark } from '@/lib/services/
 import {
   collectCardMedia,
   hasManualFirstFrame,
+  isSameTakeShot,
   prevFrameUsage,
   resolveShotMedia,
 } from '@/lib/skills/shot-media';
@@ -730,26 +731,22 @@ function ProjectPageInner() {
 
       /**
        * 上一镜末帧什么时候要抽：
-       * - same-take：当首帧，必须抽（用户手选首帧时让位）；
-       * - 同场硬切：当参考图，只有开关打开时才抽（见 VIDEO_REFERENCE_PREV_FRAME）。
-       * 上一镜还必须已经生成成功（跑着的等不了）。
+       * - same-take：必须抽（摄影机没停机，末帧是事实上的起始画面，不受全局开关限制）；
+       * - 同场硬切：作为起始参考图，受 VIDEO_REFERENCE_PREV_FRAME 控制；
+       * - 跨场景只有手动打开才抽。上一镜还必须已经生成成功（跑着的等不了）。
        */
       const usage = prevFrameUsage(live, prev);
+      const mandatoryCarry = usage !== null && isSameTakeShot(live);
       const canUsePrevFrame =
         !!usage &&
-        (usage !== 'first_frame' || !manualFrame) &&
-        (usage !== 'reference_image' || health?.video.referencePrevFrame !== false) &&
+        (mandatoryCarry ? !manualFrame : health?.video.referencePrevFrame !== false) &&
         prevJob?.status === 'succeeded' &&
         !!prevJob.videoUrl;
 
       let prevFrame: MediaInput | null = null;
       if (canUsePrevFrame && prevJob?.videoUrl) {
         // 要下载整段视频再跑 ffmpeg，给个提示免得以为卡住
-        showToast(
-          usage === 'first_frame'
-            ? '正在抽取上一镜末帧作为首帧…'
-            : '正在抽取上一镜末帧作为风格参考…',
-        );
+        showToast('正在抽取上一镜末帧作为起始参考图…');
         prevFrame = await extractCarryFrame(prevJob.videoUrl);
       }
 
@@ -762,7 +759,7 @@ function ProjectPageInner() {
         prev,
       );
 
-      if (usage === 'first_frame' && resolved.source === 'cards' && !prevFrame) {
+      if (usage && resolved.source === 'cards' && !prevFrame) {
         showToast('这一镜没有可用的上一镜末帧，已改用角色 / 场景卡作为参考图');
       }
       if (resolved.changed) handleShotChange(shot.id, { media: resolved.next });
@@ -774,7 +771,7 @@ function ProjectPageInner() {
 
   /**
    * 串行队列（并发 = 1）：一次只生成一镜。
-   * 上一镜末帧怎么用由下一镜自己的 transition 决定（same-take 当首帧、同场硬切当参考图）。
+   * 上一镜末帧怎么用由下一镜自己的 transition 决定（same-take 必带、同场硬切按开关带，一律作起始参考图）。
    */
   const handleGenerateAll = useCallback(async () => {
     // 同步锁：连点两次「全部生成」会跑出两条队列，每个镜头各提交一次
@@ -794,7 +791,7 @@ function ProjectPageInner() {
      */
     const queueScriptId = scriptIdRef.current;
     if (queueScriptId) markQueueRunning(queueScriptId);
-    /** 上一镜成片地址：只在下一镜打开了「承接上一镜」时才抽帧 */
+    /** 上一镜成片地址：只在下一镜要带末帧（same-take 或同场硬切开关打开）时才抽帧 */
     let prevVideoUrl: string | null = null;
     let completed = 0;
     /** 手动添加但还没写提示词的镜头：跳过，别让整条队列卡在它上面 */
@@ -885,16 +882,17 @@ function ProjectPageInner() {
               const live = currentScript?.shots.find((item) => item.id === shot.id) ?? shot;
 
               /**
-               * 上一镜末帧的两种用法：same-take 当首帧；同场硬切当风格参考图
-               * （后者受 VIDEO_REFERENCE_PREV_FRAME 控制，关掉就完全不带）。
+               * 上一镜末帧的两种用法：same-take 必须带（摄影机没停机）；
+               * 同场硬切作为起始参考图（受 VIDEO_REFERENCE_PREV_FRAME 控制，
+               * 关掉就完全不带）。跨场景不自动带。
                */
               const manualFrame = hasManualFirstFrame(live.media ?? [], currentScript);
               const prevShot = i > 0 ? shots[i - 1] : null;
               const usage = prevFrameUsage(live, prevShot);
+              const mandatoryCarry = usage !== null && isSameTakeShot(live);
               const canUsePrevFrame =
                 !!usage &&
-                (usage !== 'first_frame' || !manualFrame) &&
-                (usage !== 'reference_image' || health?.video.referencePrevFrame !== false) &&
+                (mandatoryCarry ? !manualFrame : health?.video.referencePrevFrame !== false) &&
                 !!prevVideoUrl;
 
               let prevFrame: MediaInput | null = null;
@@ -917,15 +915,11 @@ function ProjectPageInner() {
                 live,
                 prevShot,
               );
-              if (resolved.source === 'carry' && resolved.skippedCards > 0) {
+              if (resolved.withPrevFrameRef) {
                 setQueueInfo(
-                  `第 ${i + 1}/${shots.length} 镜 · ${label}（承接上一镜末帧，跳过 ${resolved.skippedCards} 张卡片参考图）`,
+                  `第 ${i + 1}/${shots.length} 镜 · ${label}（以上一镜末帧为起始参考图，另带 ${resolved.skippedCards === 0 ? '卡片参考图' : `卡片参考图（${resolved.skippedCards} 张因槽位不足未挂）`}）`,
                 );
-              } else if (resolved.withPrevFrameRef) {
-                setQueueInfo(
-                  `第 ${i + 1}/${shots.length} 镜 · ${label}（带上一镜末帧作风格参考）`,
-                );
-              } else if (usage === 'first_frame' && resolved.source === 'cards' && !prevFrame) {
+              } else if (usage && resolved.source === 'cards' && !prevFrame) {
                 setQueueInfo(
                   `第 ${i + 1}/${shots.length} 镜 · ${label}（无可用末帧，改用卡片参考图）`,
                 );

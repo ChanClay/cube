@@ -1038,9 +1038,9 @@ function resolveReferenceFrames(script: Script): void {
     }
 
     /**
-     * 同场景跨度 ≥2 的硬切：prevFrameUsage 本来就用不上末帧，
-     * 模型写了 true 也只会让数据与 UI 自相矛盾，统一回到「自动」。
-     * 正确解法是改序列（中间垫一档，或改成 hiddenCut 的隐蔽换机位），而不是留着这个字段。
+     * 同场景跨度 ≥2 的硬切：统一回到「自动」。末帧现在会作为起始参考图带入
+     * （见 lib/skills/shot-media 的 prevFrameUsage），跨景别的重新取景交给提示词，
+     * 但分镜阶段的正确解法仍是改序列（中间垫一档）或改成 hiddenCut 的隐蔽换机位。
      */
     if (shot.transition === 'hard-cut' && sameScene && !shot.hiddenCut && shotSizeGap(shot, prev) >= 2) {
       shot.referencePrevFrame = undefined;

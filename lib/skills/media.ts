@@ -173,7 +173,7 @@ export function isPublicOrigin(origin: string): boolean {
  */
 export const isCarryFrameUrl = (url: string): boolean => url.includes('/api/frames/');
 
-/** 这一镜是否用上一镜末帧当首帧 */
+/** 这一镜是否用上一镜末帧当首帧（自动注入已不再产生，只剩用户手动指定 / 旧数据） */
 export function hasCarryFrame(media: MediaInput[] = []): boolean {
   return media.some((item) => item.type === 'first_frame' && isCarryFrameUrl(item.url));
 }
@@ -181,8 +181,9 @@ export function hasCarryFrame(media: MediaInput[] = []): boolean {
 /**
  * 这一镜是否把上一镜末帧当**参考图**带进来了。
  *
- * 和 `hasCarryFrame` 的区别很关键：那个是「画面接住上一镜」（首帧，与参考图互斥），
- * 这个只借光线 / 色调、不改构图，只有跨场景手动打开才会出现。
+ * 和 `hasCarryFrame` 的区别很关键：那个是「首帧参数硬接上一镜」（与参考图互斥），
+ * 这个是「起始参考图」——same-take / 同场硬切自动注入，跨场景手动打开也会有，
+ * 提示词会告诉模型「从这张图开始拓展」（见 lib/skills/dialogue 的 frameReferenceClause）。
  */
 export function hasPrevFrameReference(media: MediaInput[] = []): boolean {
   return media.some((item) => item.type === 'reference_image' && isCarryFrameUrl(item.url));

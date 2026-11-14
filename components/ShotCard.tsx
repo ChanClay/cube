@@ -195,10 +195,12 @@ export default function ShotCard({
   const gapToPrev = prevShotSize ? shotSizeGap(shot, { shotSize: prevShotSize }) : 0;
   const sameScopeCut =
     !isFirst && prevFrameRefEnabled && transition === 'hard-cut' && sameSceneAsPrev;
-  /** 真正能把末帧当首帧的只有同景别（+ 遮挡转场也不算，遮挡转场是重新构图） */
-  const exactCarry = sameScopeCut && gapToPrev === 0 && !shot.hiddenCut;
-  /** 勾选框的可用范围：同景别能接住，跨 1 档或遮挡转场只能当风格参考图 */
-  const canReferencePrevFrame = sameScopeCut && (gapToPrev <= 1 || !!shot.hiddenCut);
+  /**
+   * 勾选框的可用范围：同场景硬切都能带末帧作起始参考图（景别跨度不限）。
+   * 末帧不再占用 first_frame 参数，跨景别不会把本镜钉死在上一镜构图里，
+   * 而是围绕末帧重新取景发散，跨度大时提示词的「重新取景」约束更重要。
+   */
+  const canReferencePrevFrame = sameScopeCut;
   const referencePrevFrame =
     canReferencePrevFrame && (shot.referencePrevFrame ?? true);
   useEffect(() => {
@@ -430,11 +432,7 @@ export default function ShotCard({
                     ? '已由 VIDEO_REFERENCE_PREV_FRAME=0 全局关闭'
                     : !sameSceneAsPrev
                       ? '换场景的镜头不带上上一镜画面：旧场景的光线会把新场景带歪'
-                      : exactCarry
-                        ? '把上一镜真末帧作为本镜首帧：接缝完全连续，本镜因此不能再传角色卡 / 场景卡（首帧与参考图互斥）。关掉就是纯硬切'
-                        : gapToPrev > 1 && !shot.hiddenCut
-                          ? `景别从${prevShotSize}跳到${shot.shotSize}，上一镜末帧接不住：这一镜走角色卡 / 场景卡重新构图`
-                          : '景别变了，末帧不能当首帧（那会变成一次推拉），只作风格参考图借光线与色调，角色卡照常传'
+                      : `把上一镜末帧作为起始参考图：本镜从这张图开始、按${shot.shotSize || '本镜景别'}重新取景发散，角色卡 / 场景卡照常传。关掉就是纯硬切`
                 }
               >
                 <input
@@ -443,14 +441,14 @@ export default function ShotCard({
                   disabled={!canReferencePrevFrame}
                   onChange={(e) => onChange({ referencePrevFrame: e.target.checked })}
                 />
-                <span>{exactCarry ? '末帧接住' : '末帧参考'}</span>
+                <span>末帧参考</span>
               </label>
             )}
 
             {sameScopeCut && gapToPrev > 1 && (
               <label
                 className="shot-ref-frame"
-                title="这次换机位靠人物走过前景 / 甩镜 / 暗部完成：观众看不出接缝，所以景别可以跨，但末帧只能当风格参考图"
+                title="这次换机位靠人物走过前景 / 甩镜 / 暗部完成：观众看不出接缝，所以景别可以跨"
               >
                 <input
                   type="checkbox"

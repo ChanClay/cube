@@ -143,9 +143,9 @@ export const config = {
     /**
      * 硬切镜头是否用上一镜末帧（默认开）。
      *
-     * 同景别时当首帧接住（接缝完全连续，但这一镜就传不了卡片）；景别变了则降级成
-     * reference_image，只借光线 / 色调 / 场景材质，构图按本镜重新来。判定见
-     * lib/skills/shot-media.ts 的 prevFrameUsage。
+     * 打开时末帧作为起始参考图带入（不占用 first_frame 参数），提示词告诉模型
+     * 「从这张图开始拓展」，角色卡 / 场景卡照常传；same-take 不受此开关限制。
+     * 判定见 lib/skills/shot-media.ts 的 prevFrameUsage。
      * 拿去 A/B 的那次关掉即可（改 .env.local 后重启）。
      */
     referencePrevFrame: bool(process.env.VIDEO_REFERENCE_PREV_FRAME, true),

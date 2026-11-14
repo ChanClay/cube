@@ -257,7 +257,7 @@ export default function ScriptView({
               className="btn btn--sm btn--primary"
               onClick={onGenerateAll}
               disabled={generatingAll || busyCount > 0 || doneCount === script.shots.length}
-              title="串行生成：按每个镜头的「承接上一镜末帧」开关决定是否用上一镜末帧当首帧"
+              title="串行生成：按每个镜头的衔接方式决定是否把上一镜末帧作为起始参考图带入"
             >
               {generatingAll || busyCount > 0 ? (
                 <>
@@ -428,7 +428,7 @@ export default function ScriptView({
                     <span>· {(script.scenes ?? []).length} 场景</span>
                     <span>· {idea ? '有故事创意' : '无故事创意'}</span>
                     {script.shots.length > 1 && (
-                      <span title="承接的镜头抽上一镜末帧当首帧，这类镜头不能再传角色卡参考图">
+                      <span title="承接的镜头抽上一镜末帧作起始参考图，与角色卡参考图一起传入">
                         · {sameTakeCount} 处承接
                       </span>
                     )}
