@@ -29,6 +29,7 @@ import {
   promptCameraMatches,
   promptShotSizeMatches,
   screenDirection,
+  SHOT_DETAIL_RULES,
   SHOT_LANGUAGE_RULES,
   shotSizeEn,
   shotSizeGap,
@@ -65,6 +66,17 @@ export interface AuditOptions {
   /** 用户要求的镜头数（动态模式不传） */
   expectedShots?: number;
 }
+
+/**
+ * 细节层的英文关键词（介质 / 光线 / 材质），用于 videoPrompt 的缺层检查。
+ * 词表刻意保守：漏报比误报好——误报会触发一次整稿修复。
+ */
+const DETAIL_MEDIUM =
+  /(dust|rain|mist|fog|smoke|steam|snow|ember|spark|wind|spray|splash|ripple|wave|drifting|floating|swirl|raindrop|drizzle|firelight|breeze)/i;
+const DETAIL_LIGHT =
+  /(light|sun|sunlight|sunbeam|moonlight|lamp|glow|glowing|shadow|shadows|silhouette|backlit|rim|dusk|dawn|neon|firelight|candle|beam|highlight|reflection|gleam|dim)/i;
+const DETAIL_TEXTURE =
+  /(worn|scratch|rust|rusty|matte|glossy|wet|damp|polished|brushed|leather|fabric|metal|chrome|patina|faded|weathered|grime|mud|dented|peeling|frayed|sheen)/i;
 
 export function auditScript(script: Script, options: AuditOptions = {}): ScriptIssue[] {
   const issues: ScriptIssue[] = [];
@@ -108,6 +120,17 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
 
     if (description.length < 2) {
       issues.push({ level: 'fatal', code: 'empty-description', shotIndex: at, message: `第 ${at} 镜没有画面描述` });
+    }
+    // 描述太短 = 细节层没写：翻译成英文也只能得到一句骨架，介质 / 光线 / 材质全部缺席
+    else if (description.length < 24) {
+      issues.push({
+        level: 'warn',
+        code: 'description-thin',
+        shotIndex: at,
+        message:
+          `第 ${at} 镜的画面描述只有 ${description.length} 字，不足以承载细节层。` +
+          '先补中文描述再同步英文：环境介质（在运动的尘 / 雨 / 雾 / 蒸汽）、主光方向与色温加一处明暗落点、近处物件的材质或磨损',
+      });
     }
     if (prompt.length < 5) {
       issues.push({ level: 'fatal', code: 'empty-prompt', shotIndex: at, message: `第 ${at} 镜没有视频提示词` });
@@ -154,6 +177,26 @@ export function auditScript(script: Script, options: AuditOptions = {}): ScriptI
         });
       }
       seenPrompts.add(key);
+
+      /**
+       * 细节层缺层检查：介质 / 光线 / 材质三层至少命中两层。
+       * 英文提示词是直接提交给视频模型的那一份，它没写细节，成片就没有细节。
+       */
+      const hitLayers = [
+        DETAIL_MEDIUM.test(prompt),
+        DETAIL_LIGHT.test(prompt),
+        DETAIL_TEXTURE.test(prompt),
+      ].filter(Boolean).length;
+      if (hitLayers < 2) {
+        issues.push({
+          level: 'warn',
+          code: 'prompt-thin-detail',
+          shotIndex: at,
+          message:
+            `第 ${at} 镜的 videoPrompt 细节层不足（介质 / 光线 / 材质三层只命中 ${hitLayers} 层）。` +
+            '先补中文 description 再同步英文，至少补齐两层的具体细节：环境介质（dust / rain / mist / steam，且必须参与运动）、光线方向与明暗落点（backlit / rim light / glow / shadow）、近处物件的材质与磨损（worn / scratched / wet / matte）',
+        });
+      }
 
       /**
        * 裸方位词。
@@ -676,6 +719,12 @@ const REPAIRABLE = new Set([
   'prompt-forbidden',
   'prompt-weak',
   /**
+   * 细节层缺层：description 太短 / 提示词里介质、光线、材质不足两层。
+   * 这类问题一次修复就能补上——先补中文描述再同步英文，不会打乱结构。
+   */
+  'description-thin',
+  'prompt-thin-detail',
+  /**
    * prompt-long 不进修复集：一次修复要把整份剧本重写一遍（十几镜约 60 秒），
    * 而日志里修完仍然是 190~220 词——花了最贵的一次调用却没修好，只会把生成拖到超时。
    * 它留着当提示，由下一轮人工或单镜重算处理。
@@ -728,6 +777,8 @@ function buildSystemPrompt(): string {
 3. 修连贯性时：按「上一镜 exitState → 本镜 entryState」对齐，只改断裂的那一镜，不要重排剧情、不要为了接上而新增动作。
 4. 修提示词时，沿用主体卡（人物 / 载具 / 关键道具）的英文固定短语与场景表的英文空间短语，保持全片一致；英文必须逐项对应当镜的中文 description，不许补充中文里没写的元素，也不许漏掉中文写了的主体 / 动作 / 道具。本镜出现的每一辆车都要写进 characters 并复用它的 promptEn。
 5. ${VIDEO_PROMPT_RULES}
+5.1 ${SHOT_DETAIL_RULES}
+5.2 修 description-thin / prompt-thin-detail / prompt-weak 的正确顺序：先把中文 description 按细节层补具体（介质、光线、材质、主体特征），再逐项同步到英文 videoPrompt；只往英文里堆形容词、中文描述不动是错误修法——下次本地化时细节会被冲掉。
 6. ${SHOT_LANGUAGE_RULES}
 6.1 修衔接时按剪辑点规则改：出口停在可切帧、方向不翻转、硬切写清承接的相位或锚点。
 ${CUT_POINT_RULES}

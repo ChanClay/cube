@@ -45,6 +45,7 @@ import {
   PREV_FRAME_RULES,
   PROMPT_MAX_WORDS,
   PROMPT_MIN_WORDS,
+  SHOT_DETAIL_RULES,
   SHOT_LANGUAGE_RULES,
   shotSizeGap,
   SPEAKER_SHOT_RULES,
@@ -132,6 +133,7 @@ function buildSystemPrompt(): string {
 【四、videoPrompt】
 12. ${VIDEO_PROMPT_RULES}
 13. 写作顺序固定：先用中文把这一镜的 description 写清楚（景别 + 谁 + 在做什么 + 环境 + 光线），再把这段中文逐项翻成 videoPrompt。禁止脱离 description 另写画面。
+13.1 ${SHOT_DETAIL_RULES}
 14. videoPrompt 写完后逐项核对：主体、动作、道具、环境、光线是否每个都在英文里出现？英文里有没有中文没写的元素？多出来的删掉，漏掉的补上。一段话写完，不要分点、不要重复同一信息。
 
 【五、分镜时间轴】
@@ -248,6 +250,7 @@ ${req.idea}
 6) 每个 videoPrompt 是否是 ${PROMPT_MIN_WORDS}~${PROMPT_MAX_WORDS} 个词的英文，只含一个运镜，景别与运镜是否与 shotSize / cameraMove 对得上？两个以上主体（尤其载具）同框时，第一句有没有写机位锚（镜头装在哪 / 朝哪 / 多高），谁在画面哪一侧、谁挡住谁、接触点在哪个部位是否都写得出来？每个 left / right / front / behind 是否都带了参照系（frame left / 实体名 + 部位 / the left-hand lane）？裸写的一律不合格——中文写「车尾左后方」、英文写 front right 这种方位错位必须逐条核对掉。
 6.1) 空间描述是否「先机位、再布局、后动作」？把提示词当读者读一遍：如果需要猜「谁在谁的左边」，模型就会猜，而且经常猜反。
 7) 每个 videoPrompt 是否逐项对应本镜 description 与 beatSheet：主体、每一段动作（顺序一致）、道具、环境、光线都在英文里，且没有中文没写过的元素？这一镜是否有至少一个贯穿全镜的持续运动源（特写 / 近景最容易漏，只写表情就是一张静止的肖像）？
+7.1) 每镜 description 是否写足了细节层：至少一种参与运动的环境介质、主光方向与色温加一处明暗落点、近处物件的材质或磨损？videoPrompt 是否逐项带上了这些细节？只有人物表情与动作、没有任何介质与光线的镜头要回补。
 8) 台词逐镜过一遍：
    8.1) 每一镜是不是只有一个说话人？narration 里有没有混进第二个人的台词（两人对白连写、一问一答、两行「名字：」）？有就拆成两镜：A 的镜头 → hard-cut 反打 B 的镜头；
    8.2) 对话戏是否按话轮拆成了不同镜头？说话人的镜头里有没有听者的肩 / 侧脸 / 后脑？听到关键台词的人有没有单独占一个反应镜头？正反打有没有守轴线（A 看画右、B 看画左）？

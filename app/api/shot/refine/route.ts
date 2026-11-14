@@ -12,6 +12,7 @@ import {
   normalizeCameraMove,
   normalizeNarrationType,
   normalizeShotSize,
+  SHOT_DETAIL_RULES,
   SHOT_LANGUAGE_RULES,
   SPEAKER_SHOT_RULES,
   str,
@@ -29,6 +30,8 @@ function buildSystemPrompt(): string {
 
 要求：
 1. ${VIDEO_PROMPT_RULES}
+1.1 ${SHOT_DETAIL_RULES}
+1.2 重算时细节的边界：介质、光线、材质尽量从「画面描述 + 主体卡 + 场景卡」已有的事实里取材写具体；描述确实没写、卡片也没有的，只允许补「任何这一镜都成立的空气介质与光线基调」（浮尘、雾气、湿反、主光方向），不许发明新的物件、人物或动作。
 2. videoPrompt 的唯一依据是用户改好的「画面描述」：描述里写到的主体、动作、道具、环境、光线逐项翻进英文；描述里没有的元素一个都不许加。
 2.1 台词不是画面描述的派生物，是用户已经定稿的事实：若提供了「当前台词」，narration / narrationType / speaker 必须原样返回，一个字都不许改；只有用户明确要求删掉或换掉台词时才能改。绝不许因为「画面描述里没写台词」就清空它——台词本来就不该出现在画面描述里。
 2.2 背景人群同理：若提供了「当前背景人群」，backgroundCast 必须原样返回，人数、装扮与 promptEn 都不许改；只有画面描述明确写了人群变化（涌入 / 散去 / 倒下）时才跟着改。人群全部退场时返回 crowdCleared: true（空数组不算退场，会被上一镜的人群覆盖）。绝不许把一群人缩成主角一个人。
