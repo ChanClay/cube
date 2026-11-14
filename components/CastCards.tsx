@@ -17,6 +17,9 @@ type Card = Character | Scene;
 
 const LABEL: Record<Kind, string> = { character: '角色卡', scene: '场景卡' };
 
+/** 一键生成的并发数：太大容易触发万相账号的并发限流 */
+const BATCH_CONCURRENCY = 4;
+
 const HINT: Record<Kind, string> = {
   character: '人物 / 载具 / 关键道具的外形都写在这里，用于全片一致性；点名字展开编辑',
   scene: '空间设定 + 固定陈设清单用于全片一致性；点名字展开编辑，可登记陈设与机位图',
@@ -308,18 +311,19 @@ export default function CastCards({
     }
   };
 
-  const generate = async (kind: Kind, index: number) => {
+  /** 返回是否生成成功：一键批量用它统计失败张数 */
+  const generate = async (kind: Kind, index: number): Promise<boolean> => {
     const item = listOf(kind)[index];
     const prompt = [item?.name, item?.desc].filter(Boolean).join('：').trim();
     if (!prompt) {
       setError(`先填${LABEL[kind]}的名称或描述，再生成配图`);
-      return;
+      return false;
     }
 
     const id = item?.id;
     const key = keyOf(kind, item, index);
     // 同步占位：同一张卡同时只允许一个文生图请求
-    if (!claimBusy(key)) return;
+    if (!claimBusy(key)) return false;
     setError(null);
     try {
       // 带上蓝图的固定英文短语与主体类型，卡片才会和逐镜视频里的长相 / 构图一致
@@ -331,11 +335,71 @@ export default function CastCards({
         style,
       });
       patchById(kind, id, index, { imageUrl: media.url });
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       markBusy(key, false);
     }
+  };
+
+  /**
+   * 一键批量生成：给所有还没有配图的角色卡 / 场景卡并发生成配图。
+   *
+   * 有限并发而不是逐张：后端提交锁按「卡 + 提示词」各自锁定，互不冲突，
+   * 万相接口也支持并发任务；但账号有并发配额，无上限全发容易触发限流，
+   * 所以固定同时跑 BATCH_CONCURRENCY 张。每张完成即写回，
+   * 中途停止或失败不影响已经生成的卡片。
+   */
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
+  /** 同步副本：跑批中双击按钮时 state 还没更新，靠它挡住第二次启动 */
+  const batchRunningRef = useRef(false);
+  const batchStopRef = useRef(false);
+
+  const generateAll = async () => {
+    if (batchRunningRef.current) return;
+
+    // 只挑「有文案且还没图」的卡；已有图的跳过，避免重复计费
+    const hasText = (item: Card) =>
+      [item.name, item.desc].filter(Boolean).join('：').trim().length > 0;
+    const targets: { kind: Kind; index: number }[] = [
+      ...characters.map((item, index) => ({ item, kind: 'character' as Kind, index })),
+      ...scenes.map((item, index) => ({ item, kind: 'scene' as Kind, index })),
+    ]
+      .filter(({ item }) => !item.imageUrl && hasText(item))
+      .map(({ kind, index }) => ({ kind, index }));
+
+    if (targets.length === 0) {
+      setError('所有角色卡 / 场景卡都已有配图（或还没有填写名称 / 描述），无需生成');
+      return;
+    }
+
+    batchRunningRef.current = true;
+    batchStopRef.current = false;
+    setBatch({ done: 0, total: targets.length });
+
+    // 固定数量的工人从队列领任务：JS 单线程，next++ 不会竞争
+    let next = 0;
+    let done = 0;
+    let failed = 0;
+    const worker = async () => {
+      while (!batchStopRef.current) {
+        const i = next++;
+        if (i >= targets.length) return;
+        const ok = await generate(targets[i].kind, targets[i].index);
+        if (!ok) failed += 1;
+        done += 1;
+        setBatch((prev) => (prev ? { ...prev, done } : prev));
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(BATCH_CONCURRENCY, targets.length) }, worker),
+    );
+
+    batchRunningRef.current = false;
+    setBatch(null);
+    if (failed > 0) setError(`${failed} 张配图生成失败，可展开对应卡片单独重试`);
   };
 
   const renderSection = (kind: Kind) => {
@@ -724,6 +788,41 @@ export default function CastCards({
             title="生成角色卡 / 场景卡配图与分镜提示词时作为画面风格（严格遵循）。选预设会展开成完整描述；手工改过的文本按原样使用"
             disabled={disabled}
           />
+        </div>
+      )}
+
+      {/* 一键生成：给所有没配图的角色卡 / 场景卡批量补图，有图或没文案的跳过 */}
+      {(characters.length > 0 || scenes.length > 0) && (
+        <div className="cast-batch">
+          <button
+            className="btn btn--sm btn--primary"
+            type="button"
+            onClick={() => void generateAll()}
+            disabled={disabled || !!batch}
+            title={`并发生成所有还没有配图的角色卡与场景卡（同时 ${BATCH_CONCURRENCY} 张）；已有配图或没填名称 / 描述的卡会跳过`}
+          >
+            {batch ? (
+              <>
+                <span className="spinner" />
+                生成中 {batch.done}/{batch.total}…
+              </>
+            ) : (
+              '⚡ 一键生成配图'
+            )}
+          </button>
+          {batch && (
+            <button
+              className="btn btn--sm btn--danger"
+              type="button"
+              onClick={() => {
+                batchStopRef.current = true;
+              }}
+              title="停止批量生成：不再继续后面的卡片，已完成的不受影响"
+            >
+              停止
+            </button>
+          )}
+          <span className="cast-batch-hint">同时生成 {BATCH_CONCURRENCY} 张，每张完成即保存，中途可停</span>
         </div>
       )}
 

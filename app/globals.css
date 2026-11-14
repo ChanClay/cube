@@ -1970,6 +1970,19 @@ a.btn:visited {
   color: var(--muted);
 }
 
+/* 一键生成配图：按钮 + 进度提示整行 */
+.cast-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.cast-batch-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .cast-error {
   margin-top: 8px;
   font-size: 11px;
