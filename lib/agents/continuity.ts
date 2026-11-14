@@ -156,6 +156,7 @@ export interface PlanProblem {
     | 'no-scene'
     | 'off-model-character'
     | 'missing-subject-card'
+    | 'missing-subject-type'
     | 'missing-prompt-en'
     | 'scene-in-character-desc'
     | 'missing-motion'
@@ -457,43 +458,85 @@ ${tail}${correctionBlock}`;
 const SUBJECT_TYPE_ALIASES: Record<string, CharacterSubject> = {
   human: 'human',
   person: 'human',
+  people: 'human',
   character: 'human',
   a: 'human',
   人: 'human',
   人类: 'human',
   人物: 'human',
   角色: 'human',
+  人类与类人: 'human',
   vehicle: 'vehicle',
   car: 'vehicle',
   c: 'vehicle',
   车: 'vehicle',
   载具: 'vehicle',
+  载具卡: 'vehicle',
   车辆: 'vehicle',
+  飞行器: 'vehicle',
   mech: 'mech',
   machine: 'mech',
   robot: 'mech',
   b: 'mech',
   机甲: 'mech',
+  机甲卡: 'mech',
   机械: 'mech',
   机械体: 'mech',
+  机械兽: 'mech',
+  机械巨兽: 'mech',
+  巨兽: 'mech',
+  怪兽: 'mech',
   机器人: 'mech',
+  生物: 'mech',
+  动物: 'mech',
+  creature: 'mech',
+  beast: 'mech',
+  monster: 'mech',
 };
+
+/** 模糊匹配用：同一个值里的候选词，长的排前面（先命中「机械巨兽」再轮到「机械」） */
+const SUBJECT_TYPE_KEYWORDS: { keyword: string; type: CharacterSubject }[] = Object.entries(
+  SUBJECT_TYPE_ALIASES,
+)
+  // 单字别名（a / b / c / 人 / 车）只在整字段精确匹配时认，模糊匹配会被名字误吞
+  .filter(([keyword]) => [...keyword].length > 1 || !/^[abc]$/.test(keyword))
+  .map(([keyword, type]) => ({ keyword, type }))
+  .sort((x, y) => y.keyword.length - x.keyword.length);
 
 function parseSubjectType(raw: unknown): CharacterSubject | undefined {
   if (typeof raw !== 'string') return undefined;
   const key = raw.trim().toLowerCase().replace(/[【】[\]]/g, '').replace(/\s+/g, '');
-  return SUBJECT_TYPE_ALIASES[key];
+  if (SUBJECT_TYPE_ALIASES[key]) return SUBJECT_TYPE_ALIASES[key];
+  // 「A. human」「vehicle（载具）」「subjectType：机甲」这类混写：取字段里出现的第一个已知词
+  return SUBJECT_TYPE_KEYWORDS.find(({ keyword }) => key.includes(keyword))?.type;
 }
 
 /**
  * 模型没给 subjectType 时的兜底推断，只在高置信度时下结论：
- * 名字就是载具名，或 desc 里有两个以上载具特征词且没有任何人类专属特征。
- * 拿不准就返回 undefined，交给配图层继续按关键词判断——那里有全身站姿的构图层兜底。
+ * - 名字就是载具名 → vehicle；
+ * - desc 里有两个以上载具特征词且没有任何人类专属特征 → vehicle；
+ * - 名字或 desc 直接是机甲 / 巨兽类主体（或机体特征词扎堆且没有人类专属特征）→ mech；
+ * - 其余（多半是人类卡）返回 undefined，交给配图层继续按关键词判断。
+ *
+ * mech 不能靠装甲 / 液压这类材料词判定——带机械义体的人类卡（蓝图人类模板第⑤项）
+ * 一样会命中它们；只有「机体 / 机甲 / 巨兽」这类主体名词才算数。
  */
+const MECH_NAME = /(机甲|机体|机型|机器人|机械体|机械兽|机械巨兽|巨兽|怪兽|恐龙|机兵|战甲)/;
+const MECH_DESC =
+  /(机甲|机体|机型|机器人|机械体|机械兽|机械巨兽|巨兽|怪兽|全高|人形重装|四足|兽形|履带式|面罩|目镜|传感器阵列|天线)/;
+const MECH_DESC_WEAK =
+  /(装甲板|涂装|传感器|液压缸|伺服|推进器|喷口|炮管|线缆走线|分件接缝)/;
+
 function inferSubjectType(name: string, desc: string): CharacterSubject | undefined {
   if (VEHICLE_TERM.test(name)) return 'vehicle';
+  const humanized = HUMAN_ONLY_DESC.test(desc);
+  if (MECH_NAME.test(name) && !humanized) return 'mech';
+  if (!humanized) {
+    if (MECH_DESC.test(desc)) return 'mech';
+    if ((desc.match(MECH_DESC_WEAK) ?? []).length >= 3) return 'mech';
+  }
   const vehicleHits = desc.match(VEHICLE_DESC) ?? [];
-  if (vehicleHits.length >= 2 && !HUMAN_ONLY_DESC.test(desc)) return 'vehicle';
+  if (vehicleHits.length >= 2 && !humanized) return 'vehicle';
   return undefined;
 }
 
@@ -706,6 +749,29 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
   );
   if (characters.length === 0) {
     problems.push({ code: 'no-character', message: '没有给出任何角色', blocking: true });
+  }
+
+  // 主体类型缺失：模型漏给 subjectType 时只能靠关键词兜底，
+  // 而关键词兜底正是「人卡被判成载具卡 / 机甲卡」这类不稳定的来源。
+  // 缺一张就带着清单重试，逼模型对每张卡显式表态。
+  const missingType = [
+    ...new Set(
+      charactersRaw
+        .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+        .filter((c) => str(c.name) && !parseSubjectType(c.subjectType))
+        .map((c) => str(c.name)),
+    ),
+  ];
+  if (missingType.length > 0) {
+    problems.push({
+      code: 'missing-subject-type',
+      message:
+        `主体卡 ${missingType.map((name) => `「${name}」`).join('、')} 没有写 subjectType 字段。` +
+        '每张卡都必须显式给出主体类型，只能取 human（人类与类人）/ vehicle（载具、车辆、飞行器）/ mech（机甲、机器人、机械巨兽、巨型生物）；' +
+        '漏写的卡会被关键词猜测兜底，人类卡可能因为 desc 里出现「车内 / 装甲」被判成载具或机甲，' +
+        '配图与逐镜构图都会跟着错',
+      blocking: true,
+    });
   }
 
   // 机甲 / 巨兽题材被写成人类：带着具体清单重试，别让错的主体直接进角色卡

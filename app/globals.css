@@ -1619,6 +1619,29 @@ a.btn:visited {
   color: var(--text);
 }
 
+/* 主体类型手动覆盖：判断拿不准时用户在这里钉死人类 / 载具 / 机甲 */
+.character-subject {
+  width: 100%;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--muted);
+  outline: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.character-subject:hover,
+.character-subject:focus {
+  background: #fff;
+  border-color: var(--border-soft);
+  color: var(--text);
+}
+
 .character-group {
   height: 26px;
   padding: 0 6px;
@@ -1699,6 +1722,17 @@ a.btn:visited {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* chip 上的主体类型角标：一眼看出这张卡被判成了什么 */
+.cast-chip-tag {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--border-soft);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--muted);
 }
 
 /* 展开出来的详情面板：比默认卡片更亮一点，和 chip 拉开层次 */

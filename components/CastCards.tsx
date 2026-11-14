@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/client';
 import { STYLE_LABELS } from '@/lib/skills/style-presets';
-import type { Character, Scene, SceneAngleRef, SceneItem } from '@/lib/types';
+import type { Character, CharacterSubject, Scene, SceneAngleRef, SceneItem } from '@/lib/types';
 
 /**
  * 角色卡 / 场景卡：
@@ -16,6 +16,23 @@ type Kind = 'character' | 'scene';
 type Card = Character | Scene;
 
 const LABEL: Record<Kind, string> = { character: '角色卡', scene: '场景卡' };
+
+/**
+ * 主体类型的手动覆盖项。自动判断（关键词兜底）对「带义体的人卡 / 装甲机甲卡」
+ * 有歧义，判断错了就靠这里手动钉死：载具走横图与车身构图，人类 / 机甲走全身站姿。
+ */
+const SUBJECT_OPTIONS: { value: CharacterSubject | ''; label: string }[] = [
+  { value: '', label: '主体类型：自动判断' },
+  { value: 'human', label: '人类 / 类人' },
+  { value: 'vehicle', label: '载具（横图）' },
+  { value: 'mech', label: '机甲 / 机械体' },
+];
+
+const SUBJECT_TAG: Partial<Record<CharacterSubject, string>> = {
+  vehicle: '载具',
+  mech: '机甲',
+  human: '人类',
+};
 
 /** 一键生成的并发数：太大容易触发万相账号的并发限流 */
 const BATCH_CONCURRENCY = 4;
@@ -467,6 +484,11 @@ export default function CastCards({
                     {item.imageUrl ? <img src={item.imageUrl} alt="" /> : initial}
                   </span>
                   <span className="cast-chip-name">{nameOf(item)}</span>
+                  {kind === 'character' && (item as Character).subjectType && (
+                    <span className="cast-chip-tag">
+                      {SUBJECT_TAG[(item as Character).subjectType as CharacterSubject]}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -533,6 +555,26 @@ export default function CastCards({
                     title={item.desc}
                     aria-label={`${LABEL[kind]}描述`}
                   />
+                  {kind === 'character' && (
+                    <select
+                      className="character-subject"
+                      value={(item as Character).subjectType ?? ''}
+                      onChange={(e) =>
+                        patchAt(kind, index, {
+                          subjectType:
+                            (e.target.value || undefined) as CharacterSubject | undefined,
+                        })
+                      }
+                      aria-label="主体类型"
+                      title="自动判断拿不准（带义体的人卡 / 装甲机甲卡）就在这里手动指定：载具走横图与车身构图，人类 / 机甲走全身站姿竖图"
+                    >
+                      {SUBJECT_OPTIONS.map(({ value, label }) => (
+                        <option key={value || 'auto'} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="cast-actions">

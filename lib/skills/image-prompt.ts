@@ -38,7 +38,14 @@ const VEHICLE_HINT =
  * 哪怕描述里写着「坐在驾驶座上」。
  */
 const HUMAN_APPEARANCE_HINT =
-  /(岁|男性|女性|男人|女人|短发|长发|马尾|白发|黑发|发色|胡须|肤色|脸型|眉眼|衬衫|夹克|外套|雨衣|牛仔|工装裤|短靴|皮鞋|连衣裙|身高)/g;
+  /(岁|男性|女性|男人|女人|男孩|女孩|少年|少女|青年|老者|老人|短发|长发|马尾|白发|黑发|发色|胡须|肤色|脸型|眉眼|衬衫|夹克|外套|雨衣|牛仔|工装裤|短靴|皮鞋|连衣裙|身高|义体)/g;
+
+/**
+ * 机甲 / 机械体的主体名词。关键词兜底的另一侧护栏：
+ * 机甲卡 desc 里有「装甲 / 履带 / 推进器」，与载具特征词高度重叠，
+ * 不排除的话机甲会被按载具横图与 3/4 车身构图生成。
+ */
+const MECH_HINT = /(机甲|机体|机型|机器人|机械体|机械兽|机械巨兽|巨兽|怪兽|人形重装|战甲|机兵)/;
 
 /**
  * 是否是载具卡。
@@ -52,6 +59,8 @@ export function isVehicleCard(text: string, subjectType?: CharacterSubject): boo
   if (subjectType === 'vehicle') return true;
   if (subjectType === 'human' || subjectType === 'mech') return false;
   if ((text.match(HUMAN_APPEARANCE_HINT) ?? []).length >= 2) return false;
+  // 机甲卡与载具卡共享装甲 / 履带这类词，先排除机甲再认载具
+  if (MECH_HINT.test(text)) return false;
   return VEHICLE_HINT.test(text);
 }
 
