@@ -168,7 +168,7 @@ export interface CreateProjectBody {
 export interface ImageBody {
   prompt: string;
   /** 主体类型（来自蓝图）：载具卡走横图，人类卡不会被 desc 里的「车内」带偏 */
-  subjectType?: 'human' | 'vehicle' | 'mech';
+  subjectType?: 'human' | 'vehicle' | 'mech' | 'prop';
   /** 蓝图锁定的固定英文外貌 / 空间短语，保证卡片与逐镜视频一致 */
   promptEn?: string;
   /** 决定出图比例：角色用竖图，场景用横图 */

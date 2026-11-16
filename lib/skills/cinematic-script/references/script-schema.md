@@ -14,7 +14,7 @@
   "characters": [
     {
       "name": "角色名",
-      "subjectType": "human | vehicle | mech",
+      "subjectType": "human | vehicle | mech | prop",
       "desc": "可拍摄的中文外形（只写恒定外观，不写这一镜的姿势 / 场景）",
       "promptEn": "fixed English appearance phrase"
     }

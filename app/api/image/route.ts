@@ -55,7 +55,10 @@ export async function POST(request: Request) {
   /** 主体类型（来自蓝图）：人类卡的 desc 里出现「车内」也不会被当成载具卡 */
   const subjectTypeRaw = typeof payload.subjectType === 'string' ? payload.subjectType.trim() : '';
   const subjectType: CharacterSubject | undefined =
-    subjectTypeRaw === 'human' || subjectTypeRaw === 'vehicle' || subjectTypeRaw === 'mech'
+    subjectTypeRaw === 'human' ||
+    subjectTypeRaw === 'vehicle' ||
+    subjectTypeRaw === 'mech' ||
+    subjectTypeRaw === 'prop'
       ? subjectTypeRaw
       : undefined;
 

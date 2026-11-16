@@ -259,7 +259,7 @@ export function buildBlueprintSystemPrompt(
 5. 主体卡 2~5 张（最多 8 张，放在 characters 数组里）：role 写叙事功能。characters 数组的长度必须与实际设计出的主体数完全一致——先列完清单再逐个写卡，每个主体一张卡，不许合并、不许省略，写完自检数量与清单一一致。
    写卡之前先列一遍「本片有哪些需要在两个以上镜头里被认出来的视觉主体」，再逐个判断主体类型。不判断类型就套人类模板，会把机甲、巨兽、载具写成「三十岁男人」；漏掉一个主体，就会在成片里每镜重新设计一遍。
    ${SUBJECT_CARD_RULES}
-   每张卡都必须带 subjectType，只能取 human / vehicle / mech（人类与类人写 human，载具写 vehicle，机甲 / 机器人 / 机械巨兽写 mech）。
+   每张卡都必须带 subjectType，只能取 human / vehicle / mech / prop（人类与类人写 human，载具写 vehicle，机甲 / 机器人 / 机械巨兽写 mech，贯穿全片的关键道具——武器、信物、酒杯、箱子——写 prop，不许把道具标成 human）。
    ${APPEARANCE_ONLY_RULES}
    每项都要具体到「能照着画出来」，不许用「高科技感」「未来感的衣服」这类空话。
    【A 人类 / 类人】按 8 项顺序写全：
@@ -346,7 +346,7 @@ JSON 结构：
     {
       "name": "人类角色名",
       "role": "叙事功能",
-      "subjectType": "human | vehicle | mech",
+      "subjectType": "human | vehicle | mech | prop",
       "desc": "【A 人类】① 廓形：三十岁男性，高瘦，肩背微驼；② 头部：窄长脸，苍白偏青的肤色，短发剃到耳上，发根有接驳插口；③ 上装：哑光碳纤维高领外套，胸口有陶瓷装甲分件，肘部织物磨白；④ 下装与鞋：灰黑工装裤，磁吸扣短靴；⑤ 装备 / 义体：左前臂拉丝钛义体，接缝处冷蓝发光细线，指关节可见液压结构；⑥ 配色：主色石墨灰，辅色氧化橙，发光色冷蓝，色温偏冷；⑦ 道具：腕部全息终端；⑧ 气质：站姿笔直，说话前习惯用拇指摩挲义体接缝",
       "promptEn": "30-words fixed English appearance phrase in the same order as desc"
     },
@@ -492,6 +492,15 @@ const SUBJECT_TYPE_ALIASES: Record<string, CharacterSubject> = {
   creature: 'mech',
   beast: 'mech',
   monster: 'mech',
+  prop: 'prop',
+  object: 'prop',
+  item: 'prop',
+  道具: 'prop',
+  道具卡: 'prop',
+  物件: 'prop',
+  物品: 'prop',
+  器物: 'prop',
+  信物: 'prop',
 };
 
 /** 模糊匹配用：同一个值里的候选词，长的排前面（先命中「机械巨兽」再轮到「机械」） */
@@ -527,6 +536,16 @@ const MECH_DESC =
 const MECH_DESC_WEAK =
   /(装甲板|涂装|传感器|液压缸|伺服|推进器|喷口|炮管|线缆走线|分件接缝)/;
 
+/**
+ * 关键道具的名称后缀。道具卡（酒杯 / 信物 / 兵器）常被模型逼着标成 human，
+ * 判定取保守的后缀匹配：人类的名字极少以这些字结尾（「酒剑仙」这类混名
+ * 不在尾部，不会命中），desc 里再没有任何人类专属特征时才下结论。
+ */
+const PROP_NAME_SUFFIX =
+  /(杯|盏|碗|壶|瓶|剑|刀|枪|戟|斧|锤|鞭|锏|弓|盾|匕|簪|镯|戒指|项链|玉佩|令牌|印玺|卷轴|圣旨|面具|钥匙|箱子|匣|盒|油灯|灯笼|号角|笛|箫|琴)$/;
+const PROP_DESC =
+  /(器物|道具|物件|杯身|杯沿|酒液|刃身|刀鞘|剑鞘|剑柄|刀柄|器型|器身|器皿|纹饰|鎏金|镶银)/;
+
 function inferSubjectType(name: string, desc: string): CharacterSubject | undefined {
   if (VEHICLE_TERM.test(name)) return 'vehicle';
   const humanized = HUMAN_ONLY_DESC.test(desc);
@@ -534,6 +553,7 @@ function inferSubjectType(name: string, desc: string): CharacterSubject | undefi
   if (!humanized) {
     if (MECH_DESC.test(desc)) return 'mech';
     if ((desc.match(MECH_DESC_WEAK) ?? []).length >= 3) return 'mech';
+    if (PROP_NAME_SUFFIX.test(name) && PROP_DESC.test(desc)) return 'prop';
   }
   const vehicleHits = desc.match(VEHICLE_DESC) ?? [];
   if (vehicleHits.length >= 2 && !humanized) return 'vehicle';
@@ -546,7 +566,16 @@ export function normalizeSubjectType(
   name: string,
   desc: string,
 ): CharacterSubject | undefined {
-  return parseSubjectType(rawType) ?? inferSubjectType(name, desc);
+  const parsed = parseSubjectType(rawType);
+  /**
+   * 模型把关键道具标成 human 是常见误标（schema 里以前没有 prop 可选）。
+   * 名字以道具名词收尾且 desc 没有任何人类专属特征时，强制纠正成 prop：
+   * 标错类型的道具卡会按人物构图生成竖版全身站姿配图，逐镜注入的也是「人的外貌短语」。
+   */
+  if (parsed === 'human' && !HUMAN_ONLY_DESC.test(desc) && PROP_NAME_SUFFIX.test(name)) {
+    return 'prop';
+  }
+  return parsed ?? inferSubjectType(name, desc);
 }
 
 function normalizeCharacter(raw: Record<string, unknown>): PlanCharacter | null {
@@ -779,7 +808,7 @@ export function normalizeStoryPlan(raw: unknown, req: PlanRequest): NormalizedPl
       code: 'missing-subject-type',
       message:
         `主体卡 ${missingType.map((name) => `「${name}」`).join('、')} 没有写 subjectType 字段。` +
-        '每张卡都必须显式给出主体类型，只能取 human（人类与类人）/ vehicle（载具、车辆、飞行器）/ mech（机甲、机器人、机械巨兽、巨型生物）；' +
+        '每张卡都必须显式给出主体类型，只能取 human（人类与类人）/ vehicle（载具、车辆、飞行器）/ mech（机甲、机器人、机械巨兽、巨型生物）/ prop（贯穿全片的关键道具：武器、信物、酒杯、箱子）；' +
         '漏写的卡会被关键词猜测兜底，人类卡可能因为 desc 里出现「车内 / 装甲」被判成载具或机甲，' +
         '配图与逐镜构图都会跟着错',
       blocking: true,

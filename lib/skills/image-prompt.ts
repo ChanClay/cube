@@ -57,7 +57,7 @@ const MECH_HINT = /(机甲|机体|机型|机器人|机械体|机械兽|机械巨
  */
 export function isVehicleCard(text: string, subjectType?: CharacterSubject): boolean {
   if (subjectType === 'vehicle') return true;
-  if (subjectType === 'human' || subjectType === 'mech') return false;
+  if (subjectType === 'human' || subjectType === 'mech' || subjectType === 'prop') return false;
   if ((text.match(HUMAN_APPEARANCE_HINT) ?? []).length >= 2) return false;
   // 机甲卡与载具卡共享装甲 / 履带这类词，先排除机甲再认载具
   if (MECH_HINT.test(text)) return false;
@@ -83,6 +83,14 @@ const FRAMING: Record<CardKind, string> = {
 const VEHICLE_FRAMING =
   '载具设定图，四分之三前侧视角，整车完整入画并占画面 80% 以上，车轮着地，' +
   '背景简洁并轻微虚化，画面里只出现这一辆车与车内剪影，不出现站立的行人';
+
+/**
+ * 关键道具卡的构图：器物没有「全身站姿」，按人物构图生成只会得到一张
+ * 举着酒杯的人像。单体居中、完整呈现器物全貌才是它的一致性锚点。
+ */
+const PROP_FRAMING =
+  '道具设定图，单体主体居中，完整呈现器物全貌（含柄 / 座 / 盖等所有部件），' +
+  '器物占画面 70% 以上，背景简洁并轻微虚化，画面里不出现人物';
 
 /** 命中这些词说明是有机械 / 义体 / 装备细节的科技题材角色，需要补一层材质与结构描述 */
 const TECH_HINT =
@@ -126,6 +134,12 @@ const VEHICLE_TEXTURE =
   '画面质感：高细节，车漆有真实反射与细微橘皮，玻璃有环境反射与折射，' +
   '金属件有边缘高光，轮胎橡胶有哑光质感与胎纹，车身带使用痕迹与泥点，' +
   '灯光在车身上形成可见的明暗过渡，浅景深背景轻微虚化，35mm 电影镜头，细腻颗粒，电影级调色';
+
+/** 道具卡的质感层：材质、纹饰、磨损，让它成为每一镜都能对上的同一件器物 */
+const PROP_TEXTURE =
+  '画面质感：高细节，器物材质可信（金属、陶瓷、木、玉、皮革各有质感与包浆），' +
+  '纹饰与接缝清晰，高光与反射真实，边缘有细微磕碰与使用磨损，' +
+  '浅景深背景轻微虚化，35mm 电影镜头，细腻颗粒，电影级调色';
 
 const VEHICLE_TECH_DETAIL =
   '科技细节：改装件与车身有清晰分件与接缝，进气口、扩散器与尾翼结构可见，' +
@@ -173,14 +187,16 @@ export function buildCardPrompt({
 
   // 载具卡走自己的构图与质感层：按人物全身站姿生成的车，没有一辆能认出来
   const vehicle = kind === 'character' && isVehicleCard(`${prompt} ${promptEn ?? ''}`, subjectType);
+  // 道具卡同理：没有「全身站姿」，走器物构图
+  const prop = kind === 'character' && !vehicle && subjectType === 'prop';
   // 人卡 / 机甲卡的 desc 混进「坐在车里」这类剧照信息时先剥掉，否则会和全身站姿互相打架
   const appearance =
     kind === 'character' && !vehicle ? sanitizeAppearance(prompt, subjectType) : prompt;
   const subjectText = `${appearance} ${promptEn ?? ''}`;
   const tech = hasTechDetail(subjectText);
   const tail = [
-    vehicle ? VEHICLE_FRAMING : FRAMING[kind],
-    vehicle ? VEHICLE_TEXTURE : TEXTURE[kind],
+    vehicle ? VEHICLE_FRAMING : prop ? PROP_FRAMING : FRAMING[kind],
+    vehicle ? VEHICLE_TEXTURE : prop ? PROP_TEXTURE : TEXTURE[kind],
     tech ? (vehicle ? VEHICLE_TECH_DETAIL : TECH_DETAIL[kind]) : '',
     `不要画面文字 / 水印 / logo / 分屏 / 畸形肢体`,
   ]

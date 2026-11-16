@@ -47,8 +47,10 @@ export interface MediaInput {
  * 主体类型：决定角色卡的构图与画幅。
  * 以前靠 desc 里的关键词猜（写了「车内」的人卡被判成载具卡），
  * 现在由蓝图显式给出，关键词只作为旧剧本的兜底。
+ * prop 是贯穿全片的关键道具（武器 / 信物 / 酒杯）：既不是人也不是载具，
+ * 没有它时道具卡会被逼着标成 human，按人物构图生成配图。
  */
-export type CharacterSubject = 'human' | 'vehicle' | 'mech';
+export type CharacterSubject = 'human' | 'vehicle' | 'mech' | 'prop';
 
 export interface Character {
   /** 列表渲染用的稳定 id（旧剧本可能没有） */

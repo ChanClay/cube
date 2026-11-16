@@ -26,12 +26,14 @@ const SUBJECT_OPTIONS: { value: CharacterSubject | ''; label: string }[] = [
   { value: 'human', label: '人类 / 类人' },
   { value: 'vehicle', label: '载具（横图）' },
   { value: 'mech', label: '机甲 / 机械体' },
+  { value: 'prop', label: '关键道具' },
 ];
 
 const SUBJECT_TAG: Partial<Record<CharacterSubject, string>> = {
   vehicle: '载具',
   mech: '机甲',
   human: '人类',
+  prop: '道具',
 };
 
 /** 一键生成的并发数：太大容易触发万相账号的并发限流 */
